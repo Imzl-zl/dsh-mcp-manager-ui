@@ -1,9 +1,20 @@
 {
   "name": "dsh-mcp-manager-ui",
-  "version": "1.0.0",
-  "description": "Persistent MCP server management UI for DeepSeek Harness Web — FAB overlay + Settings tab, backed by a host Remote (list/status/enable/disable/reconnect/tools/add/update/removeServer).",
+  "version": "1.1.0",
+  "description": "Responsive MCP management UI for DeepSeek Harness Web — floating panel, JSON import, and profile-backed Host Remote management.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git"
+  },
+  "homepage": "https://github.com/Imzl-zl/dsh-mcp-manager-ui#readme",
+  "bugs": {
+    "url": "https://github.com/Imzl-zl/dsh-mcp-manager-ui/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "exports": {
     "./typert": "./lib/typert.js",
     "./client": "./lib/client.js",
@@ -12,12 +23,16 @@
   },
   "files": [
     "lib",
+    "docs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "dependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "yaml": "2.8.1",
+    "zod": "4.4.3"
   },
   "dsh": {
     "bundle": {
