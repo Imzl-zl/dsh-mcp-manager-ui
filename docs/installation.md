@@ -4,9 +4,11 @@
 
 ## 环境要求
 
-- DeepSeek Harness `0.1.0-rc.6`
+- DeepSeek Harness `0.1.0-rc.7`
 - 已初始化的 `web` profile
 - Node.js 和 pnpm 可由 DSH 的插件命令正常调用
+
+插件把 DSH 宿主 API 声明为 `>=0.1.0-rc.7 <0.1.0-rc.8` 的 peer 依赖，并使用精确的 `0.1.0-rc.7` 开发基线。后续 DSH RC 需要在安装、配置合成和 Web 运行验证通过后再扩大兼容窗口。
 
 ## 从 GitHub 正式安装
 
@@ -20,7 +22,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ```sh
 # 推荐：固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.1
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.2
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>

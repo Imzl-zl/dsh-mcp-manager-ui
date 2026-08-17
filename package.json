@@ -1,6 +1,6 @@
 {
   "name": "dsh-mcp-manager-ui",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Responsive MCP management UI for DeepSeek Harness Web — floating panel, JSON import, and profile-backed Host Remote management.",
   "repository": {
     "type": "git",
@@ -29,10 +29,16 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "yaml": "2.8.1",
     "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-atomic-write": ">=0.1.0-rc.7 <0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.7 <0.1.0-rc.8"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.7"
   },
   "dsh": {
     "bundle": {

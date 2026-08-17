@@ -226,7 +226,7 @@ test('preserves prototype-shaped env and header keys as ordinary map entries', (
   assert.equal(Object.hasOwn(parsed.servers[0].env, '__proto__'), true)
 })
 
-test('accepts positive finite reconnect delays supported by DSH rc.6', () => {
+test('accepts positive finite reconnect delays supported by the current DSH MCP client', () => {
   const result = normalizeMcpImport({
     mcpServers: {
       local: { command: 'node', reconnect: { initialDelayMs: 500.5, maxDelayMs: 1000.5, maxAttempts: 3 } },

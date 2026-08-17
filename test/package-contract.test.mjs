@@ -1,20 +1,52 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { parse } from 'yaml'
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
 const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
+const installationGuide = await readFile(new URL('../docs/installation.md', import.meta.url), 'utf8')
+const lockfile = parse(await readFile(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8'))
+const dshHostPackages = [
+  '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-typert-protocol',
+]
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.1.1')
+  assert.equal(packageJson.version, '1.1.2')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
-  assert.equal(packageJson.dependencies?.['@deepseek-ai/dsh-atomic-write'], '0.1.0-rc.6')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
   assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)
+})
+
+test('package uses the verified DSH release as a host peer and exact development baseline', () => {
+  for (const name of dshHostPackages) {
+    assert.equal(packageJson.dependencies?.[name], undefined)
+    assert.equal(packageJson.peerDependencies?.[name], '>=0.1.0-rc.7 <0.1.0-rc.8')
+    assert.equal(packageJson.devDependencies?.[name], '0.1.0-rc.7')
+  }
+})
+
+test('lockfile resolves the verified DSH release only as a development baseline', () => {
+  const importer = lockfile.importers['.']
+  for (const name of dshHostPackages) {
+    assert.equal(importer.dependencies?.[name], undefined)
+    assert.equal(importer.devDependencies?.[name]?.specifier, '0.1.0-rc.7')
+    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.0-rc\.7(?:\(|$)/)
+  }
+})
+
+test('documentation targets the verified DSH and plugin releases', () => {
+  for (const document of [readme, installationGuide]) {
+    assert.match(document, /0\.1\.0-rc\.7/)
+    assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.2/)
+  }
 })
 
 test('bundle does not install the creation-mode Cordis tool', () => {
