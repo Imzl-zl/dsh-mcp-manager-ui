@@ -8,7 +8,7 @@ const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.1.0')
+  assert.equal(packageJson.version, '1.1.1')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
