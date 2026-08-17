@@ -1,6 +1,8 @@
 # dsh-mcp-manager-ui
 
-<a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.1/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+<p align="center">
+  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.1/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+</p>
 
 DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理当前 Web profile 的 MCP 配置。
 
