@@ -22,7 +22,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ```sh
 # 推荐：固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.2
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.3
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>

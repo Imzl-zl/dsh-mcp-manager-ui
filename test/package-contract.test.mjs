@@ -16,7 +16,7 @@ const dshHostPackages = [
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.1.2')
+  assert.equal(packageJson.version, '1.1.3')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
@@ -45,7 +45,7 @@ test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
     assert.match(document, /0\.1\.0-rc\.7/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.2/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.3/)
   }
 })
 
