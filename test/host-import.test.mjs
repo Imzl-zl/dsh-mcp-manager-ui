@@ -339,3 +339,111 @@ test('duplicate cross-layer server names are exposed once as a read-only conflic
     await fixture.cleanup()
   }
 })
+
+test('tool counts preserve server names containing double underscores', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-foo-bar\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: foo__bar\n        transport: stdio\n        command: node\n`
+  const entry = { options: { id: 'mcp-foo-bar', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'foo__bar', transport: 'stdio', command: 'node' } }, disabled: false, fiber: { state: 2 } }
+  const fixture = await createProfileFixture(content, [entry])
+  fixture.ctx.tools.schemas = () => [{ name: 'mcp__foo__bar__search', description: '' }]
+
+  try {
+    const result = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    assert.equal(result.servers[0].toolCount, 1)
+    assert.equal(result.servers[0].status, 'connected')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('overlapping server-name prefixes are reported as ambiguous instead of misattributed', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-foo\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: foo\n        transport: stdio\n        command: node\n    - id: mcp-foo-bar\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: foo__bar\n        transport: stdio\n        command: node\n`
+  const foo = { options: { id: 'mcp-foo', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'foo', transport: 'stdio', command: 'node' } }, disabled: false, fiber: { state: 2 } }
+  const fooBar = { options: { id: 'mcp-foo-bar', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'foo__bar', transport: 'stdio', command: 'node' } }, disabled: false, fiber: { state: 2 } }
+  const fixture = await createProfileFixture(content, [foo, fooBar])
+  fixture.ctx.tools.schemas = () => [{ name: 'mcp__foo__bar__search', description: '' }]
+
+  try {
+    const result = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    for (const server of result.servers) {
+      assert.equal(server.toolCount, 0)
+      assert.equal(server.toolCountAmbiguous, true)
+      assert.equal(server.status, 'unknown')
+    }
+    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, 'foo')
+    assert.deepEqual(tools.tools, [])
+    assert.equal(tools.ambiguous, true)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('list exposes derived status and lastError from mcp-client log records', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-broken\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: broken\n        transport: streamable-http\n        url: http://127.0.0.1:8787/mcp\n    - id: mcp-ok\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: ok\n        transport: stdio\n        command: node\n`
+  const brokenFiber = { state: 2 }
+  const broken = { options: { id: 'mcp-broken', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'broken', transport: 'streamable-http', url: 'http://127.0.0.1:8787/mcp' } }, disabled: false, fiber: brokenFiber }
+  const ok = { options: { id: 'mcp-ok', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'ok', transport: 'stdio', command: 'node' } }, disabled: false, fiber: { state: 2 } }
+  const fixture = await createProfileFixture(content, [broken, ok])
+  let cleanupCapture
+  const logger = {
+    buffer: [
+      { name: 'mcp-broken', type: 'warn', ts: Date.now(), args: ['connection attempt failed: ECONNREFUSED 127.0.0.1:8787'], fiber: { deref: () => brokenFiber } },
+      { name: 'mcp-broken', type: 'error', ts: Date.now(), args: ['giving up after 10 consecutive failed reconnect attempts'], fiber: { deref: () => brokenFiber } },
+    ],
+    exporters: new Map(),
+    _snExporter: 0,
+  }
+  fixture.ctx.root = fixture.ctx
+  fixture.ctx.logger = logger
+  fixture.ctx.effect = (factory, label) => {
+    assert.equal(label, 'mcpManager.logCapture')
+    cleanupCapture = factory()
+    return cleanupCapture
+  }
+  fixture.ctx.tools.schemas = () => [
+    { name: 'mcp__ok__search', description: '' },
+  ]
+
+  try {
+    const result = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    const byName = Object.fromEntries(result.servers.map((server) => [server.serverName, server]))
+    assert.equal(byName.broken.status, 'failed')
+    assert.match(byName.broken.lastError, /consecutive failed reconnect/)
+    assert.equal(byName.ok.status, 'connected')
+    assert.equal(byName.ok.lastError, null)
+    assert.equal(logger.exporters.size, 1)
+    const managerExporterId = [...logger.exporters.keys()][0]
+    const foreignExporterId = ++logger._snExporter
+    logger.exporters.set(foreignExporterId, { foreign: true })
+    cleanupCapture()
+    assert.equal(logger.exporters.has(managerExporterId), false)
+    assert.equal(logger.exporters.has(foreignExporterId), true)
+    await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    assert.equal(logger.exporters.size, 2)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('reveal returns the stored value for managed servers only', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const secret = 'super-secret-token'
+  const content = `- insert:\n    - id: mcp-sec\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: sec\n        transport: stdio\n        command: node\n        env:\n          API_KEY: !!js process.env.TEST_MCP_SECRET\n`
+  const entry = { options: { id: 'mcp-sec', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'sec', transport: 'stdio', command: 'node', env: { API_KEY: secret } } }, disabled: false, fiber: null }
+  const fixture = await createProfileFixture(content, [entry])
+
+  try {
+    const revealed = await McpManagerGateway.prototype.reveal.call({ ctx: fixture.ctx }, { name: 'sec', field: 'env', key: 'API_KEY' })
+    assert.equal(revealed.value, secret)
+    const whole = await McpManagerGateway.prototype.reveal.call({ ctx: fixture.ctx }, { name: 'sec', field: 'env' })
+    assert.deepEqual(whole.value, { API_KEY: secret })
+    await assert.rejects(
+      McpManagerGateway.prototype.reveal.call({ ctx: fixture.ctx }, { name: 'missing', field: 'env', key: 'API_KEY' }),
+      /不能读取配置/,
+    )
+  } finally {
+    await fixture.cleanup()
+  }
+})

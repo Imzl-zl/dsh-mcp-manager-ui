@@ -88,10 +88,43 @@ test('client does not reference unsupported DSH alias tokens', () => {
 test('client preserves redacted values during edits and never previews header values', () => {
   assert.match(client, /__DSH_MCP_REDACTED__/)
   assert.match(client, /••••••（保留原值）/)
-  assert.match(client, /headerKeys\.join\(', '\)/)
+  assert.match(client, /MASKED_VALUE/)
+  assert.match(client, /onReveal\(server, field, keyName\)/)
   assert.doesNotMatch(client, /String\(headers\[k\]\)\.slice\(0, 12\)/)
 })
 
+test('client reveals masked values in detail and edit views without replacing preserved form state', () => {
+  assert.match(client, /onReveal\(server, field, keyName\)/)
+  assert.match(client, /toggleEditReveal\(field, originalKey\)/)
+  assert.match(client, /visibleEditValue\(field, originalKey, row\.v\)/)
+  assert.match(client, /formatRevealedValue/)
+  assert.match(client, /Object\.entries\(value\)/)
+  assert.match(client, /dsh-mcp-inline-icon\{box-sizing:border-box;width:34px!important;height:34px!important/)
+  assert.match(client, /dsh-mcp-kv-del\{box-sizing:border-box;width:34px;height:34px/)
+})
+
+test('manual refresh provides progress and completion feedback', () => {
+  assert.match(client, /refreshing \? '刷新中…' : '刷新'/)
+  assert.match(client, /'已刷新，共 ' \+ next\.length \+ ' 个 MCP'/)
+})
+
+test('client avoids full-screen backdrop filters and skips stale or unchanged polling renders', () => {
+  assert.doesNotMatch(client, /dsh-mcp-(?:panel-)?overlay\{[^}]*backdrop-filter/)
+  assert.match(client, /JSON\.stringify\(prev\) === JSON\.stringify\(next\) \? prev : next/)
+  assert.match(client, /seq !== loadSeq\.current/)
+})
+
+test('list and detail use the same derived status and refresh tools after registration', () => {
+  assert.match(client, /h\(Dot, \{ phase: s\.status \|\| s\.phase \}\)/)
+  assert.match(client, /selectedServer\?\.toolRevision/)
+})
+
+test('revealed values are generation-scoped and cleared when persisted configuration changes', () => {
+  assert.match(client, /editRevealGeneration\.current/)
+  assert.match(client, /generation !== revealGeneration\.current/)
+  assert.match(client, /clearRevealed\(\);\s*flash\(editTarget/)
+  assert.match(client, /clearRevealed\(\);\s*flash\(res\.note/)
+})
 test('client validates reconnect delay ordering without rejecting DSH-supported decimals', () => {
   assert.match(client, /Number\.isFinite\(initialDelay\)/)
   assert.match(client, /initialDelay > maxDelay/)

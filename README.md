@@ -120,10 +120,21 @@ dsh web
 - `cordis.patch.yml`：插入唯一的 Host 插件实例
 - `lib/index.js`：`mcpManager` Host Remote
 - `lib/mcp-config.js`：JSON 规范化与 YAML patch 结构化读写
+- `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
 - `lib/typert.js`：Remote 契约描述
 
 `lib/` 是预构建产物，GitHub、tarball 和 npm 安装均不需要执行构建脚本。
+
+## 连接状态语义
+
+`@deepseek-ai/dsh-mcp-client` 不对外暴露连接成功/失败事件，连接状态只出现在它的日志里。因此面板采用两条独立事实拼出状态：
+
+- **已连接（connected）**：只有该 server 的工具已注册（`mcp__<server>__*` 数量 > 0）才判定为已连接。插件 fiber 处于 ACTIVE 只说明 mcp-client 在跑，不能证明握手成功——`failOnStartupError: false`（默认）时连接失败也会让 fiber 保持 ACTIVE。
+- **连接失败（failed）**：fiber 活着但没有工具注册，且 mcp-client 最近日志（通过 `ctx.logger.exporter` 订阅并按 `mcp-client(<serverName>)` 过滤）中出现 error/warn。失败原因会展示在详情页，例如 `connection attempt failed: ECONNREFUSED`、`adb forward missing`。
+- 工具数为 0 且没有任何失败日志时如实显示**连接中/等待**，不猜测成功。
+
+面板在详情页和编辑表单中默认掩码敏感值（URL 凭据、args、env、headers），点击眼睛图标后经 Host 的 `reveal` 接口读取有效运行值并在会话内临时显示；编辑时若未实际修改输入，保存仍保留原配置引用，不会把环境变量密钥写回 profile。该读取只对当前 Web profile 管理的 server 开放。
 
 ## 设计约束
 
