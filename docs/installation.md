@@ -22,7 +22,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ```sh
 # 推荐：固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.4
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.5
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
@@ -52,6 +52,8 @@ name: dsh-mcp-manager-ui
 ```
 
 打开 DSH Web 后，右下角应出现 MCP 管理按钮。面板能够读取当前 profile 中的 MCP，并对可管理条目执行启停、编辑、重连和删除。
+
+安装插件或启动 Web Host 不会自动安装内置 MCP。需要时打开面板，点击“内置 MCP”，选择 Exa、Tavily、Firecrawl、Chrome DevTools 或 Playwright 后再确认安装。已存在于当前 profile、其他 bundle 或 Agent preset 的同类配置会显示为“已配置”并跳过，不会被覆盖。前三项默认使用官方免密限额入口；Chrome DevTools 和 Playwright 通过本机 `npx` 启动，需满足相应 Node.js/浏览器要求。
 
 ## 升级
 

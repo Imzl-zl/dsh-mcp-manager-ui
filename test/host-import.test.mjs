@@ -53,6 +53,103 @@ test('host entry imports with declared runtime dependencies', async () => {
   assert.equal(host.default, host.McpManagerGateway)
 })
 
+test('host builtin catalog is read-only and selected install skips other configuration layers', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const externalExa = {
+    options: {
+      id: 'mcp-tavily',
+      name: '@deepseek-ai/dsh-mcp-client',
+      config: { serverName: 'private-search', transport: 'streamable-http', url: 'https://mcp.exa.ai/mcp' },
+    },
+    disabled: false,
+    fiber: null,
+  }
+  const groupedTavily = {
+    options: {
+      id: 'preset-tavily',
+      group: 'agent-preset',
+      name: '@deepseek-ai/dsh-mcp-client',
+      config: { serverName: 'preset-search', transport: 'streamable-http', url: 'https://mcp.tavily.com/mcp/' },
+    },
+    disabled: false,
+    fiber: null,
+  }
+  const fixture = await createProfileFixture('[]\n', [externalExa, groupedTavily])
+
+  try {
+    assert.equal(typeof McpManagerGateway.prototype.builtins, 'function')
+    assert.equal(typeof McpManagerGateway.prototype.installBuiltins, 'function')
+
+    const catalog = await McpManagerGateway.prototype.builtins.call({ ctx: fixture.ctx })
+    assert.equal(catalog.builtins.find((item) => item.id === 'exa').installed, true)
+    assert.deepEqual(catalog.builtins.find((item) => item.id === 'exa').installedAs, ['private-search'])
+    assert.equal(catalog.builtins.find((item) => item.id === 'tavily').installed, true)
+    assert.deepEqual(catalog.builtins.find((item) => item.id === 'tavily').installedAs, ['preset-search'])
+    const listed = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    assert.equal(listed.servers.some((server) => server.serverName === 'preset-search' && server.managed === false), true)
+    await assert.rejects(
+      McpManagerGateway.prototype.add.call({ ctx: fixture.ctx }, { name: 'preset-search', transport: 'stdio', command: 'node' }),
+      /already exists/i,
+    )
+    const preview = await McpManagerGateway.prototype.previewImport.call({ ctx: fixture.ctx }, {
+      mode: 'merge',
+      json: { mcpServers: { 'preset-search': { type: 'http', url: 'https://mcp.tavily.com/mcp/' } } },
+    })
+    assert.deepEqual(preview.conflicts, ['preset-search'])
+    assert.equal(await readFile(fixture.patchPath, 'utf8'), '[]\n')
+
+    const installed = await McpManagerGateway.prototype.installBuiltins.call(
+      { ctx: fixture.ctx },
+      { ids: ['exa', 'tavily', 'playwright'] },
+    )
+    const first = await readFile(fixture.patchPath, 'utf8')
+    const parsed = (await import('../lib/mcp-config.js')).readManagedMcpServers(first)
+    assert.deepEqual(installed.added, ['playwright'])
+    assert.deepEqual(installed.skipped, ['exa', 'tavily'])
+    assert.deepEqual(parsed.servers.map((server) => server.name), ['playwright'])
+    assert.equal(parsed.entryIds.playwright, 'mcp-playwright')
+    assert.doesNotMatch(first, /serverName: exa/)
+
+    const repeated = await McpManagerGateway.prototype.installBuiltins.call(
+      { ctx: fixture.ctx },
+      { ids: ['exa', 'tavily', 'playwright'] },
+    )
+    assert.deepEqual(repeated.added, [])
+    assert.deepEqual(repeated.skipped, ['exa', 'tavily', 'playwright'])
+    assert.equal(await readFile(fixture.patchPath, 'utf8'), first)
+
+    await assert.rejects(
+      McpManagerGateway.prototype.installBuiltins.call({ ctx: fixture.ctx }, { ids: ['unknown'] }),
+      /未知.*unknown/i,
+    )
+    assert.equal(await readFile(fixture.patchPath, 'utf8'), first)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('builtin installation trusts the freshly read patch when the loader still has a removed entry', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-firecrawl\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: firecrawl\n        transport: streamable-http\n        url: https://mcp.firecrawl.dev/v2/mcp\n`
+  const staleEntry = {
+    options: { id: 'mcp-firecrawl', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'firecrawl', transport: 'streamable-http', url: 'https://mcp.firecrawl.dev/v2/mcp' } },
+    disabled: false,
+    fiber: null,
+  }
+  const fixture = await createProfileFixture(content, [staleEntry])
+  fixture.entries[0].subtree = { entries: () => [staleEntry] }
+
+  try {
+    await writeFile(fixture.patchPath, '[]\n')
+    const result = await McpManagerGateway.prototype.installBuiltins.call({ ctx: fixture.ctx }, { ids: ['firecrawl'] })
+    assert.deepEqual(result.added, ['firecrawl'])
+    assert.deepEqual(result.skipped, [])
+    assert.match(await readFile(fixture.patchPath, 'utf8'), /serverName: firecrawl/)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 test('Remote projections redact secrets and preview omits normalized server configs', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
   const secret = 'super-secret-token'
@@ -319,6 +416,7 @@ test('duplicate cross-layer server names are exposed once as a read-only conflic
   const external = { options: { id: 'mcp-shared-external', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'shared', transport: 'stdio', command: 'external' } }, disabled: false, fiber: null }
   const profile = { options: { id: 'mcp-shared-profile', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'shared', transport: 'stdio', command: 'node' } }, disabled: false, fiber: null }
   const fixture = await createProfileFixture(patch, [external, profile])
+  fixture.entries[0].subtree = { entries: () => [profile] }
 
   try {
     const result = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
@@ -334,6 +432,18 @@ test('duplicate cross-layer server names are exposed once as a read-only conflic
     await assert.rejects(
       McpManagerGateway.prototype.removeServer.call(gateway, 'shared'),
       /同名冲突|不能移除/,
+    )
+    const preview = await McpManagerGateway.prototype.previewImport.call(gateway, {
+      mode: 'merge',
+      json: { mcpServers: { shared: { command: 'updated' } } },
+    })
+    assert.deepEqual(preview.conflicts, ['shared'])
+    await assert.rejects(
+      McpManagerGateway.prototype.importJson.call(gateway, {
+        mode: 'merge',
+        json: { mcpServers: { shared: { command: 'updated' } } },
+      }),
+      /不能覆盖.*shared|同名 MCP.*shared/,
     )
   } finally {
     await fixture.cleanup()
@@ -458,6 +568,7 @@ test('tool revision changes when only the parameter schema changes', async () =>
 test('list exposes derived status and lastError from mcp-client log records', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
   const content = `- insert:\n    - id: mcp-broken\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: broken\n        transport: streamable-http\n        url: http://127.0.0.1:8787/mcp\n    - id: mcp-ok\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: ok\n        transport: stdio\n        command: node\n`
+  const logSecret = 'log-super-secret-token'
   const brokenFiber = { state: 2 }
   const broken = { options: { id: 'mcp-broken', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'broken', transport: 'streamable-http', url: 'http://127.0.0.1:8787/mcp' } }, disabled: false, fiber: brokenFiber }
   const ok = { options: { id: 'mcp-ok', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'ok', transport: 'stdio', command: 'node' } }, disabled: false, fiber: { state: 2 } }
@@ -465,8 +576,8 @@ test('list exposes derived status and lastError from mcp-client log records', as
   let cleanupCapture
   const logger = {
     buffer: [
-      { name: 'mcp-broken', type: 'warn', ts: Date.now(), args: ['connection attempt failed: ECONNREFUSED 127.0.0.1:8787'], fiber: { deref: () => brokenFiber } },
-      { name: 'mcp-broken', type: 'error', ts: Date.now(), args: ['giving up after 10 consecutive failed reconnect attempts'], fiber: { deref: () => brokenFiber } },
+      { name: 'mcp-broken', type: 'warn', ts: Date.now(), args: [`connection attempt failed: ECONNREFUSED 127.0.0.1:8787 https://example.test/mcp?token=${logSecret} Authorization: Bearer ${logSecret}`], fiber: { deref: () => brokenFiber } },
+      { name: 'mcp-broken', type: 'error', ts: Date.now(), args: [{ message: 'giving up after 10 consecutive failed reconnect attempts', args: ['--config', logSecret], env: { CUSTOM: logSecret } }], fiber: { deref: () => brokenFiber } },
     ],
     exporters: new Map(),
     _snExporter: 0,
@@ -487,6 +598,7 @@ test('list exposes derived status and lastError from mcp-client log records', as
     const byName = Object.fromEntries(result.servers.map((server) => [server.serverName, server]))
     assert.equal(byName.broken.status, 'failed')
     assert.match(byName.broken.lastError, /consecutive failed reconnect/)
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(logSecret))
     assert.equal(byName.ok.status, 'connected')
     assert.equal(byName.ok.lastError, null)
     assert.equal(logger.exporters.size, 1)

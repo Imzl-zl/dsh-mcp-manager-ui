@@ -1,7 +1,7 @@
 # dsh-mcp-manager-ui
 
 <p align="center">
-  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
 
 DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理当前 Web profile 的 MCP 配置。
@@ -10,15 +10,15 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 ### 管理面板
 
-![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-overview.png)
+![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-overview.png)
 
 ### 连接详情与操作
 
-![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-detail.jpg)
+![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-detail.jpg)
 
 ### 新增 MCP
 
-![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-add.jpg)
+![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-add.jpg)
 
 ## 功能
 
@@ -26,6 +26,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 展开每个工具查看完整输入 JSON Schema：必填/可选参数、类型、枚举、默认值与原始 JSON
 - 按传输方式（HTTP/stdio）和连接状态筛选，支持按名称/命令/URL 搜索
 - 添加时一键套用常用预设模板（Filesystem、Memory、Sequential Thinking 等）
+- 从“内置 MCP”目录查看 Exa、Tavily、Firecrawl、Chrome DevTools 和 Playwright，勾选后按需追加；已有配置只识别并跳过，不会覆盖
 - 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
@@ -43,6 +44,20 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 | Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 
+## 内置 MCP
+
+插件安装和 Web Host 启动都不会自动写入任何 MCP。打开管理面板后，点击顶部工具栏中位于“导入 JSON”和“添加 MCP”之间的“内置 MCP”，可以查看目录、勾选未配置项并一次安装。
+
+| MCP | 默认配置 | 无密钥使用范围 | 本地要求 |
+|---|---|---|---|
+| [Exa](https://exa.ai/docs/reference/exa-mcp) | `https://mcp.exa.ai/mcp` | 匿名限额；可另配 API Key 提升额度 | 无 |
+| [Tavily](https://docs.tavily.com/documentation/keyless) | `https://mcp.tavily.com/mcp/` + `X-Tavily-Access-Mode: keyless` | 限额 Search / Extract；免费账号可提供更高额度 | 无 |
+| [Firecrawl](https://docs.firecrawl.dev/mcp-server) | `https://mcp.firecrawl.dev/v2/mcp` | 限额 Search / Scrape / Parse；完整工具需要登录或 API Key | 无 |
+| [Chrome DevTools](https://developer.chrome.com/docs/devtools/agents/get-started) | `npx -y chrome-devtools-mcp@latest` | 本地工具，无 API 额度 | Node.js、Chrome |
+| [Playwright](https://playwright.dev/docs/getting-started-mcp) | `npx -y @playwright/mcp@latest` | 本地工具，无 API 额度 | Node.js 20+、可用浏览器 |
+
+目录会按 `serverName`、官方 HTTP 主机名和官方 npm 包识别当前有效配置，包括来自其他 bundle、Agent preset 或 `mcp-remote` 桥接的同类项。已存在项会显示其配置名称并禁用勾选；Host 在真正写入前还会在文件锁内再次判重，只追加当时仍缺失的所选项，不更新、不替换用户配置。用户主动移除某项后，只有再次勾选安装才会恢复。
+
 DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容 `0.1.0-rc.7` 到 `0.2.0` 之前的所有版本（含后续 RC 与 `0.1.x` 正式版）。开发与测试环境跟随同一范围，升级 DSH 后用 `pnpm update && npm test` 验证即可，无需改版本号。`0.2.0` 属于新的兼容边界，需要重新验证后再放宽。
 
 ## 安装
@@ -51,7 +66,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.4
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.5
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。

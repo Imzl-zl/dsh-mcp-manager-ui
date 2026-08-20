@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as mcpConfig from '../lib/mcp-config.js'
 import {
   normalizeMcpImport,
   readManagedMcpServers,
@@ -260,4 +261,62 @@ test('removes selected managed MCP entries without touching other managed entrie
   const next = updateManagedMcpPatch(original, [], { removeNames: ['one'] })
   assert.doesNotMatch(next, /serverName: one/)
   assert.match(next, /serverName: two/)
+})
+
+test('builtin MCP catalog uses official keyless endpoints and unattended browser commands', () => {
+  assert.deepEqual(mcpConfig.BUILTIN_MCP_SERVERS.map(({ label, summary, access, ...spec }) => spec), [
+    { id: 'exa', name: 'exa', transport: 'streamable-http', url: 'https://mcp.exa.ai/mcp' },
+    {
+      id: 'tavily',
+      name: 'tavily',
+      transport: 'streamable-http',
+      url: 'https://mcp.tavily.com/mcp/',
+      headers: { 'X-Tavily-Access-Mode': 'keyless' },
+    },
+    { id: 'firecrawl', name: 'firecrawl', transport: 'streamable-http', url: 'https://mcp.firecrawl.dev/v2/mcp' },
+    { id: 'chrome-devtools', name: 'chrome-devtools', transport: 'stdio', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] },
+    { id: 'playwright', name: 'playwright', transport: 'stdio', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+  ])
+  for (const builtin of mcpConfig.BUILTIN_MCP_SERVERS) {
+    assert.ok(builtin.label)
+    assert.ok(builtin.summary)
+    assert.ok(builtin.access)
+  }
+})
+
+test('selected builtin installation appends only missing identities and never rewrites existing entries', () => {
+  const original = `# user comment\n- insert:\n    - id: user-exa\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: private-search\n        transport: streamable-http\n        url: https://mcp.exa.ai/mcp?tools=web_search_exa\n        headers:\n          x-api-key: !!js process.env.EXA_API_KEY\n`
+  const effective = [
+    ...readManagedMcpServers(original).servers,
+    { name: 'tavily-custom', transport: 'stdio', command: 'npx', args: ['-y', 'mcp-remote', 'https://mcp.tavily.com/mcp/?tavilyApiKey=user-key'] },
+    { name: 'crawler', transport: 'stdio', command: 'npx', args: ['-y', 'firecrawl-mcp@3.23.7'] },
+    { name: 'devtools-custom', transport: 'stdio', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] },
+  ]
+
+  const result = mcpConfig.appendSelectedBuiltinMcpServers(
+    original,
+    effective,
+    ['exa', 'tavily', 'firecrawl', 'chrome-devtools', 'playwright'],
+    { reservedIds: ['mcp-playwright'] },
+  )
+  const parsed = readManagedMcpServers(result.content)
+
+  assert.deepEqual(result.added, ['playwright'])
+  assert.deepEqual(result.skipped, ['exa', 'tavily', 'firecrawl', 'chrome-devtools'])
+  assert.deepEqual(parsed.servers.map((server) => server.name), ['private-search', 'playwright'])
+  assert.equal(parsed.entryIds.playwright, 'mcp-playwright-2')
+  assert.match(result.content, /# user comment/)
+  assert.match(result.content, /x-api-key: !!js process\.env\.EXA_API_KEY/)
+  assert.doesNotMatch(result.content, /builtin-seed/)
+})
+
+test('a removed builtin is reinstalled only after the user selects it again', () => {
+  const first = mcpConfig.appendSelectedBuiltinMcpServers('[]\n', [], ['firecrawl'])
+  assert.deepEqual(first.added, ['firecrawl'])
+
+  const withoutFirecrawl = updateManagedMcpPatch(first.content, [], { removeNames: ['firecrawl'] })
+  const second = mcpConfig.appendSelectedBuiltinMcpServers(withoutFirecrawl, [], ['firecrawl'])
+
+  assert.deepEqual(second.added, ['firecrawl'])
+  assert.equal(readManagedMcpServers(second.content).servers.some((server) => server.name === 'firecrawl'), true)
 })

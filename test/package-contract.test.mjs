@@ -16,7 +16,7 @@ const dshHostPackages = [
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.1.4')
+  assert.equal(packageJson.version, '1.1.5')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
@@ -52,7 +52,7 @@ test('documentation targets the verified DSH and plugin releases', () => {
     assert.match(document, /0\.1\.0-rc\.7/)
     assert.match(document, /0\.1\.0-rc\.8/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.4/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.5/)
   }
 })
 
@@ -154,6 +154,21 @@ test('client moves focus into dialogs so Escape handlers receive keyboard events
 test('client Remote contract includes JSON preview and import operations', () => {
   assert.match(client, /mcpManager\/previewImport/)
   assert.match(client, /mcpManager\/importJson/)
+})
+
+test('client places an explicit selectable builtin installer before manual add', () => {
+  assert.match(client, /BuiltinInstallModal/)
+  assert.match(client, /call\('builtins'\)/)
+  assert.match(client, /call\('installBuiltins'/)
+  assert.match(client, /type: 'checkbox'/)
+  assert.match(client, /安装选中/)
+  assert.match(client, /\.dsh-mcp-builtin-modal\{[^}]*display:flex[^}]*flex-direction:column/)
+  assert.match(client, /\.dsh-mcp-builtin-list\{[^}]*overflow-y:auto/)
+  assert.match(client, /checked: allSelected/)
+  const importPosition = client.indexOf("children: '导入 JSON'")
+  const builtinPosition = client.indexOf("children: '内置 MCP'")
+  const addPosition = client.indexOf("children: '添加 MCP'")
+  assert.ok(importPosition >= 0 && importPosition < builtinPosition && builtinPosition < addPosition)
 })
 
 test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {
