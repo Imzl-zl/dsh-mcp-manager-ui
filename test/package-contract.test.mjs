@@ -24,26 +24,27 @@ test('package exposes one Web bundle entry', () => {
   assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)
 })
 
-test('package uses the verified DSH release as a host peer and exact development baseline', () => {
+test('package declares a caret DSH compatibility window and follows the latest RC in development', () => {
   for (const name of dshHostPackages) {
     assert.equal(packageJson.dependencies?.[name], undefined)
-    assert.equal(packageJson.peerDependencies?.[name], '>=0.1.0-rc.7 <0.1.0-rc.8')
-    assert.equal(packageJson.devDependencies?.[name], '0.1.0-rc.7')
+    assert.equal(packageJson.peerDependencies?.[name], '^0.1.0-rc.7')
+    assert.equal(packageJson.devDependencies?.[name], '^0.1.0-rc.8')
   }
 })
 
-test('lockfile resolves the verified DSH release only as a development baseline', () => {
+test('lockfile resolves DSH host packages only as a development baseline on the latest RC', () => {
   const importer = lockfile.importers['.']
   for (const name of dshHostPackages) {
     assert.equal(importer.dependencies?.[name], undefined)
-    assert.equal(importer.devDependencies?.[name]?.specifier, '0.1.0-rc.7')
-    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.0-rc\.7(?:\(|$)/)
+    assert.equal(importer.devDependencies?.[name]?.specifier, '^0.1.0-rc.8')
+    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.0-rc\.8(?:\(|$)/)
   }
 })
 
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
     assert.match(document, /0\.1\.0-rc\.7/)
+    assert.match(document, /0\.1\.0-rc\.8/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
     assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.3/)
   }

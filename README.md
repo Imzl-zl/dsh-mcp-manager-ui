@@ -25,7 +25,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 查看 MCP 状态、传输方式、连接参数和工具列表
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
-- 支持 DSH rc.7 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
+- 支持 DSH rc.7+ 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
 - 导入 Claude、Cursor、Cline、Roo 等使用的 `mcpServers` JSON，以及 VS Code 的 `servers` JSON
 - JSON 导入支持“合并（同名更新）”和“替换当前 Web profile 管理的 MCP”，写入前提供预览
 - 结构化修改 Web profile 的 `cordis.patch.yml`，保留其他插件条目、注释和 `!!js` 环境变量表达式
@@ -35,11 +35,11 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 | 项目 | 已验证版本 |
 |---|---|
-| DeepSeek Harness | `0.1.0-rc.7` |
-| Node.js | DSH rc.7 自带/支持的运行时 |
+| DeepSeek Harness | `0.1.0-rc.7` 及以上（已验证至 `0.1.0-rc.8`） |
+| Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 
-DSH 宿主 API 通过 `peerDependencies` 声明为 `>=0.1.0-rc.7 <0.1.0-rc.8`，开发和测试环境精确锁定 `0.1.0-rc.7`。每个后续 RC 都需要重新验证并更新兼容窗口，不会未经测试自动跟随 `latest`。
+DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容 `0.1.0-rc.7` 到 `0.2.0` 之前的所有版本（含后续 RC 与 `0.1.x` 正式版）。开发与测试环境跟随同一范围，升级 DSH 后用 `pnpm update && npm test` 验证即可，无需改版本号。`0.2.0` 属于新的兼容边界，需要重新验证后再放宽。
 
 ## 安装
 

@@ -77,7 +77,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     for (const name of dshHostPackages) {
       assert.equal(packedManifest.dependencies?.[name], undefined)
       assert.equal(packedManifest.optionalDependencies?.[name], undefined)
-      assert.equal(packedManifest.peerDependencies?.[name], '>=0.1.0-rc.7 <0.1.0-rc.8')
+      assert.equal(packedManifest.peerDependencies?.[name], '^0.1.0-rc.7')
       assert.notEqual(packedManifest.peerDependenciesMeta?.[name]?.optional, true)
     }
     const packedText = entries
