@@ -23,6 +23,10 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 ## 功能
 
 - 查看 MCP 状态、传输方式、连接参数和工具列表
+- 展开每个工具查看完整输入 JSON Schema：必填/可选参数、类型、枚举、默认值与原始 JSON
+- 按传输方式（HTTP/stdio）和连接状态筛选，支持按名称/命令/URL 搜索
+- 添加时一键套用常用预设模板（Filesystem、Memory、Sequential Thinking 等）
+- 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
 - 支持 DSH rc.7+ 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略

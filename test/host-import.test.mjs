@@ -379,6 +379,82 @@ test('overlapping server-name prefixes are reported as ambiguous instead of misa
   }
 })
 
+test('list revision changes when the projected managed config changes', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-demo\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: demo\n        transport: stdio\n        command: node\n`
+  const entry = {
+    options: { id: 'mcp-demo', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'demo', transport: 'stdio', command: 'node' } },
+    disabled: false,
+    fiber: null,
+  }
+  const fixture = await createProfileFixture(content, [entry])
+
+  try {
+    const before = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    await McpManagerGateway.prototype.update.call(
+      { ctx: fixture.ctx },
+      { name: 'demo', transport: 'stdio', command: 'python' },
+    )
+    const after = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+
+    assert.equal(before.servers[0].command, 'node')
+    assert.equal(after.servers[0].command, 'python')
+    assert.notEqual(after.revision, before.revision)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('opaque reveal revision follows effective runtime secrets without exposing them', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-sec\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: sec\n        transport: stdio\n        command: node\n        env:\n          API_KEY: first-secret\n`
+  const entry = {
+    options: { id: 'mcp-sec', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'sec', transport: 'stdio', command: 'node', env: { API_KEY: 'first-secret' } } },
+    disabled: false,
+    fiber: null,
+  }
+  const fixture = await createProfileFixture(content, [entry])
+
+  try {
+    const before = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    entry.options.config.env.API_KEY = 'second-secret'
+    const after = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+
+    assert.equal(after.revision, before.revision)
+    assert.equal(typeof before.revealRevision, 'string')
+    assert.notEqual(after.revealRevision, before.revealRevision)
+    assert.doesNotMatch(JSON.stringify(after), /first-secret|second-secret/)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('tool revision changes when only the parameter schema changes', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const content = `- insert:\n    - id: mcp-demo\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: demo\n        transport: stdio\n        command: node\n`
+  const entry = {
+    options: { id: 'mcp-demo', name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'demo', transport: 'stdio', command: 'node' } },
+    disabled: false,
+    fiber: { state: 2 },
+  }
+  const fixture = await createProfileFixture(content, [entry])
+  let parameters = { type: 'object', properties: { before: { type: 'string' } } }
+  fixture.ctx.tools.schemas = () => [{ name: 'mcp__demo__tool', description: 'same description', parameters }]
+
+  try {
+    const before = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    parameters = { type: 'object', properties: { after: { type: 'number' } } }
+    const after = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
+    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, 'demo')
+
+    assert.deepEqual(tools.tools[0].parameters, parameters)
+    assert.notEqual(after.servers[0].toolRevision, before.servers[0].toolRevision)
+    assert.notEqual(after.revision, before.revision)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 test('list exposes derived status and lastError from mcp-client log records', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
   const content = `- insert:\n    - id: mcp-broken\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: broken\n        transport: streamable-http\n        url: http://127.0.0.1:8787/mcp\n    - id: mcp-ok\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: ok\n        transport: stdio\n        command: node\n`

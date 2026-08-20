@@ -41,6 +41,12 @@ test('lockfile resolves DSH host packages only as a development baseline on the 
   }
 })
 
+test('runtime YAML parser includes the nested-collection stack overflow fix', () => {
+  const [major, minor, patchVersion] = packageJson.dependencies.yaml.split('.').map(Number)
+  assert.equal(major, 2)
+  assert.ok(minor > 8 || (minor === 8 && patchVersion >= 3))
+})
+
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
     assert.match(document, /0\.1\.0-rc\.7/)
@@ -111,7 +117,7 @@ test('manual refresh provides progress and completion feedback', () => {
 
 test('client avoids full-screen backdrop filters and skips stale or unchanged polling renders', () => {
   assert.doesNotMatch(client, /dsh-mcp-(?:panel-)?overlay\{[^}]*backdrop-filter/)
-  assert.match(client, /JSON\.stringify\(prev\) === JSON\.stringify\(next\) \? prev : next/)
+  assert.match(client, /revision !== revisionRef\.current/)
   assert.match(client, /seq !== loadSeq\.current/)
 })
 
@@ -123,6 +129,8 @@ test('list and detail use the same derived status and refresh tools after regist
 test('revealed values are generation-scoped and cleared when persisted configuration changes', () => {
   assert.match(client, /editRevealGeneration\.current/)
   assert.match(client, /generation !== revealGeneration\.current/)
+  assert.match(client, /revealRevisionRef/)
+  assert.match(client, /if \(consumeRevision\(revealRevisionRef, res\.revealRevision\)\) clearRevealed\(\)/)
   assert.match(client, /clearRevealed\(\);\s*flash\(editTarget/)
   assert.match(client, /clearRevealed\(\);\s*flash\(res\.note/)
 })
@@ -146,4 +154,16 @@ test('client moves focus into dialogs so Escape handlers receive keyboard events
 test('client Remote contract includes JSON preview and import operations', () => {
   assert.match(client, /mcpManager\/previewImport/)
   assert.match(client, /mcpManager\/importJson/)
+})
+
+test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {
+  assert.match(client, /tool\.parameters/)
+  assert.match(client, /MCP_PRESETS/)
+  assert.match(client, /flattenParameters/)
+  assert.match(client, /describeType/)
+  assert.match(client, /transportFilter/)
+  assert.match(client, /statusFilter/)
+  assert.match(client, /navigator\.clipboard/)
+  assert.match(client, /ICONS\.copy/)
+  assert.doesNotMatch(client, /JSON\.stringify\(prev\) === JSON\.stringify\(next\)/)
 })
