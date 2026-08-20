@@ -1,7 +1,7 @@
 # dsh-mcp-manager-ui
 
 <p align="center">
-  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.3/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
 
 DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理当前 Web profile 的 MCP 配置。
@@ -10,15 +10,15 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 ### 管理面板
 
-![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.3/docs/images/mcp-manager-overview.png)
+![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-overview.png)
 
 ### 连接详情与操作
 
-![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.3/docs/images/mcp-manager-detail.jpg)
+![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-detail.jpg)
 
 ### 新增 MCP
 
-![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.3/docs/images/mcp-manager-add.jpg)
+![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.4/docs/images/mcp-manager-add.jpg)
 
 ## 功能
 
@@ -51,7 +51,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.3
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.4
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
