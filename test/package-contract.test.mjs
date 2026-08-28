@@ -122,8 +122,32 @@ test('client avoids full-screen backdrop filters and skips stale or unchanged po
 })
 
 test('list and detail use the same derived status and refresh tools after registration', () => {
-  assert.match(client, /h\(Dot, \{ phase: s\.status \|\| s\.phase \}\)/)
+  assert.match(client, /const dotPhase = \(s\) => \(mountError\(s\) \? 'failed' : s\.scope === 'workspace' \? 'idle' : s\.status \|\| s\.phase\)/)
   assert.match(client, /selectedServer\?\.toolRevision/)
+})
+
+test('mount failures are attributed to the row and the detail pane, not only a banner', () => {
+  // 顶部横幅说 memory 挂载失败、而列表里 memory 看着一切正常，是最容易误导的状态。
+  assert.match(client, /const mountErrorMap = useMemo\(\(\) => new Map\(\(mountErrors \|\| \[\]\)\.map\(\(m\) => \[m\.serverName, m\.error\]\)\)/)
+  assert.match(client, /mountError\(s\) \? h\(Badge, \{ cls: 's-err' \}, '挂载失败'\) : null/)
+  assert.match(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
+  // 列表行标红而详情说「随会话挂载」，是同一条信息在两处自相矛盾。
+  assert.match(client, /const mountFailed = isWorkspace && !!server\.lastError/)
+  assert.match(client, /const status = mountFailed \? 'failed' : isWorkspace \? 'idle'/)
+  assert.match(client, /mountFailed\s*\n\s*\? '挂载失败'/)
+  // 横幅不再猜测原因，具体错误留在它归属的条目上。
+  assert.doesNotMatch(client, /可能已被其他会话占用或连接失败/)
+})
+
+test('global MCPs are inspectable from a project tab but stay read-only there', () => {
+  // 长得像列表项却点不开，是最直接的交互不一致。
+  assert.match(client, /onClick: \(\) => onSelect\(s\.serverName\),[^]*?onKeyDown[^]*?dsh-mcp-item-name/)
+  assert.match(client, /return global \? \{ \.\.\.global, managed: false, foreign: 'global' \} : null/)
+  assert.match(client, /const isForeign = server\.foreign === 'global'/)
+  // 只读的同时仍要能改「对本项目是否可见」，否则详情页比列表还弱。
+  assert.match(client, /isForeign\s*\n\s*\? h\(React2\.Fragment, null,[^]*?onToggleExclude\(server\.serverName, next\)/)
+  assert.match(client, /isForeign \? '全局配置（在「全局」标签页可编辑）'/)
+  assert.doesNotMatch(client, /← 从左侧选择一个 MCP/)
 })
 
 test('revealed values are generation-scoped and cleared when persisted configuration changes', () => {
@@ -181,4 +205,72 @@ test('client exposes tool parameter schemas, presets, filters and clipboard copy
   assert.match(client, /navigator\.clipboard/)
   assert.match(client, /ICONS\.copy/)
   assert.doesNotMatch(client, /JSON\.stringify\(prev\) === JSON\.stringify\(next\)/)
+})
+
+test('workspace tab renders project MCPs as their own card instead of a nested collapsing list', () => {
+  // ServerList 内嵌进项目分区时必须丢掉自身卡片外框，否则出现卡中卡。
+  assert.match(client, /\.dsh-mcp-side\.embedded\{[^}]*flex:1 1 auto[^}]*border:0[^}]*padding:0/)
+  assert.match(client, /className: 'dsh-mcp-side' \+ \(embedded \? ' embedded' : ''\)/)
+  // 两个分区各自成卡片，不再靠 border-top 分隔。
+  assert.match(client, /\.dsh-mcp-section\{[^}]*border:1px solid var\(--mcp-line\)[^}]*border-radius:12px/)
+  assert.doesNotMatch(client, /\.dsh-mcp-section\+\.dsh-mcp-section\{border-top/)
+  assert.match(client, /\.dsh-mcp-section\.local\{[^}]*border-color:var\(--mcp-accent\)/)
+  assert.match(client, /className: 'dsh-mcp-section local'/)
+  assert.match(client, /className: 'dsh-mcp-section global'/)
+  // ws-body 变成纯布局容器：不再叠一层卡片，放不下时自身滚动而不是裁掉内容。
+  assert.match(client, /\.dsh-mcp-ws-body\{[^}]*overflow-y:auto/)
+  assert.doesNotMatch(client, /\.dsh-mcp-ws-body\{[^}]*border:1px solid/)
+})
+
+test('server lists keep a minimum visible height and never get clipped to zero on narrow panels', () => {
+  // flex:1 在被压缩的 column 容器里会塌缩成 0 并被 overflow:hidden 吃掉，必须给下限。
+  assert.match(client, /\.dsh-mcp-list\{flex:1 1 auto;min-height:52px/)
+  assert.match(client, /\.dsh-mcp-global-list\{[^}]*min-height:52px/)
+  assert.match(client, /\.dsh-mcp-section\.local\{[^}]*min-height:124px/)
+  assert.match(client, /\.dsh-mcp-section\.global\{[^}]*min-height:124px/)
+  // 窄屏改为整页滚动 + 列表各自 vh 上限，取代会裁掉整块列表的 max-height:34%。
+  assert.doesNotMatch(client, /max-height:34%/)
+  assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-body\{flex-direction:column;overflow-y:auto/)
+  assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-section\.local \.dsh-mcp-list\{max-height:30vh\}/)
+  assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-global-list\{max-height:30vh\}/)
+})
+
+test('workspace MCPs stay toggleable and report mount semantics instead of a stuck connecting state', () => {
+  // 项目 MCP 的 phase 恒为 waiting，沿用全局的 stopped 判定会让禁用后再也开不回来。
+  assert.match(client, /const toggleLocked = \(s\) => busy \|\| !s\.managed \|\| \(s\.scope !== 'workspace' && !s\.enabled && s\.phase !== 'stopped'\)/)
+  assert.match(client, /const status = mountFailed \? 'failed' : isWorkspace \? 'idle' : server\.status \|\| server\.phase \|\| 'waiting'/)
+  assert.match(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
+  assert.match(client, /cls: isWorkspace \? 'scope-ws' : ''/)
+})
+
+test('sparse workspace lists hide filter controls and global search stays outside the scroll area', () => {
+  // 项目 MCP 通常只有 1-3 个，常驻搜索框 + 两个下拉会吃掉整块列表高度。
+  assert.match(client, /const showControls = !embedded \|\| count > CONTROLS_THRESHOLD/)
+  assert.match(client, /workspace \? null : h\('option', \{ value: 'connected' \}/)
+  assert.match(client, /emptyHint: '此项目还没有 MCP。/)
+  // 搜索框必须是分区的直接子节点，否则会随列表一起滚走。
+  assert.match(client, /servers\.length > CONTROLS_THRESHOLD \? h\('div', \{ className: 'dsh-mcp-global-search' \}[^]*?\n\s*h\('div', \{ className: 'dsh-mcp-global-list' \}/)
+  assert.match(client, /setTransportFilter\('all'\);\s*\n\s*setStatusFilter\('all'\);/)
+})
+
+test('visibility and enablement use deliberately different controls', () => {
+  // 滑块=启用状态、眼睛=本项目可见性。两者后果不同（写 disabled vs 写 exclude），
+  // 外观统一反而会让人以为关掉全局条目就是全局禁用。
+  assert.match(client, /const EyeToggle = \(\{ hidden, disabled, onChange, label \}\)/)
+  assert.match(client, /ICONS\[hidden \? 'eyeOff' : 'eye'\]/)
+  assert.match(client, /h\(EyeToggle, \{ hidden: isHidden, disabled: busy, label: s\.serverName, onChange: \(next\) => onToggleExclude\(s\.serverName, next\) \}\)/)
+  assert.doesNotMatch(client, /dsh-mcp-hide-toggle/)
+  assert.match(client, /isHidden \? h\(Badge, \{ cls: 's-off' \}, '已屏蔽'\) : null/)
+  // 眼睛按钮不能连带触发行选中
+  assert.match(client, /onClick: \(e\) => \{ e\.stopPropagation\(\); onChange\(!hidden\); \}/)
+})
+
+test('global list collapses to a one-line summary so the project list stays the subject', () => {
+  // 全局可见性是低频操作，展开时占了项目区两倍高度并把详情挤出视口。
+  assert.match(client, /const \[globalOpen, setGlobalOpen\] = useState\(false\)/)
+  assert.match(client, /className: 'dsh-mcp-section global' \+ \(globalOpen \? '' : ' collapsed'\)/)
+  assert.match(client, /visibleGlobalCount \+ '\/' \+ globalServers\.length \+ ' 对本项目可见'/)
+  assert.match(client, /globalOpen \? h\(GlobalServerList/)
+  assert.match(client, /\.dsh-mcp-section\.global\.collapsed\{flex:none;min-height:0;border-color:transparent/)
+  assert.match(client, /setGlobalOpen\(false\);/)
 })

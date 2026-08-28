@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, clearRevealState, consumeRevision, copyText };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, clearRevealState, consumeRevision, copyText, startVisibilityAwarePolling };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -152,4 +152,37 @@ test('narrow connection details stack grids and allow long secret keys to wrap',
 
   assert.match(internals.MCP_CSS, /@media \(max-width:480px\)\{[^]*?\.dsh-mcp-kv\{grid-template-columns:1fr;/)
   assert.match(internals.MCP_CSS, /\.dsh-mcp-secret-row b\{[^}]*overflow-wrap:anywhere/)
+})
+
+test('polling pauses while the tab is hidden and refreshes on return', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { startVisibilityAwarePolling } = internals
+  let ticks = 0
+  const listeners = {}
+  const doc = {
+    visibilityState: 'visible',
+    addEventListener(name, fn) { listeners[name] = fn },
+    removeEventListener(name) { delete listeners[name] },
+  }
+  let intervalFn = null
+  let intervalDisposed = false
+  const timer = { interval(fn) { intervalFn = fn; return () => { intervalDisposed = true } } }
+
+  const dispose = startVisibilityAwarePolling(doc, timer, 5000, () => { ticks += 1 })
+
+  intervalFn()
+  assert.equal(ticks, 1, '可见时正常轮询')
+
+  doc.visibilityState = 'hidden'
+  intervalFn()
+  intervalFn()
+  assert.equal(ticks, 1, '不可见时不应拉取')
+
+  doc.visibilityState = 'visible'
+  listeners.visibilitychange()
+  assert.equal(ticks, 2, '恢复可见应立即补一次，避免看到陈旧数据')
+
+  dispose()
+  assert.equal(intervalDisposed, true)
+  assert.equal(listeners.visibilitychange, undefined, '监听器必须解绑')
 })

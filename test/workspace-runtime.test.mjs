@@ -36,10 +36,17 @@ async function createRuntimeFixture() {
     resume(options) { return { setup: options.setup }; },
   }
   const ctx = {
-    loader: { entries: () => [
-      { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'github' } } },
-      { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'exa' } } },
-    ] },
+    loader: {
+      entries: () => [
+        { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'github' } } },
+        { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'exa' } } },
+      ],
+      // 宿主按 profile 基点解析插件模块；这里给一个可挂载的替身，让成功路径真正被覆盖。
+      import: async (name) => {
+        assert.equal(name, '@deepseek-ai/dsh-mcp-client')
+        return { apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }
+      },
+    },
     tools: { schemas: () => [{ name: 'mcp__github__a' }, { name: 'mcp__exa__b' }] },
     get(name) { if (name === 'agents') return agentsService; return undefined; },
     on(event, handler) { handlers[event] = handler; return () => {}; },
@@ -136,10 +143,13 @@ test('exclude owner disambiguation never denies ambiguous names (double undersco
   try {
     // 全局同时存在 my 与 my__server：mcp__my__server__x 的归属在两者间歧义
     // （可能是 my 的 raw tool server__x，也可能是 my__server 的 x）。
-    fixture.ctx.loader = { entries: () => [
-      { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'my' } } },
-      { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'my__server' } } },
-    ] }
+    fixture.ctx.loader = {
+      entries: () => [
+        { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'my' } } },
+        { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'my__server' } } },
+      ],
+      import: async () => ({ apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }),
+    }
     fixture.ctx.tools.schemas = () => [{ name: 'mcp__my__server__x' }]
     await writeFile(join(fixture.wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
       mcpServers: { db: { command: 'psql' } },
@@ -163,6 +173,8 @@ test('mount failures are recorded for observability instead of silently dropped'
       mcpServers: { db: { command: 'psql', failOnStartupError: true } },
       exclude: [],
     }, null, 2))
+    // 显式制造解析失败，而不是依赖「宿主包碰巧不在 node_modules 里」这种偶然。
+    fixture.ctx.loader.import = async () => { throw new Error('模拟：宿主未提供 mcp-client') }
     install(fixture.ctx)
     const created = await fixture.agentsService.create({ setup: undefined })
     // setup 不被挂载失败阻断（compose 不 drive），失败被记录而非静默吞掉。
@@ -171,6 +183,29 @@ test('mount failures are recorded for observability instead of silently dropped'
     assert.equal(records.length, 1)
     assert.equal(records[0].serverName, 'db')
     assert.ok(records[0].error.length > 0)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('workspace MCPs resolve through the host loader rather than the plugin own path', async () => {
+  // 插件自己 import 时，Node 以插件真实路径为基点解析，在 link / pnpm 安装下找不到
+  // dsh 自带的 mcp-client（全局 MCP 走 loader 所以一直正常，只有项目 MCP 会挂）。
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const resolved = []
+    fixture.ctx.loader.import = async (name) => {
+      resolved.push(name)
+      return { apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }
+    }
+    install(fixture.ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+
+    assert.deepEqual(resolved, ['@deepseek-ai/dsh-mcp-client'])
+    assert.equal(fixture.mounts.length, 1, '项目 MCP 应通过宿主解析的模块真正挂载')
+    assert.equal(workspaceMountErrorsView(fixture.wsRoot).length, 0)
   } finally {
     await fixture.cleanup()
   }
@@ -188,6 +223,114 @@ test('agent runtime cleanup restores original methods', async () => {
     // 二次清理幂等。
     cleanup()
     assert.equal(fixture.agentsService.create, originalCreate)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+// 复刻 cordis 的 traceable 语义：ctx.get() 每次返回新的 Proxy（createTraceable 无缓存），
+// 且函数属性读出来还会再包一层 shadow method，因此不能靠 ctx.get() 的返回值身份判重。
+function traceableProxy(target) {
+  return new Proxy(target, {
+    get(t, prop, receiver) {
+      if (prop === Symbol.for('cordis.original')) return t
+      const value = Reflect.get(t, prop, receiver)
+      if (typeof value === 'function') return new Proxy(value, { apply: (fn, _thisArg, args) => Reflect.apply(fn, t, args) })
+      return value
+    },
+    set(t, prop, value) { return Reflect.set(t, prop, value) },
+  })
+}
+
+test('repeated install does not stack decorators when ctx.get returns a fresh proxy', async () => {
+  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const ctx = { ...fixture.ctx, get(name) { return name === 'agents' ? traceableProxy(fixture.agentsService) : undefined } }
+    // 面板每 5s 轮询两个 RPC，每个 RPC 都会 ensureAgentRuntime；包装链必须恒为 1 层，
+    // 否则 agents.create 的调用深度会随运行时长无限增长直至爆栈。
+    for (let i = 0; i < 20; i += 1) install(ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+    assert.equal(fixture.mounts.length, 1, '重复安装不得叠加装饰器')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// 只验证插件这一侧的契约：exclude 变更后必须对运行中的会话重算并调用 restrict，
+// 不依赖 tools/change。宿主是否让新增的 restrict 进入当前会话的工具视图是另一回事
+// （实测撤销即时生效、新增要等下个会话），见 setWorkspaceExclude 处的注释。
+test('exclude change recomputes restrict for live agents without a tools/change event', async () => {
+  const { installAgentRuntime: install, McpManagerGateway } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+    assert.deepEqual(fixture.restrictCalls.at(-1).deny, ['mcp__github__a'])
+
+    await McpManagerGateway.prototype.setWorkspaceExclude.call({ ctx: fixture.ctx }, {
+      wsPath: fixture.wsRoot, serverName: 'exa', hidden: true,
+    })
+
+    assert.deepEqual(fixture.restrictCalls.at(-1).deny, ['mcp__exa__b', 'mcp__github__a'], '屏蔽后应立即对运行中的会话生效')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('failed restrict is retried instead of being recorded as applied', async () => {
+  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    // 第一次 restrict 抛错：此时不得把 restrictKey 记为已生效，否则同一 deny 再也不会重试。
+    let attempts = 0
+    fixture.agentCtx.tools.restrict = (filter) => {
+      attempts += 1
+      if (attempts === 1) throw new Error('boom')
+      fixture.restrictCalls.push(filter)
+      return () => {}
+    }
+    install(fixture.ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+    assert.equal(attempts, 1)
+    assert.deepEqual(fixture.restrictCalls, [], '首次调用抛错，不应记录为已应用')
+
+    await fixture.handlers['tools/change']()
+    assert.equal(attempts, 2, '同一 deny 必须重试')
+    assert.deepEqual(fixture.restrictCalls.at(-1).deny, ['mcp__github__a'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('agent runtime install waits for the agents service via ctx.inject', async () => {
+  const { installAgentRuntimeWhenReady } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const injected = []
+    // agents 尚未就绪的 ctx：安装必须被推迟给 ctx.inject，而不是当场失败或反复重试。
+    const pending = { ...fixture.ctx, get: () => undefined, inject: (deps, cb) => { injected.push([deps, cb]) } }
+    installAgentRuntimeWhenReady(pending)
+    assert.equal(injected.length, 1)
+    assert.deepEqual(injected[0][0], ['agents'])
+
+    const originalCreate = fixture.agentsService.create
+    injected[0][1](fixture.ctx)
+    assert.notEqual(fixture.agentsService.create, originalCreate, 'agents 就绪后才装饰')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('workspace RPCs do not install the agent runtime', async () => {
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const originalCreate = fixture.agentsService.create
+    await McpManagerGateway.prototype.listWorkspaces.call({ ctx: fixture.ctx })
+    assert.equal(fixture.agentsService.create, originalCreate, 'RPC 不应承担装配职责')
   } finally {
     await fixture.cleanup()
   }
