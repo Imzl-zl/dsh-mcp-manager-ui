@@ -165,9 +165,9 @@ test('client places an explicit selectable builtin installer before manual add',
   assert.match(client, /\.dsh-mcp-builtin-modal\{[^}]*display:flex[^}]*flex-direction:column/)
   assert.match(client, /\.dsh-mcp-builtin-list\{[^}]*overflow-y:auto/)
   assert.match(client, /checked: allSelected/)
-  const importPosition = client.indexOf("children: '导入 JSON'")
-  const builtinPosition = client.indexOf("children: '内置 MCP'")
-  const addPosition = client.indexOf("children: '添加 MCP'")
+  const importPosition = client.indexOf("children: '导入 JSON")
+  const builtinPosition = client.indexOf("children: '内置 MCP")
+  const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
   assert.ok(importPosition >= 0 && importPosition < builtinPosition && builtinPosition < addPosition)
 })
 

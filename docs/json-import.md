@@ -1,6 +1,6 @@
 # JSON 导入
 
-面板支持常见 MCP 客户端配置，并在写入前提供结构化预览。导入目标始终是当前 Web profile 的 `cordis.patch.yml`。
+面板支持常见 MCP 客户端配置，并在写入前提供结构化预览。导入目标取决于当前标签页：**全局**标签写入当前 Web profile 的 `cordis.patch.yml`，**项目**标签写入该项目目录的 `.dsh/mcp.json`（互不混淆）。
 
 ## 支持的根格式
 

@@ -27,6 +27,11 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 按传输方式（HTTP/stdio）和连接状态筛选，支持按名称/命令/URL 搜索
 - 添加时一键套用常用预设模板（Filesystem、Memory、Sequential Thinking 等）
 - 从“内置 MCP”目录查看 Exa、Tavily、Firecrawl、Chrome DevTools 和 Playwright，勾选后按需追加；已有配置只识别并跳过，不会覆盖
+- **全局 + 项目双作用域**：顶部标签页在「全局」与各项目之间切换；全局 MCP 一次注册所有项目可用，项目级 MCP 写入项目目录 `.dsh/mcp.json` 仅该项目会话可见
+- 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，会话不再看到）
+- 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
+- serverName 全局唯一（含所有项目），冲突在保存时提示被哪个作用域占用
+- 项目 MCP 随会话自动挂载到 agent 作用域（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与重连），无需手动重连；编辑项目配置文件后下一次会话生效
 - 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
@@ -35,6 +40,14 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - JSON 导入支持“合并（同名更新）”和“替换当前 Web profile 管理的 MCP”，写入前提供预览
 - 结构化修改 Web profile 的 `cordis.patch.yml`，保留其他插件条目、注释和 `!!js` 环境变量表达式
 - Host Remote 与 Web 客户端均随插件生命周期加载和卸载
+
+## 已知限制（重要，请阅读）
+
+- **同一项目并发会话**：官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一。同一项目**同时运行多个会话**时，只有先挂载的会话拿到该项目 MCP，其余会话挂载失败；失败会在管理面板对应的项目标签页顶部显示“以下项目 MCP 未能挂载”，不是静默缺失。先关掉占用会话、再开新会话即可恢复。
+- **首轮就绪时序**：项目 MCP 采用异步挂载，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，挂载会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
+- **屏蔽不释放命名**：「屏蔽」全局 MCP 只隐藏其工具，该 serverName 的全局实例仍在运行并占用命名，项目内不能通过同名服务器接管；如需接管请先在全局禁用/移除该服务器。
+- **状态可观测性**：项目 MCP 工具注册在 agent 作用域，管理面板（Host 视图）无法枚举或报告其连接状态；项目行固定显示“随会话挂载”，连接状态请以会话侧为准。
+
 
 ## 兼容性
 
