@@ -73,7 +73,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     }
 
     const packedManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
-    assert.equal(packedManifest.version, '1.1.5')
+    assert.equal(packedManifest.version, '1.1.6')
     for (const name of dshHostPackages) {
       assert.equal(packedManifest.dependencies?.[name], undefined)
       assert.equal(packedManifest.optionalDependencies?.[name], undefined)

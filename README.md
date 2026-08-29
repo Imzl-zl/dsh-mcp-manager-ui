@@ -1,24 +1,28 @@
 # dsh-mcp-manager-ui
 
 <p align="center">
-  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+  <a href="https://linux.do/" title="LINUX DO"><img src="https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.6/docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
 
-DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理当前 Web profile 的 MCP 配置。
+DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理全局 MCP（Web profile）与各项目的项目级 MCP（`.dsh/mcp.json`）。
 
 ## 界面预览
 
-### 管理面板
+### 全局管理面板
 
-![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-overview.png)
+![MCP 管理面板](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.6/docs/images/mcp-manager-overview.png)
+
+### 项目作用域（`.dsh/mcp.json`）
+
+![项目 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.6/docs/images/mcp-manager-workspace.png)
 
 ### 连接详情与操作
 
-![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-detail.jpg)
+![MCP 连接详情](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.6/docs/images/mcp-manager-detail.png)
 
 ### 新增 MCP
 
-![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.5/docs/images/mcp-manager-add.jpg)
+![新增 MCP](https://cdn.jsdelivr.net/gh/Imzl-zl/dsh-mcp-manager-ui@v1.1.6/docs/images/mcp-manager-add.png)
 
 ## 功能
 
@@ -31,19 +35,33 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，新会话不再看到）
 - 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
 - serverName 全局唯一（含所有项目），冲突在保存时提示被哪个作用域占用
-- 项目 MCP 随会话自动挂载到 agent 作用域（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与重连），无需手动重连；编辑项目配置文件后下一次会话生效
+- 项目 MCP 随会话自动挂载到 agent 作用域（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与重连），无需手动重连；会话中修改项目配置不会热更新，下一次会话生效（与主流一致，详见[配置生效时机](#配置生效时机重要)）
 - 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
 - 支持 DSH rc.7+ 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
 - 导入 Claude、Cursor、Cline、Roo 等使用的 `mcpServers` JSON，以及 VS Code 的 `servers` JSON
-- JSON 导入支持“合并（同名更新）”和“替换当前 Web profile 管理的 MCP”，写入前提供预览
+- JSON 导入支持“合并（同名更新）”和“替换”，写入前提供预览
 - 结构化修改 Web profile 的 `cordis.patch.yml`，保留其他插件条目、注释和 `!!js` 环境变量表达式
 - Host Remote 与 Web 客户端均随插件生命周期加载和卸载
+- 非强制更新提示：面板打开时 Host 每天最多向 GitHub Releases 查询一次最新版本，有新版时在面板顶部显示可关闭的提示条；查询失败静默、绝不自动更新，可设环境变量 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭，除该查询外不发送任何数据
+
+## 配置生效时机（重要）
+
+两类作用域的生效机制不同，这是有意设计，与主流 Agent 客户端一致：
+
+| 作用域 | 存储位置 | 修改后何时生效 |
+|---|---|---|
+| 全局 | Web profile 的 `cordis.patch.yml` | DSH 热加载，通常立即生效（含运行中的会话） |
+| 项目 | 项目目录 `.dsh/mcp.json` | **下一次会话**生效；正在运行的会话不受影响 |
+
+项目 MCP 在会话创建/恢复时按当时的 `.dsh/mcp.json` 挂载到该会话，会话进行中不重读配置——会话里改配置不生效是预期行为，Claude Code、Codex 等客户端的项目级 MCP 同样要求新开会话。「屏蔽」全局 MCP 的可见性变更同理，只对之后的会话生效。
+
+改完配置不需要重连或重启：直接新开会话即可。新会话挂载失败（如并发会话占用 serverName）会在面板顶部明确报错，见下方已知限制。
 
 ## 已知限制（重要，请阅读）
 
-- **同一项目并发会话**：官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一。同一项目**同时运行多个会话**时，只有先挂载的会话拿到该项目 MCP，其余会话挂载失败；失败会在管理面板对应的项目标签页顶部显示“以下项目 MCP 未能挂载”，不是静默缺失。先关掉占用会话、再开新会话即可恢复。
+- **同一项目并发会话**：官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一。同一项目**同时运行多个会话**时，只有先挂载的会话拿到该项目 MCP，其余会话挂载失败；失败会在管理面板对应的项目标签页顶部显示“以下项目 MCP 未能挂载”，并附当前运行中的会话数，不是静默缺失。DSH 切换会话不会立刻销毁旧会话的 agent，它们都会被计入“在运行”。先关掉占用会话（或重启 `dsh web`）、再开新会话即可恢复。
 - **首轮就绪时序**：项目 MCP 采用异步挂载，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，挂载会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
 - **屏蔽不释放命名**：「屏蔽」全局 MCP 只隐藏其工具，该 serverName 的全局实例仍在运行并占用命名，项目内不能通过同名服务器接管；如需接管请先在全局禁用/移除该服务器。
 - **状态可观测性**：项目 MCP 工具注册在 agent 作用域，管理面板（Host 视图）无法枚举或报告其连接状态；项目行固定显示“随会话挂载”，连接状态请以会话侧为准。
@@ -79,7 +97,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.5
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.6
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
@@ -168,6 +186,8 @@ dsh web
 - **已连接（connected）**：只有该 server 的工具已注册（`mcp__<server>__*` 数量 > 0）才判定为已连接。插件 fiber 处于 ACTIVE 只说明 mcp-client 在跑，不能证明握手成功——`failOnStartupError: false`（默认）时连接失败也会让 fiber 保持 ACTIVE。
 - **连接失败（failed）**：fiber 活着但没有工具注册，且 mcp-client 最近日志（通过 `ctx.logger.exporter` 订阅并按 `mcp-client(<serverName>)` 过滤）中出现 error/warn。失败原因会展示在详情页，例如 `connection attempt failed: ECONNREFUSED`、`adb forward missing`。
 - 工具数为 0 且没有任何失败日志时如实显示**连接中/等待**，不猜测成功。
+
+以上判定只作用于全局 MCP。项目 MCP 随会话挂载，工具注册在会话（agent）作用域，Host 侧无法枚举其连接状态：面板对项目条目固定显示“随会话挂载”，仅在挂载失败（serverName 冲突等）时展示具体错误。
 
 面板在详情页和编辑表单中默认掩码敏感值（URL 凭据、args、env、headers），点击眼睛图标后经 Host 的 `reveal` 接口读取有效运行值并在会话内临时显示；编辑时若未实际修改输入，保存仍保留原配置引用，不会把环境变量密钥写回 profile。该读取只对当前 Web profile 管理的 server 开放。
 

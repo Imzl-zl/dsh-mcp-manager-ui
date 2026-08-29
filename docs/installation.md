@@ -22,7 +22,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ```sh
 # 推荐：固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.5
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.6
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
@@ -61,6 +61,8 @@ name: dsh-mcp-manager-ui
 dsh plugin --profile web update dsh-mcp-manager-ui
 ```
 
+固定 tag 安装时，`dsh plugin update` 只会重新解析同一个 spec，不会自动跨到新版本——升级需要用新 tag 重新执行 `add`。若想始终跟随最新提交，可以把 spec 固定到 `#main`，之后 `update` 会拉取最新 main；但这可能包含未经充分验证的提交，生产环境不推荐。面板自带非强制的更新提示，有新版时会在面板顶部显示可关闭的提示条，由你决定是否升级。
+
 如果使用 GitHub commit 固定安装，需要用新的 spec 重新执行 `add`。升级后重启 `dsh web`。
 
 ## 卸载
@@ -96,3 +98,7 @@ dsh plugin --profile web add C:\sudy\github\dsh-mcp-manager-ui
 ### 面板能看见但修改后立即恢复
 
 先查看页面上的错误提示，再确认 profile 文件没有被其他进程同时编辑。插件使用内容版本检查，检测到外部修改时会拒绝覆盖。
+
+### 项目 MCP 显示「挂载失败：serverName 已被占用」
+
+项目 MCP 是每个会话各自挂载的，而官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一：同一项目的并发会话里，只有先挂载的那个拿到项目 MCP，其余会话报此错误。面板会在项目标签页顶部提示当前运行中的会话数。关闭占用会话（或重启 `dsh web`）后新开会话即可恢复；会话中修改项目配置同样要新开会话才生效。
