@@ -257,9 +257,8 @@ test('repeated install does not stack decorators when ctx.get returns a fresh pr
   }
 })
 
-// 只验证插件这一侧的契约：exclude 变更后必须对运行中的会话重算并调用 restrict，
-// 不依赖 tools/change。宿主是否让新增的 restrict 进入当前会话的工具视图是另一回事
-// （实测撤销即时生效、新增要等下个会话），见 setWorkspaceExclude 处的注释。
+// exclude 变更后必须对运行中的会话重算并调用 restrict，不依赖 tools/change
+// （改屏蔽不动全局工具集，那个事件不会触发）。两个方向都已在真实宿主验证即时生效。
 test('exclude change recomputes restrict for live agents without a tools/change event', async () => {
   const { installAgentRuntime: install, McpManagerGateway } = await import('../lib/index.js')
   const fixture = await createRuntimeFixture()
@@ -331,6 +330,48 @@ test('workspace RPCs do not install the agent runtime', async () => {
     const originalCreate = fixture.agentsService.create
     await McpManagerGateway.prototype.listWorkspaces.call({ ctx: fixture.ctx })
     assert.equal(fixture.agentsService.create, originalCreate, 'RPC 不应承担装配职责')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('restrict failures become observable instead of dying in a swallowed catch', async () => {
+  const { installAgentRuntime: install, workspaceRestrictErrorView, liveWorkspaceAgentCount } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    fixture.agentCtx.tools.restrict = () => { throw new Error('scope gone') }
+    install(fixture.ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+
+    // 运行中的会话数是用户判断「这次切换能否影响当前会话」的依据，也是诊断入口。
+    assert.equal(liveWorkspaceAgentCount(fixture.wsRoot), 1)
+    const failure = workspaceRestrictErrorView(fixture.wsRoot)
+    assert.match(failure?.error ?? '', /scope gone/)
+    assert.deepEqual(failure.deny, ['mcp__github__a'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('a later successful restrict clears the recorded failure', async () => {
+  const { installAgentRuntime: install, workspaceRestrictErrorView } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    let fail = true
+    fixture.agentCtx.tools.restrict = (filter) => {
+      if (fail) throw new Error('transient')
+      fixture.restrictCalls.push(filter)
+      return () => {}
+    }
+    install(fixture.ctx)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+    assert.ok(workspaceRestrictErrorView(fixture.wsRoot))
+
+    fail = false
+    await fixture.handlers['tools/change']()
+    assert.equal(workspaceRestrictErrorView(fixture.wsRoot), null, '成功后必须清除，避免陈旧告警长期挂在面板上')
   } finally {
     await fixture.cleanup()
   }
