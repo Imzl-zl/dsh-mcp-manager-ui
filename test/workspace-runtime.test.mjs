@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { installAgentRuntime } from '../lib/index.js'
+import { installAgentRuntime } from '../lib/workspace-runtime.js'
 
 async function createRuntimeFixture() {
   const wsRoot = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
@@ -57,7 +57,7 @@ async function createRuntimeFixture() {
 }
 
 test('agent runtime decorator composes create/resume and applies workspace scope', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     install(fixture.ctx)
@@ -82,7 +82,7 @@ test('agent runtime decorator composes create/resume and applies workspace scope
 })
 
 test('agent runtime skips disabled servers and handles missing config', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   const empty = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
   try {
@@ -114,7 +114,7 @@ test('agent runtime skips disabled servers and handles missing config', async ()
 })
 
 test('tools/change reconciles workspace restrict when global tools change', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     install(fixture.ctx)
@@ -138,7 +138,7 @@ test('tools/change reconciles workspace restrict when global tools change', asyn
 })
 
 test('exclude owner disambiguation never denies ambiguous names (double underscore safe)', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     // 全局同时存在 my 与 my__server：mcp__my__server__x 的归属在两者间歧义
@@ -166,7 +166,7 @@ test('exclude owner disambiguation never denies ambiguous names (double undersco
 })
 
 test('mount failures are recorded for observability instead of silently dropped', async () => {
-  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/index.js')
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     await writeFile(join(fixture.wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
@@ -191,7 +191,7 @@ test('mount failures are recorded for observability instead of silently dropped'
 test('workspace MCPs resolve through the host loader rather than the plugin own path', async () => {
   // 插件自己 import 时，Node 以插件真实路径为基点解析，在 link / pnpm 安装下找不到
   // dsh 自带的 mcp-client（全局 MCP 走 loader 所以一直正常，只有项目 MCP 会挂）。
-  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/index.js')
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     const resolved = []
@@ -212,7 +212,7 @@ test('workspace MCPs resolve through the host loader rather than the plugin own 
 })
 
 test('agent runtime cleanup restores original methods', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     const originalCreate = fixture.agentsService.create
@@ -242,7 +242,7 @@ function traceableProxy(target) {
 }
 
 test('repeated install does not stack decorators when ctx.get returns a fresh proxy', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     const ctx = { ...fixture.ctx, get(name) { return name === 'agents' ? traceableProxy(fixture.agentsService) : undefined } }
@@ -260,7 +260,8 @@ test('repeated install does not stack decorators when ctx.get returns a fresh pr
 // exclude 变更后必须对运行中的会话重算并调用 restrict，不依赖 tools/change
 // （改屏蔽不动全局工具集，那个事件不会触发）。两个方向都已在真实宿主验证即时生效。
 test('exclude change recomputes restrict for live agents without a tools/change event', async () => {
-  const { installAgentRuntime: install, McpManagerGateway } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const { McpManagerGateway } = await import('../lib/index.js')
   const fixture = await createRuntimeFixture()
   try {
     install(fixture.ctx)
@@ -279,7 +280,7 @@ test('exclude change recomputes restrict for live agents without a tools/change 
 })
 
 test('failed restrict is retried instead of being recorded as applied', async () => {
-  const { installAgentRuntime: install } = await import('../lib/index.js')
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     // 第一次 restrict 抛错：此时不得把 restrictKey 记为已生效，否则同一 deny 再也不会重试。
@@ -305,7 +306,7 @@ test('failed restrict is retried instead of being recorded as applied', async ()
 })
 
 test('agent runtime install waits for the agents service via ctx.inject', async () => {
-  const { installAgentRuntimeWhenReady } = await import('../lib/index.js')
+  const { installAgentRuntimeWhenReady } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     const injected = []
@@ -336,7 +337,7 @@ test('workspace RPCs do not install the agent runtime', async () => {
 })
 
 test('restrict failures become observable instead of dying in a swallowed catch', async () => {
-  const { installAgentRuntime: install, workspaceRestrictErrorView, liveWorkspaceAgentCount } = await import('../lib/index.js')
+  const { installAgentRuntime: install, workspaceRestrictErrorView, liveWorkspaceAgentCount } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     fixture.agentCtx.tools.restrict = () => { throw new Error('scope gone') }
@@ -355,7 +356,7 @@ test('restrict failures become observable instead of dying in a swallowed catch'
 })
 
 test('a later successful restrict clears the recorded failure', async () => {
-  const { installAgentRuntime: install, workspaceRestrictErrorView } = await import('../lib/index.js')
+  const { installAgentRuntime: install, workspaceRestrictErrorView } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     let fail = true

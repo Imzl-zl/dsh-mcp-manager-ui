@@ -151,6 +151,9 @@ dsh web
 - `package.json`：声明 `dsh.bundle` 和 Web `dsh.client`
 - `cordis.patch.yml`：插入唯一的 Host 插件实例
 - `lib/index.js`：`mcpManager` Host Remote
+- `lib/mcp-registry.js`：loader 中 MCP 条目的枚举与工具归属推断
+- `lib/workspace-runtime.js`：项目配置读写状态与 agent 作用域的项目 MCP 装配
+- `lib/workspace-config.js`：项目级 `.dsh/mcp.json` 的读写与转换
 - `lib/mcp-config.js`：JSON 规范化与 YAML patch 结构化读写
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
