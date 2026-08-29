@@ -28,7 +28,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 添加时一键套用常用预设模板（Filesystem、Memory、Sequential Thinking 等）
 - 从“内置 MCP”目录查看 Exa、Tavily、Firecrawl、Chrome DevTools 和 Playwright，勾选后按需追加；已有配置只识别并跳过，不会覆盖
 - **全局 + 项目双作用域**：顶部标签页在「全局」与各项目之间切换；全局 MCP 一次注册所有项目可用，项目级 MCP 写入项目目录 `.dsh/mcp.json` 仅该项目会话可见
-- 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，会话不再看到）
+- 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，新会话不再看到）
 - 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
 - serverName 全局唯一（含所有项目），冲突在保存时提示被哪个作用域占用
 - 项目 MCP 随会话自动挂载到 agent 作用域（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与重连），无需手动重连；编辑项目配置文件后下一次会话生效

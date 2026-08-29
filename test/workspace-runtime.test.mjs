@@ -257,9 +257,10 @@ test('repeated install does not stack decorators when ctx.get returns a fresh pr
   }
 })
 
-// exclude 变更后必须对运行中的会话重算并调用 restrict，不依赖 tools/change
-// （改屏蔽不动全局工具集，那个事件不会触发）。两个方向都已在真实宿主验证即时生效。
-test('exclude change recomputes restrict for live agents without a tools/change event', async () => {
+// exclude 变更后重算 deny 并写入会话作用域，不依赖 tools/change（改屏蔽不动全局工具集，
+// 那个事件不会触发）。断言的是「重算并调用 restrict」——会话的工具清单在首轮请求时定型，
+// 已开始的对话不受影响。
+test('exclude change recomputes deny and calls restrict without a tools/change event', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const { McpManagerGateway } = await import('../lib/index.js')
   const fixture = await createRuntimeFixture()
@@ -273,7 +274,7 @@ test('exclude change recomputes restrict for live agents without a tools/change 
       wsPath: fixture.wsRoot, serverName: 'exa', hidden: true,
     })
 
-    assert.deepEqual(fixture.restrictCalls.at(-1).deny, ['mcp__exa__b', 'mcp__github__a'], '屏蔽后应立即对运行中的会话生效')
+    assert.deepEqual(fixture.restrictCalls.at(-1).deny, ['mcp__exa__b', 'mcp__github__a'], '写入后应重算 deny 并调用 restrict')
   } finally {
     await fixture.cleanup()
   }
