@@ -79,7 +79,11 @@ async function createRuntimeFixture() {
           return fiber
         },
       }
-      const scope = { key: scopeKey, ctx: scopedCtx, disposed: false, dispose() { this.disposed = true; connectionCount -= 1; scopedTools.delete(scopeKey) } }
+      const scope = {
+        key: scopeKey, ctx: scopedCtx, disposed: false,
+        // 模拟真实 quiesceFiber 的异步 teardown：serverName 在 teardown 完成后才归还。
+        dispose() { this.disposed = true; scopedTools.delete(scopeKey); return new Promise((resolve) => setTimeout(() => { connectionCount -= 1; resolve() }, 5)) },
+      }
       createdScopes.push(scope)
       return scope
     },
@@ -110,6 +114,23 @@ async function createRuntimeFixture() {
     logger: { warn: () => {}, error: () => {}, info: () => {} },
   }
   return { wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, scopedTools, agentOwnTools, createdScopes, get connectionCount() { return connectionCount }, sharedClientCalls, cleanup: () => rm(wsRoot, { recursive: true, force: true }) }
+}
+
+
+// 构造一个会话替身：tools.register 写入该会话的 own 层；effect(fn) 立即执行 fn 并
+// 把返回的 disposer 收集进 effectSink（模拟 agent 作用域的清理 effect）。
+function makeSession(fixture, id, effectSink = null) {
+  const session = {
+    agent: { id, session: { header: { cwd: fixture.wsRoot } } },
+    plugin: () => { throw new Error('会话不应直接挂 mcp-client') },
+    tools: {
+      restrict: () => () => {},
+      register(def) { const own = fixture.agentOwnTools.get(session.agent) ?? new Map(); own.set(def.name, def); fixture.agentOwnTools.set(session.agent, own); return () => own.delete(def.name) },
+    },
+    effect(fn) { if (effectSink) effectSink.push(fn()); return () => {} },
+  }
+  session.agent.ctx = session
+  return session
 }
 
 test('agent runtime decorator composes create/resume and applies workspace scope', async () => {
@@ -569,5 +590,116 @@ test('shared project connection: two sessions call the project MCP concurrently 
     assert.equal(fixture.connectionCount, 1)
   } finally {
     await fixture.cleanup()
+  }
+})
+
+// ── 并发 setup 竞态：check→await→set 未串行化会让两个会话各建一份连接、触发 serverName 冲突 ──
+test('shared project connection: concurrent setup of two sessions builds ONE connection (setup race serialized)', async () => {
+  const { installAgentRuntime: install, workspaceMountErrorsView, readWorkspaceConfigCached } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    // 预填配置缓存：让两个 setup 跳过文件读取、同步进入 acquire。再把 mcp-client 的模块
+    // 加载换成受控 barrier：不 resolve 前两个 acquire 都停在 await 处——否则 fs.stat 时序
+    // 会让第一个 setup 先全链路跑完，第二个变成顺序复用，测不出竞态。
+    install(fixture.ctx)
+    await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
+    const originalImport = fixture.ctx.loader.import
+    const mcpBarrier = []
+    fixture.ctx.loader.import = (name) => name === '@deepseek-ai/dsh-scope' ? originalImport(name) : new Promise((resolve) => mcpBarrier.push(resolve))
+    const A = makeSession(fixture, 'A')
+    const B = makeSession(fixture, 'B')
+    const created = await fixture.agentsService.create({ setup: undefined })
+    const resumed = await fixture.agentsService.resume({ setup: undefined })
+    // dsh 启动恢复多会话的真实形态：并发 setup，不等待第一个完成。
+    const pa = created.setup(A)
+    const pb = resumed.setup(B)
+    // 两个 setup 先经过配置缓存 stat（异步），再停在 mcp-client 模块加载的 barrier 上。
+    // 新实现下只有第一个 acquire 真正发起建连（并发者复用同一 pending cell，不再 import）。
+    const deadline = Date.now() + 2000
+    while (mcpBarrier.length < 1 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1))
+    assert.ok(mcpBarrier.length >= 1, '至少一个 acquire 发起 mcp-client 模块加载，实际 ' + mcpBarrier.length)
+    // 同时放行：两个 acquire 一起续跑——若无串行化，它们会各建一份连接（撞 serverName）。
+    for (const resolve of mcpBarrier) resolve({ apply: () => {}, inject: [], name: 'mcp-client', Config: undefined })
+    await Promise.all([pa, pb])
+    assert.equal(fixture.mounts.length, 1, '并发 setup 必须只挂一份 mcp-client')
+    assert.equal(fixture.connectionCount, 1, '并发 setup 必须只建一条连接')
+    assert.deepEqual(workspaceMountErrorsView(fixture.wsRoot), [], '并发 setup 不得触发 serverName 冲突')
+    assert.deepEqual([...(fixture.agentOwnTools.get(A.agent) ?? new Map()).keys()].sort(), ['mcp__db__x', 'mcp__db__y'])
+    assert.deepEqual([...(fixture.agentOwnTools.get(B.agent) ?? new Map()).keys()].sort(), ['mcp__db__x', 'mcp__db__y'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 释放→重建竞态：teardown 是异步的，立即重开必须等旧连接归还 serverName ──
+test('shared project connection: immediate re-acquire after last release waits for teardown (no async serverName window)', async () => {
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const disposers = []
+    const A = makeSession(fixture, 'A', disposers)
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A)
+    assert.equal(fixture.connectionCount, 1)
+    // 末会话关闭：mock 的 teardown 延迟 5ms（模拟 quiesceFiber），此刻连接尚未销毁。
+    disposers.forEach((fn) => fn?.())
+    assert.equal(fixture.connectionCount, 1, 'teardown 完成前连接仍在释放中')
+    // 立刻重开会话：必须等待旧连接 teardown 完成再新建，不能撞 serverName。
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B)
+    assert.equal(fixture.connectionCount, 1, '释放窗口内重建不得产生第二条连接')
+    assert.deepEqual(workspaceMountErrorsView(fixture.wsRoot), [])
+    assert.deepEqual([...(fixture.agentOwnTools.get(B.agent) ?? new Map()).keys()].sort(), ['mcp__db__x', 'mcp__db__y'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── HMR/卸载：cleanup 必须撤回运行中会话的投射并释放共享连接，否则留下僵尸工具 ──
+test('shared project connection: plugin cleanup retracts projections from live sessions (HMR safety)', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const cleanup = install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A)
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B)
+    assert.equal(fixture.createdScopes.length, 1)
+    assert.equal((fixture.agentOwnTools.get(A.agent) ?? new Map()).size, 2)
+    assert.equal((fixture.agentOwnTools.get(B.agent) ?? new Map()).size, 2)
+    // 模拟插件 HMR 重载：卸载旧实例（installAgentRuntime 返回的 cleanup 即 ctx.effect 的清理体）。
+    cleanup()
+    assert.equal((fixture.agentOwnTools.get(A.agent) ?? new Map()).size, 0, 'HMR 后运行中会话的工具投射必须撤回')
+    assert.equal((fixture.agentOwnTools.get(B.agent) ?? new Map()).size, 0)
+    assert.equal(fixture.createdScopes[0].disposed, true, 'HMR 后共享连接必须释放')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 多 app root：一个 root 的 tools/change 与释放不得影响另一个 root 的投射/连接 ──
+test('shared project connection: separate app roots never interfere', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const f1 = await createRuntimeFixture()
+  const f2 = await createRuntimeFixture()
+  try {
+    install(f1.ctx)
+    install(f2.ctx)
+    const A = makeSession(f1, 'A')
+    const B = makeSession(f2, 'B')
+    await (await f1.agentsService.create({ setup: undefined })).setup(A)
+    await (await f2.agentsService.resume({ setup: undefined })).setup(B)
+    assert.equal(f1.connectionCount, 1)
+    assert.equal(f2.connectionCount, 1, '两个 app root 各自只建一条连接')
+    assert.equal((f2.agentOwnTools.get(B.agent) ?? new Map()).size, 2)
+    // f1 的宿主工具集变化：tools/change 只应重算 f1 的投射，不得误撤 f2 的。
+    f1.handlers['tools/change']()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.equal((f2.agentOwnTools.get(B.agent) ?? new Map()).size, 2, 'f1 的 tools/change 不得撤掉 f2 的投射')
+    assert.equal((f1.agentOwnTools.get(A.agent) ?? new Map()).size, 2)
+  } finally {
+    await f1.cleanup()
+    await f2.cleanup()
   }
 })
