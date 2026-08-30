@@ -32,6 +32,22 @@ test('package declares a caret DSH compatibility window and follows the latest R
   }
 })
 
+test('every host contract this plugin actually depends on is declared as a peer', () => {
+  // 不声明就等于隐式依赖：下面每一项都有硬依赖的契约，它们一变本插件就会静默失效。
+  //   dsh-tools      → tools.schemas(scope)/get(name, scope) 的作用域视图，整个投射模型的地基
+  //   dsh-agent      → agents.create/resume(options) 的单参签名与 traceable set 语义
+  //   dsh-agent-loop → setup(agentCtx) 的 raceAbort 语义（抛弃但不取消）与 agent.ctx = scope.ctx.extend
+  //   dsh-scope      → createScope/quiesceFiber（共享连接的隔离作用域与可 await 的 teardown）
+  //   dsh-mcp-client → serverName 注册表、工具名前缀、日志 label
+  for (const name of ['@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-mcp-client']) {
+    assert.equal(packageJson.peerDependencies?.[name], '^0.1.0-rc.7', name + ' 必须声明为 peer')
+  }
+  // cordis 锁到补丁位：ensureLogCapture 为了绕过 LoggerService.exporter() 删错 ID 的 bug，
+  // 直接读写了 logger.exporters / logger._snExporter 两个私有字段。这是唯一可订阅的诊断面，
+  // 但它不是公开契约，所以不能用 caret 区间。
+  assert.equal(packageJson.peerDependencies?.cordis, '~4.0.1')
+})
+
 test('lockfile resolves DSH host packages only as a development baseline on the latest RC', () => {
   const importer = lockfile.importers['.']
   for (const name of dshHostPackages) {
@@ -122,22 +138,24 @@ test('client avoids full-screen backdrop filters and skips stale or unchanged po
 })
 
 test('list and detail use the same derived status and refresh tools after registration', () => {
-  assert.match(client, /const dotPhase = \(s\) => \(mountError\(s\) \? 'failed' : s\.status \|\| s\.phase\)/)
+  assert.match(client, /const dotPhase = \(s\) => \(mountFailed\(s\) \? 'failed' : s\.status \|\| s\.phase\)/)
   assert.match(client, /selectedServer\?\.toolRevision/)
 })
 
 test('mount failures are attributed to the row and the detail pane, not only a banner', async () => {
   const host = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
   // 顶部横幅说 memory 挂载失败、而列表里 memory 看着一切正常，是最容易误导的状态。
-  assert.match(client, /const mountErrorMap = useMemo\(\(\) => new Map\(\(mountErrors \|\| \[\]\)\.map\(\(m\) => \[m\.serverName, m\.error\]\)\)/)
-  assert.match(client, /mountError\(s\) \? h\(Badge, \{ cls: 's-err' \}, '挂载失败'\) : null/)
+  // 行与详情都只读 Host 标在行上的 mountFailed；客户端不再拿 mountErrors 列表反推一遍（第二真相源）。
+  assert.doesNotMatch(client, /const mountErrorMap = useMemo/)
+  assert.match(client, /const mountFailed = \(s\) => s\.mountFailed === true/)
+  assert.match(client, /mountFailed\(s\) \? h\(Badge, \{ cls: 's-err' \}, '挂载失败'\) : null/)
   // 挂载失败（我们 setup 阶段挂不上）与连接失败（mcp-client 报错/重连耗尽）必须分开：
   // 用“lastError 存在”反推挂载失败会把连接失败误标成挂载失败，也是同一事实的第二个真相源。
-  assert.match(host, /row\.mountFailed = true; row\.lastError = mountError/)
+  assert.match(host, /row\.mountFailed = true;/)
   assert.match(client, /const mountFailed = isWorkspace && server\.mountFailed === true/)
   assert.doesNotMatch(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
   // 列表行标红而详情说「随会话挂载」，是同一条信息在两处自相矛盾。
-  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'waiting'/)
+  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'stopped'/)
   assert.match(client, /mountFailed\s*\n\s*\? '挂载失败'/)
   // 横幅不再猜测原因，具体错误留在它归属的条目上。
   assert.doesNotMatch(client, /可能已被其他会话占用或连接失败/)
@@ -239,12 +257,14 @@ test('server lists keep a minimum visible height and never get clipped to zero o
   assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-global-list\{max-height:30vh\}/)
 })
 
-test('workspace MCPs stay toggleable and report mount semantics instead of a stuck connecting state', () => {
-  // 项目 MCP 的 phase 恒为 waiting，沿用全局的 stopped 判定会让禁用后再也开不回来。
+test('workspace MCPs stay toggleable and share the global status vocabulary', () => {
+  // 项目 MCP 没有 loader 条目的 phase 语义，沿用全局的 stopped 判定会让禁用后再也开不回来。
   assert.match(client, /const toggleLocked = \(s\) => busy \|\| !s\.managed \|\| \(s\.scope !== 'workspace' && !s\.enabled && s\.phase !== 'stopped'\)/)
-  // 共享连接后项目行用真实连接态（connected/connecting/idle），不再恒显“随会话挂载”。
-  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'waiting'/)
+  // 项目行的 status 与全局同一个取值域（deriveMcpPhase），只是文案不同；不再有自创的
+  // connecting/idle/active 那套平行词汇，也不再恒显“随会话挂载”。
+  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'stopped'/)
   assert.match(client, /status === 'connected' \? '已连接（本项目会话共享）'/)
+  assert.doesNotMatch(client, /s\.status === 'connecting'/)
   assert.doesNotMatch(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
   assert.match(client, /cls: isWorkspace \? 'scope-ws' : ''/)
 })
@@ -292,7 +312,28 @@ test('project MCP: what the README promises the panel shows, the panel actually 
   // 详情页空态不能承诺“刷新即可看到工具”：那要求 tools RPC 真能枚举共享作用域层，
   // 而 toolInventory 只认 loader 条目 + 全局视图。要么能枚举，要么别承诺。
   assert.doesNotMatch(client, /刷新即可看到工具/)
-  assert.match(host, /workspaceToolSchemas\(this\.ctx, value\)\.map\(projectToolSchema\)/)
+  assert.match(host, /workspaceToolSchemas\(this\.ctx, value, wsPath\)\.map\(projectToolSchema\)/)
+  // 项目 MCP 的详情必须带 wsPath 去问，否则两个项目同名时会列到另一个项目的工具。
+  assert.match(client, /call\('tools', \{ name: selected, wsPath: scope \}\)/)
+})
+
+test('project MCP: the shared-connection reference is owned by cordis, not by our own bookkeeping', async () => {
+  const runtime = await readFile(new URL('../lib/workspace-runtime.js', import.meta.url), 'utf8')
+  // 一份引用 = 一个会话作用域的 effect。它的原子性使「从检查到记账不得有 await」这类
+  // 只能靠注释约束的临界区消失；作用域已销毁时由 cordis 的 assertActive() 抛出，不自建判定。
+  assert.match(runtime, /slot\.release = agentCtx\.effect\(\(\) => \(\) => disposeProjectSlot\(slot\), `mcp-manager\.projectConn/)
+  // HMR 撤回必须走同一个官方 disposer（幂等由 cordis 的 runner\.epoch 保证），
+  // 而不是另开一条释放路径——后者会让会话后续销毁时变成重复释放。
+  assert.match(runtime, /typeof slot\.release === "function" \? slot\.release\(\) : disposeProjectSlot\(slot\)/)
+  // 「本代装饰器还在管事吗」是插件代次的属性，不能和会话存活性共用同一张表。
+  assert.match(runtime, /if \(!generation\.active\)/)
+  assert.doesNotMatch(runtime, /if \(!agentWorkspaceStates\.has\(agent\)\)/)
+  // 生命周期归属先建立、再改宿主状态；缺少 effect() 直接抛，不静默降级。
+  assert.doesNotMatch(runtime, /ctx\.effect\?\.\(/)
+  assert.match(runtime, /无法为 agent 装饰器建立生命周期归属/)
+  // 并发等待者不能拿到一份正在 teardown 的连接（refs 从 0 再加回去）。
+  assert.match(runtime, /entry\.released = true/)
+  assert.match(runtime, /if \(entry\.released\) continue/)
 })
 
 test('project MCP: the README states the protocol claim per spec revision and names no false escape hatch', () => {
@@ -306,4 +347,34 @@ test('project MCP: the README states the protocol claim per spec revision and na
   assert.match(readme, /把它挪到全局作用域也没用/)
   // #28860 属于 anthropics/claude-code，不是 DSH 的提案。
   assert.doesNotMatch(readme, /DSH 的 shared-daemon 提案/)
+})
+
+test('project MCP: the tools contract carries wsPath, so the detail pane is not permanently empty', async () => {
+  const { TYPERT } = await import('../lib/typert.js')
+  const invocation = TYPERT.invocations.find((entry) => entry.method === 'tools')
+  // 声明成标量 name 时，typert 网关会把 `{ name, wsPath }` 当作 args 映射展开并拒绝：
+  // `args fields do not match the descriptor: unexpected "wsPath"`。
+  // 于是项目 MCP 的详情页永远是空的——Host 侧早就能按 scopeKey 枚举，错只在契约窄了一格。
+  assert.equal(invocation.parameters.length, 1)
+  assert.equal(invocation.parameters[0].wire, 'payload')
+  const clientDescriptor = client.match(/mcpManager\/tools'[^\n]*/)?.[0] ?? ''
+  assert.match(clientDescriptor, /mcpParam\('payload'/)
+  // 两条分支都必须发对象；裸字符串会落回标量参数那条老路。
+  assert.match(client, /call\('tools', \{ name: selected, wsPath: scope \}\)/)
+  assert.match(client, /call\('tools', \{ name: selected \}\)/)
+  assert.doesNotMatch(client, /call\('tools', selected\)/)
+})
+
+test('project MCP: the read-only diagnostics RPC is declared, implemented and documented', async () => {
+  const { TYPERT } = await import('../lib/typert.js')
+  const host = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  assert.ok(TYPERT.invocations.some((entry) => entry.method === 'projectConnections'))
+  // Host 有、契约没有 = 客户端永远调不到；契约有、Host 没有 = 调用必失败。两边都要在。
+  assert.match(host, /async projectConnections\(\) \{/)
+  assert.match(host, /projectConnectionsView\(this\.ctx\)/)
+  assert.match(client, /mcpManager\/projectConnections/)
+  // refs 与 sessions 是两个独立事实（相等=健康），README 必须把这条判读方式写清楚，
+  // 否则这个接口的返回值没人知道怎么用。
+  assert.match(readme, /projectConnections/)
+  assert.match(readme, /refs\s*>\s*sessions/)
 })

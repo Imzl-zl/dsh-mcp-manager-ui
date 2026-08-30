@@ -481,7 +481,7 @@ test('overlapping server-name prefixes are reported as ambiguous instead of misa
       assert.equal(server.toolCountAmbiguous, true)
       assert.equal(server.status, 'unknown')
     }
-    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, 'foo')
+    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, { name: 'foo' })
     assert.deepEqual(tools.tools, [])
     assert.equal(tools.ambiguous, true)
   } finally {
@@ -555,7 +555,7 @@ test('tool revision changes when only the parameter schema changes', async () =>
     const before = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
     parameters = { type: 'object', properties: { after: { type: 'number' } } }
     const after = await McpManagerGateway.prototype.list.call({ ctx: fixture.ctx })
-    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, 'demo')
+    const tools = await McpManagerGateway.prototype.tools.call({ ctx: fixture.ctx }, { name: 'demo' })
 
     assert.deepEqual(tools.tools[0].parameters, parameters)
     assert.notEqual(after.servers[0].toolRevision, before.servers[0].toolRevision)
