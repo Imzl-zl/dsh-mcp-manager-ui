@@ -139,7 +139,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.6
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.7
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
