@@ -126,13 +126,17 @@ test('list and detail use the same derived status and refresh tools after regist
   assert.match(client, /selectedServer\?\.toolRevision/)
 })
 
-test('mount failures are attributed to the row and the detail pane, not only a banner', () => {
+test('mount failures are attributed to the row and the detail pane, not only a banner', async () => {
+  const host = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
   // 顶部横幅说 memory 挂载失败、而列表里 memory 看着一切正常，是最容易误导的状态。
   assert.match(client, /const mountErrorMap = useMemo\(\(\) => new Map\(\(mountErrors \|\| \[\]\)\.map\(\(m\) => \[m\.serverName, m\.error\]\)\)/)
   assert.match(client, /mountError\(s\) \? h\(Badge, \{ cls: 's-err' \}, '挂载失败'\) : null/)
-  assert.match(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
+  // 挂载失败（我们 setup 阶段挂不上）与连接失败（mcp-client 报错/重连耗尽）必须分开：
+  // 用“lastError 存在”反推挂载失败会把连接失败误标成挂载失败，也是同一事实的第二个真相源。
+  assert.match(host, /row\.mountFailed = true; row\.lastError = mountError/)
+  assert.match(client, /const mountFailed = isWorkspace && server\.mountFailed === true/)
+  assert.doesNotMatch(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
   // 列表行标红而详情说「随会话挂载」，是同一条信息在两处自相矛盾。
-  assert.match(client, /const mountFailed = isWorkspace && !!server\.lastError/)
   assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'waiting'/)
   assert.match(client, /mountFailed\s*\n\s*\? '挂载失败'/)
   // 横幅不再猜测原因，具体错误留在它归属的条目上。
@@ -275,4 +279,31 @@ test('global list collapses to a one-line summary so the project list stays the 
   assert.match(client, /globalOpen \? h\(GlobalServerList/)
   assert.match(client, /\.dsh-mcp-section\.global\.collapsed\{flex:none;min-height:0;border-color:transparent/)
   assert.match(client, /setGlobalOpen\(false\);/)
+})
+
+test('project MCP: what the README promises the panel shows, the panel actually shows', async () => {
+  const host = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
+  // README 承诺「面板会在该项目行标出 `配置待生效`，详情页给出说明」——必须真的存在，
+  // 而不是只写进一条用户看不到的 logger.warn。
+  assert.match(readme, /面板会在该项目行标出 `配置待生效`/)
+  assert.match(host, /row\.configStale = conn\.configStale/)
+  assert.match(client, /s\.configStale \? h\(Badge, null, '配置待生效'\) : null/)
+  assert.match(client, /isWorkspace && server\.configStale \? h\('div', \{ className: 'dsh-mcp-log warn' \}/)
+  // 详情页空态不能承诺“刷新即可看到工具”：那要求 tools RPC 真能枚举共享作用域层，
+  // 而 toolInventory 只认 loader 条目 + 全局视图。要么能枚举，要么别承诺。
+  assert.doesNotMatch(client, /刷新即可看到工具/)
+  assert.match(host, /workspaceToolSchemas\(this\.ctx, value\)\.map\(projectToolSchema\)/)
+})
+
+test('project MCP: the README states the protocol claim per spec revision and names no false escape hatch', () => {
+  // 随包 SDK 协商的是 2025-11-25（没有 Statelessness 一节），无状态那套要求来自 2026-07-28。
+  // 不写清版本，等于把“按 2025-11-25 维护连接级状态”的服务器说成有缺陷。
+  assert.match(readme, /2026-07-28[^]*?Statelessness/)
+  assert.match(readme, /2025-11-25[^]*?没有\*\*\s?Statelessness/)
+  assert.doesNotMatch(readme, /那是服务器自身的缺陷/)
+  // 「放到全局作用域」「项目内另起 serverName」都给不了 per-session 隔离，不能当建议给出。
+  assert.match(readme, /不支持 per-session 隔离/)
+  assert.match(readme, /把它挪到全局作用域也没用/)
+  // #28860 属于 anthropics/claude-code，不是 DSH 的提案。
+  assert.doesNotMatch(readme, /DSH 的 shared-daemon 提案/)
 })

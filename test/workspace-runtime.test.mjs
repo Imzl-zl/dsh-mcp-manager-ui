@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { installAgentRuntime } from '../lib/workspace-runtime.js'
 
-async function createRuntimeFixture() {
+async function createRuntimeFixture({ deferTools = false } = {}) {
   const wsRoot = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
   await mkdir(join(wsRoot, '.dsh'), { recursive: true })
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
@@ -18,6 +18,7 @@ async function createRuntimeFixture() {
   const mounts = []
   const effects = []
   const handlers = {}
+  const warns = []
   // 模拟宿主 ToolRuntime 的“按作用域”工具表：scopeKey -> [{name, ...}]。
   // 共享连接把工具注册进它的作用域层，会话侧按 scopeKey 读取并投射进 own 层。
   const scopedTools = new Map() // scopeKey -> Map<name, def>
@@ -52,6 +53,27 @@ async function createRuntimeFixture() {
   const createdScopes = []
   let connectionCount = 0            // 建立了几条底层连接（共享的关键指标）
   const sharedClientCalls = []       // 底层连接收到的调用（含 session 标记），验证多路复用不串
+  const publishTargets = new Map()   // scopeKey -> serverName（用于 deferTools 时延后注册）
+  const logExporters = []            // ensureLogCapture 挂上来的 exporter（模拟 cordis LoggerService）
+  // 模拟 mcp-client 连接就绪后注册 mcp__<server>__*。真实实现要等 connect + tools/list，
+  // 所以 deferTools 模式下 setup 当场看到的是空集，必须靠 tools/change 补投射。
+  const publish = (scopeKey, srv) => {
+    let table = scopedTools.get(scopeKey)
+    if (!table) { table = new Map(); scopedTools.set(scopeKey, table) }
+    const mkDef = (raw) => ({
+      name: `mcp__${srv}__${raw}`,
+      output: { schema: {}, render: () => [] },
+      // 代理执行 = 转发到这条共享连接；按 JSON-RPC 语义各调用独立异步返回。
+      execute: async (args) => {
+        const id = sharedClientCalls.length
+        sharedClientCalls.push({ id, tool: `${srv}.${raw}`, args })
+        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 8)))
+        return { content: [{ type: 'text', text: `${raw}:${args?.echo ?? ''}` }] }
+      },
+    })
+    table.set(`mcp__${srv}__x`, mkDef('x'))
+    table.set(`mcp__${srv}__y`, mkDef('y'))
+  }
   const scopeModule = {
     createScope(_ctx, scopeKey) {
       scopedTools.set(scopeKey, new Map())
@@ -59,21 +81,8 @@ async function createRuntimeFixture() {
         plugin(plugin, config) {
           mounts.push([plugin, config])
           connectionCount += 1                       // 每 (ws,server) 只应 +1
-          const table = scopedTools.get(scopeKey)
-          const srv = config.serverName
-          const mkDef = (raw) => ({
-            name: `mcp__${srv}__${raw}`,
-            output: { schema: {}, render: () => [] },
-            // 代理执行 = 转发到这条共享连接；按 JSON-RPC 语义各调用独立异步返回。
-            execute: async (args) => {
-              const id = sharedClientCalls.length
-              sharedClientCalls.push({ id, tool: `${srv}.${raw}`, args })
-              await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 8)))
-              return { content: [{ type: 'text', text: `${raw}:${args?.echo ?? ''}` }] }
-            },
-          })
-          table.set(`mcp__${srv}__x`, mkDef('x'))
-          table.set(`mcp__${srv}__y`, mkDef('y'))
+          publishTargets.set(scopeKey, config.serverName)
+          if (!deferTools) publish(scopeKey, config.serverName)
           const fiber = Promise.resolve()
           fiber.catch = () => fiber
           return fiber
@@ -111,9 +120,31 @@ async function createRuntimeFixture() {
     get(name) { if (name === 'agents') return agentsService; if (name === 'tools') return ctx.tools; return undefined; },
     on(event, handler) { handlers[event] = handler; return () => {}; },
     effect(fn) { effects.push(fn); return () => {}; },
-    logger: { warn: () => {}, error: () => {}, info: () => {} },
+    logger: {
+      warn: (message) => warns.push(message), error: () => {}, info: () => {},
+      // mcp-client 不暴露连接事件，面板靠 ctx.logger.exporter 订阅它的日志判定连接失败。
+      buffer: [],
+      exporter: (exp) => { logExporters.push(exp); return () => { const at = logExporters.indexOf(exp); if (at >= 0) logExporters.splice(at, 1) } },
+    },
   }
-  return { wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, scopedTools, agentOwnTools, createdScopes, get connectionCount() { return connectionCount }, sharedClientCalls, cleanup: () => rm(wsRoot, { recursive: true, force: true }) }
+  return {
+    wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, warns, scopedTools, agentOwnTools, createdScopes,
+    get connectionCount() { return connectionCount },
+    sharedClientCalls,
+    // 让连接“就绪”：注册工具并广播 tools/change，等价于真实 mcp-client connect + tools/list 完成。
+    publishTools(scope) {
+      publish(scope.key, publishTargets.get(scope.key))
+      return handlers['tools/change']?.()
+    },
+    ownToolNames(session) { return [...(agentOwnTools.get(session.agent) ?? new Map()).keys()].sort() },
+    // 模拟 mcp-client 写一条日志（scope 名与正文都带 mcp-client(<serverName>)，与官方 label 一致）。
+    emitMcpLog(type, text) {
+      const record = { type, name: 'mcp-client', args: [text], ts: Date.now() }
+      for (const exp of [...logExporters]) exp.export(record)
+      return record
+    },
+    cleanup: () => rm(wsRoot, { recursive: true, force: true }),
+  }
 }
 
 
@@ -701,5 +732,173 @@ test('shared project connection: separate app roots never interfere', async () =
   } finally {
     await f1.cleanup()
     await f2.cleanup()
+  }
+})
+
+// ── 会话在建连期间被销毁：dsh-agent-loop 的 setupAndPublish 用 raceAbort 抛弃 setup 但不取消它，
+//    所以「建连返回」之后必须先确认会话记录仍在再记账，否则这份连接（真实环境里是一个 MCP
+//    子进程）永远没人归还。 ──
+test('shared project connection: a session disposed mid-connect returns its reference (no leaked connection)', async () => {
+  const { installAgentRuntime: install, readWorkspaceConfigCached, workspaceConnectionStatus } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
+    const originalImport = fixture.ctx.loader.import
+    let releaseImport
+    fixture.ctx.loader.import = (name) => (name === '@deepseek-ai/dsh-scope'
+      ? originalImport(name)
+      : new Promise((resolve) => { releaseImport = () => resolve({ apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }) }))
+    const disposers = []
+    const A = makeSession(fixture, 'A', disposers)
+    const pending = (await fixture.agentsService.create({ setup: undefined })).setup(A)
+    const deadline = Date.now() + 2000
+    while (!releaseImport && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1))
+    assert.ok(releaseImport, 'setup 必须已停在共享连接的模块加载上')
+    // 会话此刻销毁（宿主已经在跑 prepared.dispose()），被抛弃的 setup 稍后才续跑。
+    await disposers[0]?.()
+    releaseImport()
+    await pending
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    assert.equal(fixture.connectionCount, 0, '会话已销毁，setup 续跑时建出的连接必须当场归还')
+    assert.deepEqual(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' }), { mounted: false, toolCount: 0, refs: 0, configStale: false })
+    assert.equal(fixture.ownToolNames(A).length, 0, '已销毁的会话不应留下工具投射')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 生产主路径：真实 mcp-client 在 setup 当场还没注册任何工具（apply 在 cordis 的微任务里跑，
+//    工具要等 connect + tools/list），投射完全依赖后续的 tools/change。 ──
+test('shared project connection: tools registered after connect reach every live session via tools/change', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture({ deferTools: true })
+  try {
+    install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A)
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B)
+    assert.equal(fixture.connectionCount, 1)
+    assert.deepEqual(fixture.ownToolNames(A), [], 'setup 当场共享连接尚未注册工具')
+    assert.deepEqual(fixture.ownToolNames(B), [])
+    // 连接就绪 → mcp-client 注册工具 → tools/change。
+    await fixture.publishTools(fixture.createdScopes[0])
+    assert.deepEqual(fixture.ownToolNames(A), ['mcp__db__x', 'mcp__db__y'], '就绪后必须补投射进每个存活会话')
+    assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 会话销毁 / 插件卸载都必须能被宿主 await 到连接真正关闭，否则关停会早于 MCP 子进程退出 ──
+test('shared project connection: teardown is awaitable by the host (session dispose and plugin unload)', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const bySession = await createRuntimeFixture()
+  try {
+    install(bySession.ctx)
+    const disposers = []
+    await (await bySession.agentsService.create({ setup: undefined })).setup(makeSession(bySession, 'A', disposers))
+    assert.equal(bySession.connectionCount, 1)
+    await disposers[0]()
+    assert.equal(bySession.connectionCount, 0, '会话作用域的 disposer 必须返回 teardown promise')
+  } finally {
+    await bySession.cleanup()
+  }
+  const byUnload = await createRuntimeFixture()
+  try {
+    const cleanup = install(byUnload.ctx)
+    await (await byUnload.agentsService.create({ setup: undefined })).setup(makeSession(byUnload, 'A'))
+    assert.equal(byUnload.connectionCount, 1)
+    await cleanup()
+    assert.equal(byUnload.connectionCount, 0, '插件卸载的 cleanup 必须返回 teardown promise')
+  } finally {
+    await byUnload.cleanup()
+  }
+})
+
+// ── 配置粘性：运行中连接沿用首会话配置，如实告知（configStale），全部会话结束后才换新配置 ──
+test('shared project connection: config changes are reported as stale, then applied once all sessions end', async () => {
+  const { installAgentRuntime: install, workspaceConnectionStatus, readWorkspaceConfigCached } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const disposers = []
+    await (await fixture.agentsService.create({ setup: undefined })).setup(makeSession(fixture, 'A', disposers))
+    assert.equal(fixture.mounts.at(-1)[1].command, 'psql')
+    // 用户改了 .dsh/mcp.json（长度不同，必然绕过 mtime+size 短路）。
+    await writeFile(join(fixture.wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+      mcpServers: { db: { command: 'psql-next-generation', env: { KEY: '${KEY}' } } },
+      exclude: ['github'],
+    }, null, 2))
+    const changed = await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
+    const stale = workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, changed.servers[0])
+    assert.equal(stale.configStale, true, '面板必须能看到「配置已变化但仍在复用旧连接」')
+    assert.equal(stale.refs, 1)
+    // 旧会话还在时新开会话：复用旧连接 + 明确告知，不静默、也不在运行中替换连接。
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(makeSession(fixture, 'B'))
+    assert.equal(fixture.connectionCount, 1, '旧会话在跑时不得另建连接')
+    assert.equal(fixture.mounts.length, 1)
+    assert.ok(fixture.warns.some((line) => line.includes('配置已变化')), '复用旧配置必须留下日志，' + JSON.stringify(fixture.warns))
+    assert.equal(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, changed.servers[0]).refs, 2)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 面板必须能枚举项目 MCP 的工具：它们注册在共享作用域层里，toolInventory 走的全局视图看不到 ──
+test('shared project connection: the panel can enumerate project MCP tools (scope layer, not global view)', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const { McpManagerGateway } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const gateway = { ctx: fixture.ctx }
+    assert.deepEqual((await McpManagerGateway.prototype.tools.call(gateway, 'db')).tools, [], '尚无会话持有连接时应为空')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(makeSession(fixture, 'A'))
+    const listed = await McpManagerGateway.prototype.tools.call(gateway, 'db')
+    assert.deepEqual(listed.tools.map((t) => t.name).sort(), ['mcp__db__x', 'mcp__db__y'])
+    assert.equal(listed.ambiguous, false)
+    // 全局 MCP 仍走原来的 toolInventory 通路。
+    assert.deepEqual((await McpManagerGateway.prototype.tools.call(gateway, 'github')).tools.map((t) => t.name), ['mcp__github__a'])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── mcp-client 不暴露连接事件，重连耗尽后只会注销工具 + 写日志。项目 MCP 必须和全局走同一条
+//    日志判定，否则会恒显「连接中」，把终态失败伪装成还在努力。 ──
+test('shared project connection: a connection that gave up reconnecting reads as failed, not a permanent connecting', async () => {
+  const { installAgentRuntime: install, readWorkspaceConfigCached } = await import('../lib/workspace-runtime.js')
+  const { summarizeWorkspaceRow } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture({ deferTools: true })
+  try {
+    install(fixture.ctx)
+    await (await fixture.agentsService.create({ setup: undefined })).setup(makeSession(fixture, 'A'))
+    const server = (await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)).servers[0]
+    // 连接已建、尚未注册工具，也没有失败证据：如实显示连接中，不猜成功也不猜失败。
+    assert.equal(summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, server, undefined).status, 'connecting')
+    fixture.emitMcpLog('error', 'mcp-client(db): giving up after 10 consecutive failed reconnect attempts — tools unregistered')
+    const row = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, server, undefined)
+    assert.equal(row.status, 'failed', '有 error 日志且零工具时必须判失败')
+    assert.match(row.lastError, /giving up/)
+    assert.notEqual(row.mountFailed, true, '这是连接失败，不是挂载失败')
+    // 挂载失败是另一条通路：标记与文案都不同，面板不会把两者混成一句。
+    const mountFailedRow = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, server, 'serverName "db" is already in use')
+    assert.equal(mountFailedRow.mountFailed, true)
+    assert.match(mountFailedRow.lastError, /already in use/)
+    // info 级日志（如 tool list changed）不构成失败证据。
+    const quiet = await createRuntimeFixture({ deferTools: true })
+    try {
+      install(quiet.ctx)
+      await (await quiet.agentsService.create({ setup: undefined })).setup(makeSession(quiet, 'A'))
+      quiet.emitMcpLog('info', 'mcp-client(db): tool list changed, re-syncing')
+      const quietServer = (await readWorkspaceConfigCached(quiet.ctx, quiet.wsRoot)).servers[0]
+      assert.equal(summarizeWorkspaceRow(quiet.ctx, quiet.wsRoot, quietServer, undefined).status, 'connecting')
+    } finally {
+      await quiet.cleanup()
+    }
+  } finally {
+    await fixture.cleanup()
   }
 })
