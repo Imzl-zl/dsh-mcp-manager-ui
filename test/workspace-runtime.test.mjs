@@ -18,9 +18,14 @@ async function createRuntimeFixture() {
   const mounts = []
   const effects = []
   const handlers = {}
+  // 模拟宿主 ToolRuntime 的“按作用域”工具表：scopeKey -> [{name, ...}]。
+  // 共享连接把工具注册进它的作用域层，会话侧按 scopeKey 读取并投射进 own 层。
+  const scopedTools = new Map() // scopeKey -> Map<name, def>
+  const agentOwnTools = new Map() // agent -> Map<name, def>
   const agentCtx = {
     agent: { id: 'a1', session: { header: { cwd: wsRoot } } },
     plugin(plugin, config) {
+      // 会话不再直接挂 mcp-client；保留以便断言“没有走旧的每会话挂载路径”。
       mounts.push([plugin, config])
       const fiber = Promise.resolve()
       fiber.catch = () => fiber
@@ -28,12 +33,56 @@ async function createRuntimeFixture() {
     },
     tools: {
       restrict(filter) { restrictCalls.push(filter); return () => {}; },
+      register(def) {
+        let own = agentOwnTools.get(agentCtx.agent)
+        if (!own) { own = new Map(); agentOwnTools.set(agentCtx.agent, own) }
+        own.set(def.name, def)
+        return () => { own.delete(def.name) }
+      },
     },
+    effect(fn) { effects.push(fn); return () => {}; },
   }
   agentCtx.agent.ctx = agentCtx
   const agentsService = {
     create(options) { return { setup: options.setup }; },
     resume(options) { return { setup: options.setup }; },
+  }
+  // 共享连接的 createScope 替身：建一个 scopeKey 的工具表，plugin() 时按 config.serverName
+  // 注册两个工具（模拟 mcp-client 连接就绪后注册 mcp__<server>__*）。
+  const createdScopes = []
+  let connectionCount = 0            // 建立了几条底层连接（共享的关键指标）
+  const sharedClientCalls = []       // 底层连接收到的调用（含 session 标记），验证多路复用不串
+  const scopeModule = {
+    createScope(_ctx, scopeKey) {
+      scopedTools.set(scopeKey, new Map())
+      const scopedCtx = {
+        plugin(plugin, config) {
+          mounts.push([plugin, config])
+          connectionCount += 1                       // 每 (ws,server) 只应 +1
+          const table = scopedTools.get(scopeKey)
+          const srv = config.serverName
+          const mkDef = (raw) => ({
+            name: `mcp__${srv}__${raw}`,
+            output: { schema: {}, render: () => [] },
+            // 代理执行 = 转发到这条共享连接；按 JSON-RPC 语义各调用独立异步返回。
+            execute: async (args) => {
+              const id = sharedClientCalls.length
+              sharedClientCalls.push({ id, tool: `${srv}.${raw}`, args })
+              await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 8)))
+              return { content: [{ type: 'text', text: `${raw}:${args?.echo ?? ''}` }] }
+            },
+          })
+          table.set(`mcp__${srv}__x`, mkDef('x'))
+          table.set(`mcp__${srv}__y`, mkDef('y'))
+          const fiber = Promise.resolve()
+          fiber.catch = () => fiber
+          return fiber
+        },
+      }
+      const scope = { key: scopeKey, ctx: scopedCtx, disposed: false, dispose() { this.disposed = true; connectionCount -= 1; scopedTools.delete(scopeKey) } }
+      createdScopes.push(scope)
+      return scope
+    },
   }
   const ctx = {
     loader: {
@@ -41,19 +90,26 @@ async function createRuntimeFixture() {
         { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'github' } } },
         { options: { name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'exa' } } },
       ],
-      // 宿主按 profile 基点解析插件模块；这里给一个可挂载的替身，让成功路径真正被覆盖。
       import: async (name) => {
+        if (name === '@deepseek-ai/dsh-scope') return scopeModule
         assert.equal(name, '@deepseek-ai/dsh-mcp-client')
         return { apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }
       },
     },
-    tools: { schemas: () => [{ name: 'mcp__github__a' }, { name: 'mcp__exa__b' }] },
-    get(name) { if (name === 'agents') return agentsService; return undefined; },
+    // 全局工具（用于 exclude/restrict 展开）在无 scope 时返回；带 scopeKey 时返回该共享连接注册的工具。
+    tools: {
+      schemas: (scope) => {
+        if (scope !== undefined && scopedTools.has(scope)) return [...scopedTools.get(scope).values()].map((d) => ({ name: d.name }))
+        return [{ name: 'mcp__github__a' }, { name: 'mcp__exa__b' }]
+      },
+      get: (name, scope) => (scope !== undefined ? scopedTools.get(scope)?.get(name) : undefined),
+    },
+    get(name) { if (name === 'agents') return agentsService; if (name === 'tools') return ctx.tools; return undefined; },
     on(event, handler) { handlers[event] = handler; return () => {}; },
     effect(fn) { effects.push(fn); return () => {}; },
     logger: { warn: () => {}, error: () => {}, info: () => {} },
   }
-  return { wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, cleanup: () => rm(wsRoot, { recursive: true, force: true }) }
+  return { wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, scopedTools, agentOwnTools, createdScopes, get connectionCount() { return connectionCount }, sharedClientCalls, cleanup: () => rm(wsRoot, { recursive: true, force: true }) }
 }
 
 test('agent runtime decorator composes create/resume and applies workspace scope', async () => {
@@ -195,15 +251,23 @@ test('workspace MCPs resolve through the host loader rather than the plugin own 
   const fixture = await createRuntimeFixture()
   try {
     const resolved = []
+    const scopeMod = {
+      createScope(_ctx, scopeKey) {
+        const scopedCtx = { plugin: (plugin, config) => { fixture.mounts.push([plugin, config]); const f = Promise.resolve(); f.catch = () => f; return f } }
+        return { ctx: scopedCtx, dispose() {} }
+      },
+    }
     fixture.ctx.loader.import = async (name) => {
       resolved.push(name)
+      if (name === '@deepseek-ai/dsh-scope') return scopeMod
       return { apply: () => {}, inject: [], name: 'mcp-client', Config: undefined }
     }
     install(fixture.ctx)
     const created = await fixture.agentsService.create({ setup: undefined })
     await created.setup(fixture.agentCtx)
 
-    assert.deepEqual(resolved, ['@deepseek-ai/dsh-mcp-client'])
+    // 共享连接需要两个宿主模块：dsh-scope（造隔离作用域）与 mcp-client（真正连接）。
+    assert.deepEqual([...resolved].sort(), ['@deepseek-ai/dsh-mcp-client', '@deepseek-ai/dsh-scope'])
     assert.equal(fixture.mounts.length, 1, '项目 MCP 应通过宿主解析的模块真正挂载')
     assert.equal(workspaceMountErrorsView(fixture.wsRoot).length, 0)
   } finally {
@@ -374,6 +438,135 @@ test('a later successful restrict clears the recorded failure', async () => {
     fail = false
     await fixture.handlers['tools/change']()
     assert.equal(workspaceRestrictErrorView(fixture.wsRoot), null, '成功后必须清除，避免陈旧告警长期挂在面板上')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 共享连接：同项目多会话不再撞 serverName，且各会话都拿到工具 ──
+test('shared project connection: two sessions of one project reuse ONE mcp-client instance', async () => {
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    // 同一项目的第二个会话：旧实现会在这里撞 serverName，新实现应复用同一份连接。
+    const sessionB = {
+      agent: { id: 'a2', session: { header: { cwd: fixture.wsRoot } } },
+      plugin: () => { throw new Error('会话不应直接挂 mcp-client') },
+      tools: {
+        restrict: () => () => {},
+        register(def) { const own = fixture.agentOwnTools.get(sessionB.agent) ?? new Map(); own.set(def.name, def); fixture.agentOwnTools.set(sessionB.agent, own); return () => own.delete(def.name) },
+      },
+      effect(fn) { fixture.effects.push(fn); return () => {} },
+    }
+    sessionB.agent.ctx = sessionB
+
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(fixture.agentCtx)
+    const resumed = await fixture.agentsService.resume({ setup: undefined })
+    await resumed.setup(sessionB)
+
+    // ① 全进程只挂了一份 mcp-client（serverName 只登记一次）
+    assert.equal(fixture.mounts.length, 1, '两个会话必须共用一份 mcp-client 实例')
+    assert.equal(fixture.mounts[0][1].serverName, 'db')
+    // ② 两个会话各自 own 层都拿到了该 server 的工具
+    const toolsA = [...(fixture.agentOwnTools.get(fixture.agentCtx.agent) ?? new Map()).keys()].sort()
+    const toolsB = [...(fixture.agentOwnTools.get(sessionB.agent) ?? new Map()).keys()].sort()
+    assert.deepEqual(toolsA, ['mcp__db__x', 'mcp__db__y'])
+    assert.deepEqual(toolsB, ['mcp__db__x', 'mcp__db__y'])
+    // ③ 没有任何挂载错误（旧实现此处是 "serverName already in use"）
+    assert.deepEqual(workspaceMountErrorsView(fixture.wsRoot), [])
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('shared project connection: releasing one session keeps the other working, last one disposes', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const disposersA = []
+    const disposersB = []
+    const mkSession = (id, sink) => {
+      const s = {
+        agent: { id, session: { header: { cwd: fixture.wsRoot } } },
+        plugin: () => { throw new Error('nope') },
+        tools: { restrict: () => () => {}, register: (def) => { const own = fixture.agentOwnTools.get(s.agent) ?? new Map(); own.set(def.name, def); fixture.agentOwnTools.set(s.agent, own); return () => own.delete(def.name) } },
+        effect(fn) { sink.push(fn()); return () => {} },
+      }
+      s.agent.ctx = s
+      return s
+    }
+    const A = mkSession('A', disposersA)
+    const B = mkSession('B', disposersB)
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(A)
+    const resumed = await fixture.agentsService.resume({ setup: undefined })
+    await resumed.setup(B)
+
+    assert.equal(fixture.createdScopes.length, 1)
+    assert.equal(fixture.createdScopes[0].disposed, false)
+
+    // 关掉会话 A（触发 agent scope 的清理 effect）：连接仍在，B 的工具不受影响。
+    disposersA.forEach((fn) => fn?.())
+    assert.equal(fixture.createdScopes[0].disposed, false, '还有会话在用，连接不得断开')
+    assert.deepEqual([...(fixture.agentOwnTools.get(B.agent) ?? new Map()).keys()].sort(), ['mcp__db__x', 'mcp__db__y'])
+    assert.equal((fixture.agentOwnTools.get(A.agent) ?? new Map()).size, 0, 'A 的投射已撤回')
+
+    // 末个会话关掉后，引用计数归零，连接被释放（serverName 归还）。
+    disposersB.forEach((fn) => fn?.())
+    assert.equal(fixture.createdScopes[0].disposed, true, '末个会话关掉后必须释放连接')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── test 3：同项目两会话「交叉并发实际调用」项目 MCP，验证一份连接 + 不串扰 ──
+test('shared project connection: two sessions call the project MCP concurrently without crosstalk', async () => {
+  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const mkSession = (id) => {
+      const s = {
+        agent: { id, session: { header: { cwd: fixture.wsRoot } } },
+        plugin: () => { throw new Error('会话不应直接挂 mcp-client') },
+        tools: {
+          restrict: () => () => {},
+          register(def) { const own = fixture.agentOwnTools.get(s.agent) ?? new Map(); own.set(def.name, def); fixture.agentOwnTools.set(s.agent, own); return () => own.delete(def.name) },
+        },
+        effect(fn) { fixture.effects.push(fn); return () => {} },
+      }
+      s.agent.ctx = s
+      return s
+    }
+    const A = mkSession('A'); const B = mkSession('B')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A)
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B)
+
+    // 前提：两个会话，一条底层连接。
+    assert.equal(fixture.connectionCount, 1, '两个并发会话必须共用一条连接')
+    assert.deepEqual(workspaceMountErrorsView(fixture.wsRoot), [])
+
+    const toolA = fixture.agentOwnTools.get(A.agent).get('mcp__db__x')
+    const toolB = fixture.agentOwnTools.get(B.agent).get('mcp__db__x')
+    assert.ok(toolA && toolB, '两个会话各自 own 层都应拿到 mcp__db__x')
+
+    // 交叉并发：A、B 各发 25 个带唯一 echo 的调用，全部经同一条连接多路复用。
+    const jobs = []
+    for (let i = 0; i < 25; i += 1) {
+      jobs.push(toolA.execute({ echo: `A${i}` }).then((r) => ['A' + i, r.content[0].text]))
+      jobs.push(toolB.execute({ echo: `B${i}` }).then((r) => ['B' + i, r.content[0].text]))
+    }
+    const out = await Promise.all(jobs)
+    // 每个调用必须拿回自己的 echo（x:A0 / x:B7 ...），不得串到别的会话的载荷。
+    const crossed = out.filter(([tag, text]) => text !== `x:${tag}`)
+    assert.deepEqual(crossed, [], '并发交叉调用出现串扰: ' + JSON.stringify(crossed))
+    // 底层连接确实收到了全部 50 个调用（复用而非各起一份）。
+    assert.equal(fixture.sharedClientCalls.length, 50)
+    // 全程仍只有一条连接。
+    assert.equal(fixture.connectionCount, 1)
   } finally {
     await fixture.cleanup()
   }

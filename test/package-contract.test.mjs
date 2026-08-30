@@ -122,7 +122,7 @@ test('client avoids full-screen backdrop filters and skips stale or unchanged po
 })
 
 test('list and detail use the same derived status and refresh tools after registration', () => {
-  assert.match(client, /const dotPhase = \(s\) => \(mountError\(s\) \? 'failed' : s\.scope === 'workspace' \? 'idle' : s\.status \|\| s\.phase\)/)
+  assert.match(client, /const dotPhase = \(s\) => \(mountError\(s\) \? 'failed' : s\.status \|\| s\.phase\)/)
   assert.match(client, /selectedServer\?\.toolRevision/)
 })
 
@@ -133,7 +133,7 @@ test('mount failures are attributed to the row and the detail pane, not only a b
   assert.match(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
   // 列表行标红而详情说「随会话挂载」，是同一条信息在两处自相矛盾。
   assert.match(client, /const mountFailed = isWorkspace && !!server\.lastError/)
-  assert.match(client, /const status = mountFailed \? 'failed' : isWorkspace \? 'idle'/)
+  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'waiting'/)
   assert.match(client, /mountFailed\s*\n\s*\? '挂载失败'/)
   // 横幅不再猜测原因，具体错误留在它归属的条目上。
   assert.doesNotMatch(client, /可能已被其他会话占用或连接失败/)
@@ -238,8 +238,10 @@ test('server lists keep a minimum visible height and never get clipped to zero o
 test('workspace MCPs stay toggleable and report mount semantics instead of a stuck connecting state', () => {
   // 项目 MCP 的 phase 恒为 waiting，沿用全局的 stopped 判定会让禁用后再也开不回来。
   assert.match(client, /const toggleLocked = \(s\) => busy \|\| !s\.managed \|\| \(s\.scope !== 'workspace' && !s\.enabled && s\.phase !== 'stopped'\)/)
-  assert.match(client, /const status = mountFailed \? 'failed' : isWorkspace \? 'idle' : server\.status \|\| server\.phase \|\| 'waiting'/)
-  assert.match(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
+  // 共享连接后项目行用真实连接态（connected/connecting/idle），不再恒显“随会话挂载”。
+  assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'waiting'/)
+  assert.match(client, /status === 'connected' \? '已连接（本项目会话共享）'/)
+  assert.doesNotMatch(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
   assert.match(client, /cls: isWorkspace \? 'scope-ws' : ''/)
 })
 

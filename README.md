@@ -35,7 +35,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，新会话不再看到）
 - 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
 - serverName 全局唯一（含所有项目），冲突在保存时提示被哪个作用域占用
-- 项目 MCP 随会话自动挂载到 agent 作用域（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与重连），无需手动重连；会话中修改项目配置不会热更新，下一次会话生效（与主流一致，详见[配置生效时机](#配置生效时机重要)）
+- 项目 MCP 由**该项目的所有会话共享一份连接**（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与自动重连）：同一项目开多少个会话都能用，不会互相占用 `serverName`，也无需手动重连；会话中修改项目配置不会热更新，下一次会话生效（与主流一致，详见[配置生效时机](#配置生效时机重要)）
 - 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
@@ -55,16 +55,27 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 | 全局 | Web profile 的 `cordis.patch.yml` | DSH 热加载，通常立即生效（含运行中的会话） |
 | 项目 | 项目目录 `.dsh/mcp.json` | **下一次会话**生效；正在运行的会话不受影响 |
 
-项目 MCP 在会话创建/恢复时按当时的 `.dsh/mcp.json` 挂载到该会话，会话进行中不重读配置——会话里改配置不生效是预期行为，Claude Code、Codex 等客户端的项目级 MCP 同样要求新开会话。「屏蔽」全局 MCP 的可见性变更同理，只对之后的会话生效。
+项目 MCP 在会话创建/恢复时按当时的 `.dsh/mcp.json` 装配到该会话，会话进行中不重读配置——会话里改配置不生效是预期行为，Claude Code、Codex 等客户端的项目级 MCP 同样要求新开会话。「屏蔽」全局 MCP 的可见性变更同理，只对之后的会话生效。
 
-改完配置不需要重连或重启：直接新开会话即可。新会话挂载失败（如并发会话占用 serverName）会在面板顶部明确报错，见下方已知限制。
+改完配置不需要重连或重启：直接新开会话即可。
+
+## 项目 MCP 的共享连接模型
+
+同一项目的多个会话**共用一份**项目 MCP 连接：
+
+- 每个 `(项目目录, serverName)` 在整个 `dsh web` 进程内只启动**一份** `mcp-client` 实例，因此 `serverName` 只登记一次，**并发会话不会撞名**。
+- 该连接注册出的工具会投射进**每个属于该项目的会话**自己的工具层，所以每个会话都能看到并调用；其他项目的会话看不到（隔离保留）。
+- 引用计数管理生命周期：该项目第一个会话建立连接，最后一个会话结束后释放。
+- 一份连接也意味着**服务端状态是共享的**：对 `memory`（项目共享记忆）、`serena`（单份索引，避免并发写坏缓存）这类是收益；若某个服务器带有强会话亲和的可变状态，请放到全局作用域或改用项目内独立的 serverName。
+
+这与社区共识方向一致（Serena 的单实例常驻、Claude Code 的 shared-daemon 提案 [#28860](https://github.com/anthropics/claude-code/issues/28860)）；因为 DSH 是单进程多会话，无需 daemon/代理即可在进程内共享。
 
 ## 已知限制（重要，请阅读）
 
-- **同一项目并发会话**：官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一。同一项目**同时运行多个会话**时，只有先挂载的会话拿到该项目 MCP，其余会话挂载失败；失败会在管理面板对应的项目标签页顶部显示“以下项目 MCP 未能挂载”，并附当前运行中的会话数，不是静默缺失。DSH 切换会话不会立刻销毁旧会话的 agent，它们都会被计入“在运行”。先关掉占用会话（或重启 `dsh web`）、再开新会话即可恢复。
-- **首轮就绪时序**：项目 MCP 采用异步挂载，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，挂载会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
+- **首轮就绪时序**：项目 MCP 默认异步建连，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
 - **屏蔽不释放命名**：「屏蔽」全局 MCP 只隐藏其工具，该 serverName 的全局实例仍在运行并占用命名，项目内不能通过同名服务器接管；如需接管请先在全局禁用/移除该服务器。
-- **状态可观测性**：项目 MCP 工具注册在 agent 作用域，管理面板（Host 视图）无法枚举或报告其连接状态；项目行固定显示“随会话挂载”，连接状态请以会话侧为准。
+- **全局与项目不能同名**：`serverName` 在整个进程内唯一，项目级不能与全局或其他项目用同一个名字；保存时会提示被哪个作用域占用。
+- **共享服务端状态**：见上一节最后一条——同项目多会话共用一份连接，服务端状态互相可见。
 
 
 ## 兼容性
@@ -170,7 +181,7 @@ dsh web
 - `cordis.patch.yml`：插入唯一的 Host 插件实例
 - `lib/index.js`：`mcpManager` Host Remote
 - `lib/mcp-registry.js`：loader 中 MCP 条目的枚举与工具归属推断
-- `lib/workspace-runtime.js`：项目配置读写状态与 agent 作用域的项目 MCP 装配
+- `lib/workspace-runtime.js`：项目配置读写状态、按 `(项目, serverName)` 引用计数的共享 mcp-client 连接，以及把其工具投射进每个会话作用域
 - `lib/workspace-config.js`：项目级 `.dsh/mcp.json` 的读写与转换
 - `lib/mcp-config.js`：JSON 规范化与 YAML patch 结构化读写
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
@@ -187,7 +198,7 @@ dsh web
 - **连接失败（failed）**：fiber 活着但没有工具注册，且 mcp-client 最近日志（通过 `ctx.logger.exporter` 订阅并按 `mcp-client(<serverName>)` 过滤）中出现 error/warn。失败原因会展示在详情页，例如 `connection attempt failed: ECONNREFUSED`、`adb forward missing`。
 - 工具数为 0 且没有任何失败日志时如实显示**连接中/等待**，不猜测成功。
 
-以上判定只作用于全局 MCP。项目 MCP 随会话挂载，工具注册在会话（agent）作用域，Host 侧无法枚举其连接状态：面板对项目条目固定显示“随会话挂载”，仅在挂载失败（serverName 冲突等）时展示具体错误。
+以上判定同样适用于项目 MCP：它现在是一份长驻的共享连接，Host 侧可以枚举其工具与连接状态——面板对项目条目显示「已连接（本项目会话共享）/ 连接中… / 待会话挂载」，装配失败时展示具体错误。
 
 面板在详情页和编辑表单中默认掩码敏感值（URL 凭据、args、env、headers），点击眼睛图标后经 Host 的 `reveal` 接口读取有效运行值并在会话内临时显示；编辑时若未实际修改输入，保存仍保留原配置引用，不会把环境变量密钥写回 profile。该读取只对当前 Web profile 管理的 server 开放。
 
