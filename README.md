@@ -4,7 +4,7 @@
   <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
 
-DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮管理全局 MCP（Web profile）与各项目的项目级 MCP（`.dsh/mcp.json`）。
+DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮（可拖拽）管理全局 MCP（Web profile）与各项目的项目级 MCP（`.dsh/mcp.json`）。
 
 ## 界面预览
 
@@ -139,7 +139,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.7
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.8
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
