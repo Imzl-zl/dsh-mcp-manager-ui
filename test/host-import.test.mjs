@@ -163,7 +163,8 @@ test('Remote projections redact secrets and preview omits normalized server conf
     const wire = JSON.stringify(result)
     assert.doesNotMatch(wire, new RegExp(secret))
     assert.equal(result.servers.find((server) => server.serverName === 'remote').headers.Authorization, '__DSH_MCP_REDACTED__')
-    assert.equal(result.servers.find((server) => server.serverName === 'remote').headers['X-From-Env'], '!!js process.env.SAFE_TOKEN')
+    // 默认一律掩码：`!!js` 引用与明文一视同仁，内部表达式不得出现在线上投影里。
+    assert.equal(result.servers.find((server) => server.serverName === 'remote').headers['X-From-Env'], '__DSH_MCP_REDACTED__')
     assert.equal(result.servers.find((server) => server.serverName === 'remote').headers.Bypass, '__DSH_MCP_REDACTED__')
     assert.equal(result.servers.find((server) => server.serverName === 'local').env.API_KEY, '__DSH_MCP_REDACTED__')
     assert.deepEqual(result.servers.find((server) => server.serverName === 'local').args, ['__DSH_MCP_REDACTED__'])

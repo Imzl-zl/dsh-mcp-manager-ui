@@ -176,14 +176,15 @@ test('client disposer releases Remote registration and stylesheet', async () => 
         mount()
       },
       register(options) {
-        timer = options.inject().timer
+        // 只有需要 call/timer 的入口声明 inject；侧栏入口是无 inject 的纯组件注册。
+        if (typeof options.inject === 'function') timer = options.inject().timer
       },
     },
   }
 
   try {
     const dispose = await client.apply(ctx)
-    assert.deepEqual(slots, ['shell.overlay'])
+    assert.deepEqual(slots, ['shell.overlay', 'sidebar.footer.action'])
     assert.equal(document.styles.length, 1)
 
     let timeoutFired = false

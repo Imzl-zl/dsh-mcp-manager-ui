@@ -80,17 +80,18 @@ test('addWorkspaceServer writes the project file and rejects duplicates and glob
       /该项目已存在/,
     )
 
-    // 全局 patch 存在同名 → 项目层拒绝
+    // 全局已有同名 → 项目层允许：DSH 0.1.5 起 mcp-client 按注册作用域判 serverName 唯一性，
+    // 本项目是独立作用域，跨作用域同名是合法配置（实测：同一作用域内仍会被拒绝）。
     const globalFixture = await createHostFixture('[]\n', [{ title: 'proj-a' }])
     try {
       await McpManagerGateway.prototype.add.call({ ctx: globalFixture.ctx }, { name: 'global-x', transport: 'stdio', command: 'node' })
-      await assert.rejects(
-        McpManagerGateway.prototype.addWorkspaceServer.call({ ctx: globalFixture.ctx }, {
-          wsPath: globalFixture.wsRoot,
-          spec: { name: 'global-x', transport: 'stdio', command: 'node' },
-        }),
-        /已被全局占用/,
-      )
+      const crossScope = await McpManagerGateway.prototype.addWorkspaceServer.call({ ctx: globalFixture.ctx }, {
+        wsPath: globalFixture.wsRoot,
+        spec: { name: 'global-x', transport: 'stdio', command: 'node' },
+      })
+      assert.match(crossScope.note, /global-x/)
+      const written = JSON.parse(await readFile(configPath(globalFixture.wsRoot), 'utf8'))
+      assert.ok(written.mcpServers['global-x'], '项目层与全局同名必须能落盘，不再被当作冲突拦截')
     } finally {
       await globalFixture.cleanup()
     }
@@ -175,20 +176,34 @@ test('concurrent workspace writes are serialized without losing updates', async 
   }
 })
 
-test('getWorkspaceView renders internal js expressions as file templates', async () => {
+test('workspace view keeps file templates while reveal returns the live value', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
   const fixture = await createHostFixture('[]\n', [{ title: 'proj-a' }])
   try {
     await mkdir(join(fixture.wsRoot, '.dsh'), { recursive: true })
     await writeFile(configPath(fixture.wsRoot), JSON.stringify({
-      mcpServers: { hl: { command: 'npx', args: ['${TOKEN}'], env: { KEY: '${KEY}' } } },
+      mcpServers: { hl: { command: 'npx', args: ['${DSH_MCP_REVEAL_PROBE}'], env: { KEY: '${DSH_MCP_REVEAL_PROBE}' } } },
     }))
     const view = await McpManagerGateway.prototype.getWorkspaceView.call({ ctx: fixture.ctx }, { wsPath: fixture.wsRoot })
     assert.equal(view.servers[0].command, 'npx')
-    assert.equal(view.servers[0].env.KEY, '${KEY}')
-    const revealed = await McpManagerGateway.prototype.revealWorkspaceServer.call({ ctx: fixture.ctx }, { wsPath: fixture.wsRoot, name: 'hl', field: 'args' })
-    assert.deepEqual(revealed.value, ['${TOKEN}'])
+    // 列表与详情的默认显示一律掩码：明文与 `!!js` 引用一视同仁，key 名保留作信息。
+    // 旧实现把环境变量引用原样保留，结果是内部 `!!js` 表达式会直接出现在界面上。
+    assert.equal(view.servers[0].env.KEY, '__DSH_MCP_REDACTED__')
+    assert.deepEqual(view.servers[0].args, ['__DSH_MCP_REDACTED__'])
+
+    // 眼睛点开的是 reveal：要「有效运行值」。变量未设置时如实为空，而不是把模板
+    // ${DSH_MCP_REVEAL_PROBE} 当值返回（那会让人以为看到的就是密钥）。
+    delete process.env.DSH_MCP_REVEAL_PROBE
+    const unset = await McpManagerGateway.prototype.revealWorkspaceServer.call({ ctx: fixture.ctx }, { wsPath: fixture.wsRoot, name: 'hl', field: 'args' })
+    assert.deepEqual(unset.value, [''])
+
+    process.env.DSH_MCP_REVEAL_PROBE = 'live-token-42'
+    const liveOne = await McpManagerGateway.prototype.revealWorkspaceServer.call({ ctx: fixture.ctx }, { wsPath: fixture.wsRoot, name: 'hl', field: 'env', key: 'KEY' })
+    assert.equal(liveOne.value, 'live-token-42')
+    const liveList = await McpManagerGateway.prototype.revealWorkspaceServer.call({ ctx: fixture.ctx }, { wsPath: fixture.wsRoot, name: 'hl', field: 'args' })
+    assert.deepEqual(liveList.value, ['live-token-42'])
   } finally {
+    delete process.env.DSH_MCP_REVEAL_PROBE
     await fixture.cleanup()
   }
 })

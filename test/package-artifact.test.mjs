@@ -11,9 +11,17 @@ import test from 'node:test'
 const execFileAsync = promisify(execFile)
 const projectRoot = new URL('..', import.meta.url)
 const dshHostPackages = [
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-agent-loop',
   '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-mcp-client',
+  '@deepseek-ai/dsh-scope',
+  '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ]
+// 与 package-contract 的兼容窗口一致：只支持 0.1.5 起（setup 从它开始传 agent 第二参数，
+// mcp-client 也从它开始按注册作用域判重）。
+const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
 
 function tarString(buffer, offset, length) {
   const end = buffer.indexOf(0, offset)
@@ -73,11 +81,11 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     }
 
     const packedManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
-    assert.equal(packedManifest.version, '1.1.8')
+    assert.equal(packedManifest.version, '1.2.0')
     for (const name of dshHostPackages) {
       assert.equal(packedManifest.dependencies?.[name], undefined)
       assert.equal(packedManifest.optionalDependencies?.[name], undefined)
-      assert.equal(packedManifest.peerDependencies?.[name], '^0.1.0-rc.7')
+      assert.equal(packedManifest.peerDependencies?.[name], COMPAT_WINDOW)
       assert.notEqual(packedManifest.peerDependenciesMeta?.[name]?.optional, true)
     }
     const packedText = entries
@@ -91,6 +99,10 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     await linkPackage(profileModules, 'yaml')
     await linkPackage(profileModules, 'zod')
     for (const name of dshHostPackages) await linkPackage(hostModules, name)
+    // 不在 dsh-* 命名空间（版本线不同），但同样从宿主机层解析：
+    // reveal 用它把 `!!js` 配置节点求值成有效运行值。真实 DSH_HOME 的
+    // profiles/node_modules 里带这个包，已实测确认。
+    await linkPackage(hostModules, '@deepseek-ai/cordis-plugin-loader')
 
     const entry = await import(`${pathToFileURL(join(packageRoot, 'lib', 'index.js')).href}?artifact`)
     assert.equal(typeof entry.default, 'function')

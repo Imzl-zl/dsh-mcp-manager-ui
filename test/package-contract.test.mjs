@@ -6,17 +6,32 @@ import { parse } from 'yaml'
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
 const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+const hostIndex = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
 const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
 const installationGuide = await readFile(new URL('../docs/installation.md', import.meta.url), 'utf8')
 const lockfile = parse(await readFile(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8'))
 const dshHostPackages = [
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-agent-loop',
   '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-mcp-client',
+  '@deepseek-ai/dsh-scope',
+  '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ]
+// 只支持 0.1.5 起（与 peer 窗口一致）：setup 在 0.1.5 才把 agent 作为第二参数传给插件，
+// 而 mcp-client 也是 0.1.5 起才按注册作用域判 serverName 唯一性。旧版本不再兼容。
+const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
+// 开发基线跟随已验证的最新 RC；发布边界由 peer 窗口表达。
+const DEV_BASELINE = '^0.1.5-rc.1'
+// cordis 锁补丁位：ensureLogCapture 读写 logger.exporters / logger._snExporter 私有字段。
+const CORDIS_PEER = '~4.0.2'
+// reveal 用 loader 的 interpolate 求值 `!!js` 节点；范围跟随 dsh 自身对它的要求。
+const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.1.8')
+  assert.equal(packageJson.version, '1.2.0')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
@@ -24,11 +39,11 @@ test('package exposes one Web bundle entry', () => {
   assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)
 })
 
-test('package declares a caret DSH compatibility window and follows the latest RC in development', () => {
+test('package declares the DSH compatibility window and pins development to a verified RC', () => {
   for (const name of dshHostPackages) {
     assert.equal(packageJson.dependencies?.[name], undefined)
-    assert.equal(packageJson.peerDependencies?.[name], '^0.1.0-rc.7')
-    assert.equal(packageJson.devDependencies?.[name], '^0.1.0-rc.8')
+    assert.equal(packageJson.peerDependencies?.[name], COMPAT_WINDOW)
+    assert.equal(packageJson.devDependencies?.[name], DEV_BASELINE)
   }
 })
 
@@ -36,25 +51,33 @@ test('every host contract this plugin actually depends on is declared as a peer'
   // 不声明就等于隐式依赖：下面每一项都有硬依赖的契约，它们一变本插件就会静默失效。
   //   dsh-tools      → tools.schemas(scope)/get(name, scope) 的作用域视图，整个投射模型的地基
   //   dsh-agent      → agents.create/resume(options) 的单参签名与 traceable set 语义
-  //   dsh-agent-loop → setup(agentCtx) 的 raceAbort 语义（抛弃但不取消）与 agent.ctx = scope.ctx.extend
+  //   dsh-agent-loop → setup(agentCtx, agent) 的两参契约与 raceAbort 语义
   //   dsh-scope      → createScope/quiesceFiber（共享连接的隔离作用域与可 await 的 teardown）
   //   dsh-mcp-client → serverName 注册表、工具名前缀、日志 label
-  for (const name of ['@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-mcp-client']) {
-    assert.equal(packageJson.peerDependencies?.[name], '^0.1.0-rc.7', name + ' 必须声明为 peer')
+  for (const name of dshHostPackages) {
+    assert.equal(packageJson.peerDependencies?.[name], COMPAT_WINDOW, name + ' 必须声明为 peer')
   }
   // cordis 锁到补丁位：ensureLogCapture 为了绕过 LoggerService.exporter() 删错 ID 的 bug，
   // 直接读写了 logger.exporters / logger._snExporter 两个私有字段。这是唯一可订阅的诊断面，
   // 但它不是公开契约，所以不能用 caret 区间。
-  assert.equal(packageJson.peerDependencies?.cordis, '~4.0.1')
+  assert.equal(packageJson.peerDependencies?.['@deepseek-ai/cordis'], CORDIS_PEER)
+  // 官方 scope 包名是 @deepseek-ai/cordis；无 scope 的 `cordis` 是另一个包，写错就是假兼容声明。
+  assert.equal(packageJson.peerDependencies?.cordis, undefined)
+  // cordis-plugin-loader 不在 dsh-* 命名空间，peer 范围跟随 dsh 自身的要求：
+  // reveal 用它把 `!!js` 节点求值成有效运行值。
+  assert.equal(packageJson.peerDependencies?.['@deepseek-ai/cordis-plugin-loader'], CORDIS_LOADER_PEER)
+  assert.equal(packageJson.devDependencies?.['@deepseek-ai/cordis-plugin-loader'], CORDIS_LOADER_PEER)
 })
 
 test('lockfile resolves DSH host packages only as a development baseline on the latest RC', () => {
   const importer = lockfile.importers['.']
   for (const name of dshHostPackages) {
     assert.equal(importer.dependencies?.[name], undefined)
-    assert.equal(importer.devDependencies?.[name]?.specifier, '^0.1.0-rc.8')
-    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.0-rc\.8(?:\(|$)/)
+    assert.equal(importer.devDependencies?.[name]?.specifier, DEV_BASELINE)
+    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.5-rc\.1(?:\(|$)/)
   }
+  assert.equal(importer.dependencies?.['@deepseek-ai/cordis'], undefined)
+  assert.equal(importer.devDependencies?.['@deepseek-ai/cordis']?.specifier, CORDIS_PEER)
 })
 
 test('runtime YAML parser includes the nested-collection stack overflow fix', () => {
@@ -65,11 +88,51 @@ test('runtime YAML parser includes the nested-collection stack overflow fix', ()
 
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
-    assert.match(document, /0\.1\.0-rc\.7/)
-    assert.match(document, /0\.1\.0-rc\.8/)
+    assert.match(document, /0\.1\.5-rc\.1/)
+    // 不再**声称**兼容 0.1.0-rc.x：peer 窗口已收窄到 0.1.5 起。
+    // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
+    assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.1\.8/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.2\.0/)
   }
+})
+
+test('the reveal control only renders for masked values', () => {
+  // 明文值（如无凭据的 URL）不需要「显示/隐藏」：它本来就摆在眼前，
+  // 配个眼睛只会让人以为还藏了东西，而点下去什么也不变（用户报过这个）。
+  assert.match(client, /const masked = fallback === REDACTED_VALUE/)
+  assert.match(client, /masked \? h\('button'/, '眼睛必须在 masked 时才渲染')
+  // 复制按钮只属于「已点开」的状态，不能与眼睛一起无端出现。
+  assert.match(client, /revealedNow \? h\('button'/)
+})
+
+test('reveal resolves !!js config nodes with the loader evaluator, never returns the raw node', () => {
+  // loader 把 `!!js` 表达式以 raw 节点留在 entry.options.config（官方为写回保留 `!!js` 形式），
+  // apply 之前才用 interpolate 求值。直接把该节点当「有效运行值」返回，客户端会把它序列化成
+  // "[object Object]"——用户点眼睛看到的就是这个，看不到 key。
+  assert.match(hostIndex, /import \{ interpolate \} from "@deepseek-ai\/cordis-plugin-loader"/)
+  // 必须用 entry 自己的 ctx：官方用例里表达式可以引用该行 inject 的服务。
+  assert.match(hostIndex, /interpolate\(entry\.ctx, value\)/)
+  // 项目层用与会话建连同一个求值器（内部 spec 存的是 `!!js` 字符串），同样要运行值不要模板。
+  assert.match(hostIndex, /resolveSpecValue\(current\[field\], process\.env\)/)
+  // 旧的「返回文件模板」实现必须彻底消失：模板不是运行值。
+  assert.doesNotMatch(hostIndex, /restoreTemplateDeep/)
+  // 编辑表单仍只把运行值用于显示：保留原值标记不得因为求值而失效。
+  assert.match(hostIndex, /containsRedactedValue/)
+})
+
+test('agent setup takes the agent from the official second parameter, never from ctx', async () => {
+  const runtime = await readFile(new URL('../lib/workspace-runtime.js', import.meta.url), 'utf8')
+  // dsh-agent-loop 0.1.5：`setup?.(prepared.agent.ctx, prepared.agent)`。
+  // ctx 是 agent 的 scope context，上面**没有** agent 属性；读它会被 cordis 的服务守卫拒绝：
+  // `cannot get property "agent" without inject`——而 setup 抛错会让会话的创建与恢复直接失败。
+  // （早年测试替身把 agent 挂在 ctx 上，所以这个缺陷 40+ 个用例全假通过。）
+  assert.match(runtime, /async \(agentCtx, agent\) =>/)
+  assert.match(runtime, /if \(!agent\)/)
+  // 中间层必须把官方契约原样透传给下一层：少传 agent 就是
+  // `Cannot read properties of undefined (reading 'session')`（宿主的 setup 会读 agent.session）。
+  assert.match(runtime, /callerSetup\?\.\(agentCtx, agent\)/)
+  assert.doesNotMatch(runtime, /callerSetup\?\.\(agentCtx\)/)
 })
 
 test('bundle does not install the creation-mode Cordis tool', () => {

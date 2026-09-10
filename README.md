@@ -36,9 +36,10 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - **全局 + 项目双作用域**：顶部标签页在「全局」与各项目之间切换；全局 MCP 一次注册所有项目可用，项目级 MCP 写入项目目录 `.dsh/mcp.json` 仅该项目会话可见
 - 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，新会话不再看到）
 - 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
-- serverName 全局唯一（含所有项目），冲突在保存时提示被哪个作用域占用
+- **两个入口，同一个面板**：右下角悬浮按钮（可拖拽、记忆位置）与 DSH 0.1.5 起的官方侧栏入口（`sidebar.footer.action`，展开态在「设置」上方显示「MCP」，收起成 56px 轨道时只剩图标）共享同一开关状态，都打开同一个浮层面板。面板浮在会话之上而**不切换主面板**，所以查连接状态、临时禁用某个 server 都不打断正在进行的对话。之所以不用主面板：MCP 管理多数发生在会话进行中（模型报某个 server 连不上、想加一个马上用），而主面板会把会话视图换掉，配置完还得再切回来。
+- serverName 按**注册作用域**唯一（DSH 0.1.5 起）：项目之间、全局与项目之间可以同名，各自独立连接与注册工具；同一作用域内（同一项目）仍不允许重名
 - 项目 MCP 由**该项目的所有会话共享一份连接**（复用官方 `@deepseek-ai/dsh-mcp-client`，支持惰性连接与自动重连）：同一项目开多少个会话都能用，不会互相占用 `serverName`，也无需手动重连；会话中修改项目配置不会热更新，下一次会话生效（与主流一致，详见[配置生效时机](#配置生效时机重要)）
-- 显示并复制已解密的 URL 凭据、args、env、headers 值（会话内临时可见）
+- 需要时经眼睛临时揭示被掩码的值（URL 凭据、args、env/headers），并可一键复制；明文值不配眼睛
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
 - 支持 DSH rc.7+ 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
@@ -84,11 +85,13 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 但随 DSH 分发的 `@modelcontextprotocol/sdk` 目前协商的是 **2025-11-25**，那一版**没有** Statelessness 一节，取而代之的是 Lifecycle Management（含 session control）。也就是说：**按 2025-11-25 实现的服务器完全可以合理地维护连接级会话状态**，这不算它的缺陷。
 - 传输层的并发安全是有保障的：一个 `Client` 实例的请求 id 单调唯一（SDK 的 `_requestMessageId++`）、响应按 id 路由，stdio 一次 `write` 写整帧，所以多个会话在同一连接上交织调用不会串线。DSH 是单进程多会话，因此不需要生态里那些代理方案的 shim/broker/socket 和请求 id 重映射。
 
-### 不适合共享的服务器（重要，本宿主没有 per-session 逃生舱）
+### 不适合共享的服务器（重要：本插件只提供 shared 一档）
 
 把会话身份隐式绑在连接/进程上的服务器（浏览器自动化、SSH 会话、编辑器缓冲区、按连接建索引等）在多会话共享时会串状态。
 
-生态里的代理方案通常提供 `shared / isolated / session-aware` 三档开关（如 [mcp-mux](https://github.com/thebtf/mcp-mux)、[jasonwarta/mcp-mux](https://github.com/jasonwarta/mcp-mux)、[punt-labs/mcp-proxy](https://github.com/punt-labs/mcp-proxy)）。**本宿主给不了 `isolated` 这一档**，原因就是上面那条：per-session 隔离必须 per-session 换 `serverName`，而那会连带换掉工具名。所以请如实理解：
+生态里的代理方案通常提供 `shared / isolated / session-aware` 三档开关（如 [mcp-mux](https://github.com/thebtf/mcp-mux)、[jasonwarta/mcp-mux](https://github.com/jasonwarta/mcp-mux)、[punt-labs/mcp-proxy](https://github.com/punt-labs/mcp-proxy)）。**本插件目前只提供 `shared` 这一档**（每个 `(项目, serverName)` 一份共享连接）。
+
+关于 `isolated`：在 DSH `0.1.0-rc.7`/`rc.8` 上它确实做不到——那时 `serverName` 全进程唯一，per-session 隔离必须 per-session 换名，而换名会连带换掉模型可见的工具名。但 **DSH 0.1.5 起底层已经支持**：`mcp-client` 按注册作用域判重，同一个 `serverName` 可以在不同会话作用域里各挂一份而互不冲突（本插件的项目级共享作用域吃的就是这个能力）。所以要补 `isolated` 档，缺的只是插件的档位开关与 UI，不再是宿主限制。在那之前，请把这类服务器当作**不支持**，改用下面的做法：
 
 - 这类服务器**在项目作用域下不被支持**。把它挪到全局作用域也没用（那只是从“本项目所有会话共享”变成“所有项目所有会话共享”，隔离更差）；在项目里另起一个 `serverName` 同样无效（`serverName` 区分的是服务器，不是会话）。
 - 可行的做法：让该服务器改用 `streamable-http` 并自己按请求参数分区状态，或者用一个外部代理（上面那几个项目）在 DSH 之外做隔离。
@@ -99,8 +102,8 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 ## 已知限制（重要，请阅读）
 
 - **首轮就绪时序**：项目 MCP 默认异步建连，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
-- **屏蔽不释放命名**：「屏蔽」全局 MCP 只隐藏其工具，该 serverName 的全局实例仍在运行并占用命名，项目内不能通过同名服务器接管；如需接管请先在全局禁用/移除该服务器。
-- **全局与项目不能同名**：`serverName` 在整个进程内唯一，项目级不能与全局或其他项目用同一个名字；保存时会提示被哪个作用域占用。这一校验在**保存路径**上，手工编辑 `.dsh/mcp.json`（或项目不在工作区注册表里）能绕过它；那时第二份连接会启动失败，面板会在该项目行标 `serverName 被占用` 并列出和哪些项目撞了（该会话拿不到这个 MCP 的工具，fail-closed）。
+- **屏蔽不释放全局实例**：「屏蔽」全局 MCP 只隐藏它的工具，该 serverName 的全局实例仍在运行（占用它自己那个作用域）。DSH 0.1.5 起项目可以直接用同名服务器独立连接，不需要先把全局那份禁用；更早的宿主按全进程唯一判定，那时同名会启动失败。
+- **同名按注册作用域隔离（0.1.5 起）**：`mcp-client` 按**注册作用域**判定 `serverName` 唯一性（`scopeOf(ctx) ?? ctx.root`），而本插件给每个 `(项目, serverName)` 一个独立作用域，所以项目之间、全局与项目之间同名都是合法配置，各自独立连接、各自注册工具（实测：同一作用域内同名仍被拒绝）。**DSH `0.1.0-rc.7`/`rc.8` 按全进程唯一判定**，同名会让其中一份启动失败：面板会在失败的那行标 `serverName 同名冲突`、列出与谁同名，并给出这个版本条件。
 - **共享连接与配置粘性**：见上「配置生效时机」的注意——运行中连接沿用首会话配置，全部会话结束后新连接才用新配置；期间面板标 `配置待生效`。
 - **不支持 per-session 隔离**：见上「不适合共享的服务器」。
 - **关掉最后一个会话后立刻重开会稍等**：新连接要等旧连接完全销毁才建（避免撞名），这段等待取决于 MCP 服务端退出的快慢。**上界约 9 秒**：MCP SDK 的 stdio 关闭本身最多等 2s（stdin 关掉）+ 2s（SIGTERM）再 SIGKILL，mcp-client 对关闭确认又有 5 秒上限。同一会话的多个 server 是并行释放的，不累加。实测正常服务器远低于这个上界（Windows、SDK 1.30.0）：`transport.close()` 对 `@modelcontextprotocol/server-memory` 35ms、`mcp-deepwiki` 43ms、`fast-context-mcp` 34ms、`serena` 167ms；整个 `dsh web` 进程的优雅退出（同时拆 4 个 stdio + 2 个 HTTP 连接）约 0.5s。慢的前提是服务器不理 stdin EOF，见下一条。
@@ -113,7 +116,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 | 项目 | 已验证版本 |
 |---|---|
-| DeepSeek Harness | `0.1.0-rc.7` 及以上（已验证至 `0.1.0-rc.8`） |
+| DeepSeek Harness | `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.1`） |
 | Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 
@@ -131,7 +134,16 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 目录会按 `serverName`、官方 HTTP 主机名和官方 npm 包识别当前有效配置，包括来自其他 bundle、Agent preset 或 `mcp-remote` 桥接的同类项。已存在项会显示其配置名称并禁用勾选；Host 在真正写入前还会在文件锁内再次判重，只追加当时仍缺失的所选项，不更新、不替换用户配置。用户主动移除某项后，只有再次勾选安装才会恢复。
 
-DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容 `0.1.0-rc.7` 到 `0.2.0` 之前的所有版本（含后续 RC 与 `0.1.x` 正式版）。开发与测试环境跟随同一范围，升级 DSH 后用 `pnpm update && npm test` 验证即可，无需改版本号。`0.2.0` 属于新的兼容边界，需要重新验证后再放宽。
+DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
+
+**为什么只支持 0.1.5 起**：插件依赖两个 0.1.5 才具备的官方能力——
+
+1. **`mcp-client` 按注册作用域判 `serverName` 唯一性**（`scopeOf(ctx) ?? ctx.root`；更早的版本把注册表挂在 `ctx.root`，全进程唯一）。项目级 MCP 的「跨项目/全局与项目同名」就建立在这条上。
+2. **`setup` 把 agent 作为第二个参数交给插件**（`setup?.(prepared.agent.ctx, prepared.agent)`；更早的版本只传 ctx）。项目 MCP 的挂载需要 agent 的 `session.header.cwd`；从 ctx 上读 agent 会被 cordis 服务守卫拒绝（`cannot get property "agent" without inject`），而 setup 抛错会让会话的创建与恢复直接失败。
+
+旧版本不再兼容，也不再为它们保留降级分支。
+
+开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
 
 ## 安装
 
@@ -139,7 +151,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `^0.1.0-rc.7` 声明，自动兼容
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.1.8
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.0
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
@@ -250,7 +262,7 @@ mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, r
 - `configStale` 为 `null` 表示无从判定（还没建连，或配置里已经没有这个 server），不伪造 `false`；读配置失败时原因在 `configError`。
 - 全程只读：不改引用计数、不碰 fiber、不触发建连或释放。面板目前不接线，它是给排障留的接口。
 
-面板在详情页和编辑表单中默认掩码敏感值（URL 凭据、args、env、headers），点击眼睛图标后经 Host 的 `reveal` 接口读取有效运行值并在会话内临时显示；编辑时若未实际修改输入，保存仍保留原配置引用，不会把环境变量密钥写回 profile。该读取只对当前 Web profile 管理的 server 开放。
+面板在详情页和编辑表单中默认掩码敏感值——URL 凭据、args、env/headers 的值都掩码，**明文与 `!!js`/`${VAR}` 引用一视同仁**：引用写法不该改变界面上显示什么，更不该把内部 `!!js` 表达式亮出来（旧实现把 `!!js process.env.X` 当“安全引用”原样保留，结果同一份配置一个掩码、一个泄底）。点击眼睛图标后经 Host 的 `reveal` 接口读取**有效运行值**（全局的 `!!js` 按该 entry 自己的 ctx 求值，项目层的 `${VAR}` 用建连同一个求值器解析）并在会话内临时显示，再点一次回到掩码；编辑时若未实际修改输入，保存仍保留原配置引用，不会把密钥写回配置。该读取只对当前 Web profile 管理的 server 开放。
 
 ## 设计约束
 
