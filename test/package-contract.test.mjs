@@ -99,6 +99,9 @@ test('documentation targets the verified DSH and plugin releases', () => {
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
     assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.2\.1/)
+    // npm 是主安装路径（它让 `dsh plugin update` 能在 ^1.x 内自动升级），必须写进两份文档。
+    assert.match(document, /dsh plugin --profile web add dsh-mcp-manager-ui@\^1\.2\.1/)
+    assert.match(document, /dsh plugin --profile web update dsh-mcp-manager-ui/)
   }
 })
 

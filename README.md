@@ -47,7 +47,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - JSON 导入支持“合并（同名更新）”和“替换”，写入前提供预览
 - 结构化修改 Web profile 的 `cordis.patch.yml`，保留其他插件条目、注释和 `!!js` 环境变量表达式
 - Host Remote 与 Web 客户端均随插件生命周期加载和卸载
-- 非强制更新提示：面板打开时 Host 每天最多向 GitHub Releases 查询一次最新版本，有新版时在面板顶部显示可关闭的提示条；查询失败静默、绝不自动更新，可设环境变量 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭，除该查询外不发送任何数据
+- 非强制更新提示：面板打开时 Host 每天最多向 GitHub Releases 查询一次最新版本，有新版时在面板顶部显示可关闭的提示条；查询失败静默、绝不自动更新，可设环境变量 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭，除该查询外不发送任何数据。从 npm 安装时可以直接 `dsh plugin --profile web update dsh-mcp-manager-ui`（`^1.x` 内自动升小版本），不依赖这个提示条
 
 ## 配置生效时机（重要）
 
@@ -150,13 +150,26 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 - `@deepseek-ai/cordis-plugin-loader`（版本线 `1.0.3`）：`reveal` 用它的 `interpolate` 求值 `!!js` 配置节点。它是 vendor 包，靠 profile 的模块回退解析得到（与 `@deepseek-ai/cordis` 同一条路径）。
 - `@deepseek-ai/cordis` 的私有字段：`LoggerService.exporter()` 的 disposer 删的是「当时的最大 ID」而不是注册时的 ID（`lib/index.js` 的 `return () => this.exporters.delete(this._snExporter)`），热重载会误删其他插件的 exporter。本插件因此直接读写 `logger.exporters` / `logger._snExporter` 这对私有字段，并把 peer 锁到 `~4.0.2`；字段形状一变就退回 `exporter()` 通道并明确告警。
 
+peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` 带 `nodeLinker: hoisted` + **`autoInstallPeers: false`**（`initProfile` 写入，注释写明理由：让缺失的 peer 走 `profiles/node_modules` 安装回退层，「so every plugin shares the installation's single cordis instance instead of a duplicate」）。因此本插件的 9 个 peer **不会**被 pnpm 装进 profile 的 `node_modules`，而是与宿主共用同一份包实例——这一点对 `@deepseek-ai/dsh-scope` 是硬要求：作用域标签是模块内的 `Symbol`，两份实例会让工具投射静默失效（见「连接状态语义」的作用域故障）。如果面板报「作用域隔离失败」，先确认这个配置没被改掉。
+
 ## 安装
 
 使用 DSH 插件命令安装。不要把 `mcp-manager-ui` 再手工插入 Web profile 的 `cordis.patch.yml`。
 
 ```sh
-# 正式使用固定 release tag。
+# 推荐：npm 安装（后续 `dsh plugin update` 就会在 ^1.x 内自动升到最新小版本）
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.2.1
+
+# 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.1
+```
+
+两种安装方式的区别只有一个：**npm 的 `^1.x` 范围能让 `dsh plugin update` 自动升小版本，而 git tag 是不可变规格、`update` 只会重新解析同一个 tag**。代码、peer 解析、安装后的行为完全相同（都不需要构建，也不需要 `allowBuilds`）。
+
+升级：
+
+```sh
+dsh plugin --profile web update dsh-mcp-manager-ui
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
