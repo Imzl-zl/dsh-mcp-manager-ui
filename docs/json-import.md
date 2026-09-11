@@ -2,6 +2,8 @@
 
 面板支持常见 MCP 客户端配置，并在写入前提供结构化预览。导入目标取决于当前标签页：**全局**标签写入当前 Web profile 的 `cordis.patch.yml`，**项目**标签写入该项目目录的 `.dsh/mcp.json`（互不混淆）。全局导入热加载生效；项目导入遵循项目作用域语义，下一次会话生效（见 README 的「配置生效时机」）。
 
+> `.dsh/mcp.json` 是本插件的私有约定：DSH 自身没有项目级 MCP 配置文件（官方只有 profile 的 `cordis.yml` / `cordis.patch.yml` 行，以及 ACP 客户端的 per-session `mcpServers`）。文件里的 `mcpServers` schema 与各客户端一致，但**路径不兼容**：Claude Code 读项目根的 `.mcp.json`，DSH 不读 `.dsh/mcp.json`，其他工具也不会。本文件只在装了本插件时才有意义。
+
 ## 支持的根格式
 
 Claude、Cursor、Cline、Roo 等客户端常用：

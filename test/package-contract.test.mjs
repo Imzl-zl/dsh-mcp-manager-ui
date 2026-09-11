@@ -23,7 +23,7 @@ const dshHostPackages = [
 // 而 mcp-client 也是 0.1.5 起才按注册作用域判 serverName 唯一性。旧版本不再兼容。
 const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
 // 开发基线跟随已验证的最新 RC；发布边界由 peer 窗口表达。
-const DEV_BASELINE = '^0.1.5-rc.1'
+const DEV_BASELINE = '^0.1.5-rc.2'
 // cordis 锁补丁位：ensureLogCapture 读写 logger.exporters / logger._snExporter 私有字段。
 const CORDIS_PEER = '~4.0.2'
 // reveal 用 loader 的 interpolate 求值 `!!js` 节点；范围跟随 dsh 自身对它的要求。
@@ -31,8 +31,13 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.2.0')
+  assert.equal(packageJson.version, '1.2.1')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
+  // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
+  //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
+  //   @deepseek-ai/dsh-client-ui-slots —— 是纯核心库，从不声明 dsh.client / 导出 ./client
+  // 死引用会被客户端模块系统静默跳过（不报错），所以只能靠这条断言拦住它回潮。
+  assert.deepEqual(packageJson.dsh?.client?.inject, ['@deepseek-ai/dsh-api-remotes'])
   assert.equal(packageJson.files?.includes('docs'), true)
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
@@ -74,7 +79,7 @@ test('lockfile resolves DSH host packages only as a development baseline on the 
   for (const name of dshHostPackages) {
     assert.equal(importer.dependencies?.[name], undefined)
     assert.equal(importer.devDependencies?.[name]?.specifier, DEV_BASELINE)
-    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.5-rc\.1(?:\(|$)/)
+    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.5-rc\.2(?:\(|$)/)
   }
   assert.equal(importer.dependencies?.['@deepseek-ai/cordis'], undefined)
   assert.equal(importer.devDependencies?.['@deepseek-ai/cordis']?.specifier, CORDIS_PEER)
@@ -88,12 +93,12 @@ test('runtime YAML parser includes the nested-collection stack overflow fix', ()
 
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
-    assert.match(document, /0\.1\.5-rc\.1/)
+    assert.match(document, /0\.1\.5-rc\.2/)
     // 不再**声称**兼容 0.1.0-rc.x：peer 窗口已收窄到 0.1.5 起。
     // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.2\.0/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.2\.1/)
   }
 })
 
@@ -201,7 +206,7 @@ test('client avoids full-screen backdrop filters and skips stale or unchanged po
 })
 
 test('list and detail use the same derived status and refresh tools after registration', () => {
-  assert.match(client, /const dotPhase = \(s\) => \(mountFailed\(s\) \? 'failed' : s\.status \|\| s\.phase\)/)
+  assert.match(client, /const dotPhase = \(s\) => \(mountFailed\(s\) \|\| scopeFailed\(s\) \? 'failed' : s\.status \|\| s\.phase\)/)
   assert.match(client, /selectedServer\?\.toolRevision/)
 })
 

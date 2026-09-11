@@ -1,6 +1,6 @@
 {
   "name": "dsh-mcp-manager-ui",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Responsive MCP management UI for DeepSeek Harness Web — floating panel, JSON import, and profile-backed Host Remote management.",
   "repository": {
     "type": "git",
@@ -46,13 +46,13 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.2",
     "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
-    "@deepseek-ai/dsh-agent": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-atomic-write": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-mcp-client": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-scope": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.1"
+    "@deepseek-ai/dsh-agent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-mcp-client": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-scope": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2"
   },
   "dsh": {
     "bundle": {
@@ -61,9 +61,7 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-api-remotes",
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-slots"
+        "@deepseek-ai/dsh-api-remotes"
       ]
     }
   },

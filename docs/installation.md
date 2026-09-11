@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- DeepSeek Harness `0.1.5-rc.1` 及以上
+- DeepSeek Harness `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.2`）
 - 已初始化的 `web` profile
 - Node.js 和 pnpm 可由 DSH 的插件命令正常调用
 
@@ -22,7 +22,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ```sh
 # 推荐：固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.1
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
@@ -99,6 +99,11 @@ dsh plugin --profile web add C:\sudy\github\dsh-mcp-manager-ui
 
 先查看页面上的错误提示，再确认 profile 文件没有被其他进程同时编辑。插件使用内容版本检查，检测到外部修改时会拒绝覆盖。
 
-### 项目 MCP 显示「挂载失败：serverName 已被占用」
+### 项目 MCP 显示「挂载失败」或「作用域故障」
 
-项目 MCP 是每个会话各自挂载的，而官方 `@deepseek-ai/dsh-mcp-client` 的 `serverName` 在应用根全局唯一：同一项目的并发会话里，只有先挂载的那个拿到项目 MCP，其余会话报此错误。面板会在项目标签页顶部提示当前运行中的会话数。关闭占用会话（或重启 `dsh web`）后新开会话即可恢复；会话中修改项目配置同样要新开会话才生效。
+两者不是同一类故障，面板顶部的横幅和行上的标记会告诉你是哪一类：
+
+- **挂载失败**：本插件在会话 setup 阶段就没挂上（`${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。点开那一行的详情看具体原因。
+- **作用域故障**：连接本身是好的，但工具不在共享作用域层（落到了全局层）。原因是 `@deepseek-ai/dsh-scope` 在宿主与插件之间解析成了两份模块实例（作用域标签是模块内的 Symbol）。核对 DSH 安装的依赖树，确保只有一份 `@deepseek-ai/dsh-scope`。
+
+同一项目的多个会话不会因并发而撞 `serverName`：项目 MCP 按 `(项目, serverName)` 共用一份连接（0.1.5 起 `mcp-client` 按注册作用域判重），所以这个错误不会因「同项目开了两个会话」而出现。

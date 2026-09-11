@@ -33,12 +33,13 @@ function makeInactiveEffect() {
 // deferTools 默认 true = 生产时序：真实 mcp-client 的 apply 在 cordis 的微任务里才跑，工具要等
 // connect + tools/list 才注册，所以 setup 当场看到的一定是空集，投射完全依赖后续 tools/change。
 // 需要「工具已就绪」的用例显式调用 await fixture.connectAll()。
-async function createRuntimeFixture({ deferTools = true } = {}) {
+async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {}) {
   const wsRoot = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
   await mkdir(join(wsRoot, '.dsh'), { recursive: true })
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
     mcpServers: {
       db: { command: 'psql', env: { KEY: '${KEY}' } },
+      ...extraServers,
     },
     exclude: ['github'],
   }, null, 2))
@@ -130,6 +131,8 @@ async function createRuntimeFixture({ deferTools = true } = {}) {
       return scope
     },
   }
+  // 全局工具的真相源：作用域故障判定要能造出「工具出现在全局视图」这一事实，所以它是可写的。
+  const globalSchemas = [{ name: 'mcp__github__a' }, { name: 'mcp__exa__b' }]
   const ctx = {
     loader: {
       entries: () => [
@@ -146,7 +149,7 @@ async function createRuntimeFixture({ deferTools = true } = {}) {
     tools: {
       schemas: (scope) => {
         if (scope !== undefined && scopedTools.has(scope)) return [...scopedTools.get(scope).values()].map((d) => ({ name: d.name }))
-        return [{ name: 'mcp__github__a' }, { name: 'mcp__exa__b' }]
+        return globalSchemas
       },
       get: (name, scope) => (scope !== undefined ? scopedTools.get(scope)?.get(name) : undefined),
     },
@@ -163,6 +166,7 @@ async function createRuntimeFixture({ deferTools = true } = {}) {
   const sessionDisposers = []
   const fixture = {
     wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, warns, scopedTools, agentOwnTools, createdScopes,
+    globalSchemas,
     sessionDisposers,
     get connectionCount() { return connectionCount },
     sharedClientCalls,
@@ -797,7 +801,7 @@ test('shared project connection: a session disposed mid-connect returns its refe
     await pending
     await new Promise((resolve) => setTimeout(resolve, 30))
     assert.equal(fixture.connectionCount, 0, '会话已销毁，setup 续跑时建出的连接必须当场归还')
-    assert.deepEqual(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' }), { mounted: false, schemas: [], refs: 0, configStale: false, fiberState: undefined, duplicateOwners: [] })
+    assert.deepEqual(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' }), { mounted: false, schemas: [], refs: 0, configStale: false, fiberState: undefined, duplicateOwners: [], scopeError: '' })
     assert.equal(fixture.ownToolNames(A).length, 0, '已销毁的会话不应留下工具投射')
     assert.ok(fixture.warns.some((line) => line.includes('已归还共享连接引用')), JSON.stringify(fixture.warns))
   } finally {
@@ -1093,6 +1097,7 @@ test('shared project connection: the read-only diagnostics view reports refs and
       fiberState: 2,
       configStale: false,
       configError: '',
+      scopeError: '',
     })
     // 只读：问一次诊断不得动引用计数，否则这个接口自己就会把连接锁死或提前释放。
     assert.equal((await projectConnectionsView(fixture.ctx))[0].refs, 2)
@@ -1139,6 +1144,102 @@ test('shared project connection: a connection still being established is visible
 
     releaseImport()
     await pending
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('scope failures are recorded and surfaced instead of reading as “connected”', async () => {
+  const rt = await import('../lib/workspace-runtime.js')
+  const { summarizeWorkspaceRow } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    rt.installAgentRuntime(fixture.ctx)
+    const session = makeSession(fixture, 'scope-1')
+    // 两份 dsh-scope 实例的症状从建连起就存在：工具被注册到全局层。判定在「首次
+    // fiber ACTIVE 读取时」一次性定论（否则每行每 5s 轮询都要比一次全局视图），
+    // 所以泄漏事实必须在 setup 之前就位——这与真实故障的时序一致。
+    fixture.globalSchemas.push({ name: 'mcp__db__leaked' })
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(session.ctx, session.sessionAgent)
+
+    const status = rt.workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' })
+    assert.match(status.scopeError, /两份模块实例/, '作用域故障必须带出可判定的原因')
+
+    // 面板行：必须标成作用域故障，而不是「0 工具 → 连接失败」——否则用户会去查 MCP 配置。
+    // （真实宿主上 schemas(scopeKey) 认不出标签时会退回全局层，因此工具数是「读到」的而不是 0，
+    //  这条更隐蔽的形状由 real-host-integration.test.mjs 用真 dsh-tools 覆盖；这里的替身只建模
+    //  作用域层，所以不断言读取结果，只断言判定与上报。）
+    const row = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, { name: 'db', transport: 'stdio' }, undefined)
+    assert.equal(row.status, 'failed')
+    assert.equal(row.scopeFailed, true)
+    assert.notEqual(row.mountFailed, true, '这是作用域故障，不是挂载失败')
+    assert.match(row.lastError, /全局层/)
+
+    // 只读排障视图同样如实带出（面板暂未接线，这条接口是排障入口）。
+    const rows = await rt.projectConnectionsView(fixture.ctx)
+    assert.match(rows.find((entry) => entry.serverName === 'db').scopeError, /全局层/)
+    assert.equal(rt.workspaceScopeErrorsView(fixture.wsRoot).length, 1)
+
+    // 面板每 5s 轮询都会走到这条路径：同一故障只该打一条日志，且结论不翻腾。
+    const warnings = fixture.warns.filter((line) => line.includes('作用域工具视图不可用'))
+    assert.equal(warnings.length, 1, JSON.stringify(fixture.warns))
+    rt.workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' })
+    assert.equal(fixture.warns.filter((line) => line.includes('作用域工具视图不可用')).length, 1)
+    assert.equal(rt.workspaceScopeErrorsView(fixture.wsRoot).length, 1)
+
+    // 故障消失（依赖树修复）后新连接必须重新判定：记账要能清掉，不能变永久假警报。
+    fixture.globalSchemas.pop()
+    await session.dispose()
+    const healedSession = makeSession(fixture, 'scope-1-healed')
+    const healedCreated = await fixture.agentsService.create({ setup: undefined })
+    await healedCreated.setup(healedSession.ctx, healedSession.sessionAgent)
+    fixture.publishTools(fixture.createdScopes.at(-1))
+    const healed = rt.workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' })
+    assert.equal(healed.scopeError, '')
+    assert.deepEqual(rt.workspaceScopeErrorsView(fixture.wsRoot), [])
+    assert.equal(summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, { name: 'db', transport: 'stdio' }, undefined).scopeFailed, undefined)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('a same-named global instance is never reported as a scope failure (undecidable, so not asserted)', async () => {
+  const rt = await import('../lib/workspace-runtime.js')
+  const { summarizeWorkspaceRow } = await import('../lib/index.js')
+  // github 既有同名全局 loader 条目、它的工具又出现在全局视图里：与本项目连接的“泄漏”不可区分。
+  const fixture = await createRuntimeFixture({ extraServers: { github: { command: 'gh-mcp' } } })
+  try {
+    rt.installAgentRuntime(fixture.ctx)
+    const session = makeSession(fixture, 'scope-2')
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(session.ctx, session.sessionAgent)
+
+    const status = rt.workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'github' })
+    assert.equal(status.scopeError, '', '同名实例存在时不可判定，宁可不断言也不能冤枉健康连接')
+    const row = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, { name: 'github', transport: 'stdio' }, undefined)
+    assert.notEqual(row.scopeFailed, true)
+    assert.equal(row.status, 'failed', '连接已 ACTIVE 且 0 工具：仍按既有的 deriveMcpPhase 读作失败')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('a workspace registry failure is reported once instead of silently showing no projects', async () => {
+  const rt = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const originalGet = fixture.ctx.get
+    const unique = `registry down ${Date.now()}`
+    fixture.ctx.get = (name) => (name === 'workspaceRegistry'
+      ? { list() { throw new Error(unique) } }
+      : originalGet(name))
+
+    assert.deepEqual(await rt.listWorkspaceRecords(fixture.ctx), [])
+    assert.deepEqual(await rt.listWorkspaceRecords(fixture.ctx), [])
+    const warnings = fixture.warns.filter((line) => line.includes('读取工作区注册表失败'))
+    assert.equal(warnings.length, 1, '轮询会重复走到这里，同一故障只该打一条日志')
+    assert.match(warnings[0], new RegExp(unique))
   } finally {
     await fixture.cleanup()
   }

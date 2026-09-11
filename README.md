@@ -4,7 +4,7 @@
   <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
 
-DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮（可拖拽）管理全局 MCP（Web profile）与各项目的项目级 MCP（`.dsh/mcp.json`）。
+DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，通过右下角悬浮按钮（可拖拽）管理全局 MCP（Web profile）与各项目的项目级 MCP（`.dsh/mcp.json`，**本插件私有格式**：DSH 自身没有项目级 MCP 配置契约，见[兼容性](#兼容性)）。
 
 ## 界面预览
 
@@ -33,7 +33,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 按传输方式（HTTP/stdio）和连接状态筛选，支持按名称/命令/URL 搜索
 - 添加时一键套用常用预设模板（Filesystem、Memory、Sequential Thinking 等）
 - 从“内置 MCP”目录查看 Exa、Tavily、Firecrawl、Chrome DevTools 和 Playwright，勾选后按需追加；已有配置只识别并跳过，不会覆盖
-- **全局 + 项目双作用域**：顶部标签页在「全局」与各项目之间切换；全局 MCP 一次注册所有项目可用，项目级 MCP 写入项目目录 `.dsh/mcp.json` 仅该项目会话可见
+- **全局 + 项目双作用域**：顶部标签页在「全局」与各项目之间切换；全局 MCP 一次注册所有项目可用，项目级 MCP 写入项目目录 `.dsh/mcp.json` 仅该项目会话可见。该项目文件沿用 `mcpServers` 的 schema（与 Claude/Cursor 等一致），但**路径是插件自己的约定**——DSH 不读它，其他客户端也不读 `.dsh/mcp.json`
 - 项目级补充：在项目标签页添加/编辑/移除只写该项目 `.dsh/mcp.json`；项目可用「屏蔽」隐藏某个全局 MCP（写 `exclude`，新会话不再看到）
 - 全局注册共用的、项目级补充项目特有的：共用 MCP（Exa、GitHub、Chrome DevTools 等）全局注册一次，所有项目直接可用，无需每个项目重复配置
 - **两个入口，同一个面板**：右下角悬浮按钮（可拖拽、记忆位置）与 DSH 0.1.5 起的官方侧栏入口（`sidebar.footer.action`，展开态在「设置」上方显示「MCP」，收起成 56px 轨道时只剩图标）共享同一开关状态，都打开同一个浮层面板。面板浮在会话之上而**不切换主面板**，所以查连接状态、临时禁用某个 server 都不打断正在进行的对话。之所以不用主面板：MCP 管理多数发生在会话进行中（模型报某个 server 连不上、想加一个马上用），而主面板会把会话视图换掉，配置完还得再切回来。
@@ -42,7 +42,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 - 需要时经眼睛临时揭示被掩码的值（URL 凭据、args、env/headers），并可一键复制；明文值不配眼睛
 - 启用、禁用、重连、添加、编辑和移除 MCP
 - 跟随 DSH 深色/浅色主题，并适配窄屏和移动宽度
-- 支持 DSH rc.7+ 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
+- 支持 DSH 的完整 MCP 连接字段：`command`、`args`、`env`、`cwd`、`url`、`headers`、调用超时、启动失败策略和重连策略
 - 导入 Claude、Cursor、Cline、Roo 等使用的 `mcpServers` JSON，以及 VS Code 的 `servers` JSON
 - JSON 导入支持“合并（同名更新）”和“替换”，写入前提供预览
 - 结构化修改 Web profile 的 `cordis.patch.yml`，保留其他插件条目、注释和 `!!js` 环境变量表达式
@@ -116,7 +116,7 @@ DeepSeek Harness Web 的 MCP 管理面板。它在 Web Host 中运行一份，�
 
 | 项目 | 已验证版本 |
 |---|---|
-| DeepSeek Harness | `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.1`） |
+| DeepSeek Harness | `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.2`；`pnpm install && npm test` 含一组真机集成用例） |
 | Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 
@@ -145,13 +145,18 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
 
+两个不在 `@deepseek-ai/dsh-*` 契约面里、但在真实安装中位于宿主模块层的依赖，值得点名：
+
+- `@deepseek-ai/cordis-plugin-loader`（版本线 `1.0.3`）：`reveal` 用它的 `interpolate` 求值 `!!js` 配置节点。它是 vendor 包，靠 profile 的模块回退解析得到（与 `@deepseek-ai/cordis` 同一条路径）。
+- `@deepseek-ai/cordis` 的私有字段：`LoggerService.exporter()` 的 disposer 删的是「当时的最大 ID」而不是注册时的 ID（`lib/index.js` 的 `return () => this.exporters.delete(this._snExporter)`），热重载会误删其他插件的 exporter。本插件因此直接读写 `logger.exporters` / `logger._snExporter` 这对私有字段，并把 peer 锁到 `~4.0.2`；字段形状一变就退回 `exporter()` 通道并明确告警。
+
 ## 安装
 
 使用 DSH 插件命令安装。不要把 `mcp-manager-ui` 再手工插入 Web profile 的 `cordis.patch.yml`。
 
 ```sh
 # 正式使用固定 release tag。
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.2.1
 ```
 
 安装、升级、卸载和本地开发流程见 [安装与升级](docs/installation.md)。
@@ -185,7 +190,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 ## JSON 兼容范围
 
-DSH rc.7 原生支持两种 MCP transport：
+DSH 的 MCP 配置原生支持两种 transport：
 
 - `stdio`：`command`、`args`、`env`、`cwd`
 - `streamable-http`：`url`、`headers`
@@ -218,6 +223,8 @@ dsh --profile web --dump-config
 dsh web
 ```
 
+`npm test` 里除替身用例（`workspace-runtime.test.mjs` 等，验证插件内部自洽）外，还有一组**真机集成用例**（`real-host-integration.test.mjs`）：真 `@deepseek-ai/cordis` + 真 `dsh-tools` + 真 `dsh-scope` + 真 `dsh-mcp-client` + 一个真 stdio MCP 子进程。它证明的是替身测不出来的地基：`tools.schemas(scope)` 按对象同一性查层、`agentCtx` 必须能解析到 `tools`（`dsh-agent-loop` 的 `AgentLoop.inject` 含 `tools`）、`mcp-client` 的 `serverName` 注册表按 `scopeOf(ctx)` 判重，以及「同项目两会话共用一份连接、工具不泄漏到全局、最后一个会话结束后子进程退出」。
+
 ## 包结构
 
 - `package.json`：声明 `dsh.bundle` 和 Web `dsh.client`
@@ -242,10 +249,11 @@ dsh web
 - **连接中（loading）**：fiber 尚未 ACTIVE（还在跑 apply）。不猜测成功也不猜测失败。
 - **已停止（stopped）**：没有 fiber。全局意为条目未加载；项目语境里意为「尚无会话持有这份共享连接」，面板显示为「待会话挂载」。
 
-全局与项目行走的是**同一个判定函数**（`mcp-observability.deriveMcpPhase`）与同一个取值域，只有文案不同（项目行的 connected 写作「已连接（本项目会话共享）」、stopped 写作「待会话挂载」）。面板还会在项目行标出 `配置待生效`（配置改过但仍在复用旧连接）与 `N 个会话共用`。两类失败分开告知，不混为一谈：
+全局与项目行走的是**同一个判定函数**（`mcp-observability.deriveMcpPhase`）与同一个取值域，只有文案不同（项目行的 connected 写作「已连接（本项目会话共享）」、stopped 写作「待会话挂载」）。面板还会在项目行标出 `配置待生效`（配置改过但仍在复用旧连接）与 `N 个会话共用`。**三类**失败分开告知，不混为一谈：
 
 - **挂载失败**（`mountFailed`）：本插件在会话 setup 阶段就挂不上（配置里的 `${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。
 - **连接失败**（`status === 'failed'`）：mcp-client 那边的事。两者由 Host 分开标记，客户端不再用「lastError 存在」反推挂载失败。
+- **作用域故障**（`scopeFailed`）：连接是好的，但工具不在共享作用域层——工具落到了全局层，说明 `@deepseek-ai/dsh-scope` 在宿主与插件之间解析成了两份模块实例（作用域标签是模块内的 Symbol）。这是最隐蔽的故障形态：`tools.schemas(scopeKey)` 认不出标签时会**退回全局层**，面板因此显示「已连接 N 工具」，而工具其实对所有会话、所有项目都可见。所以判定直接对比全局视图（同名前缀的工具出现在全局视图 ⇒ 它们不属于本作用域），并把原因写在 `scopeFailed` 行与 `mcpManager/projectConnections` 的 `scopeError` 上。判定刻意保守：只有「没有同名全局条目、也没有其他项目用同名」时才断言，否则无法与「别人的同名实例的工具」区分；同一连接只判定一次（结论缓存在连接上，不在轮询里重复开销）。
 
 项目 MCP 的工具注册在它自己的共享作用域层里，全局工具视图看不到，所以面板按该作用域枚举（不是走全局 `tools.schemas()`）。
 
@@ -254,12 +262,13 @@ dsh web
 面板每行只回答得了「这个项目的这个 server 怎么了」。进程级的问题（一共有几条共享连接、有没有引用卡住不归零）由一个只读 RPC 回答：
 
 ```
-mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, refs, sessions, toolCount, fiberState, configStale, configError, duplicateOwners }] }
+mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, refs, sessions, toolCount, fiberState, configStale, configError, duplicateOwners, scopeError }] }
 ```
 
 - `state`：`ready`（已就绪）/ `connecting`（建连中，还没有连接态可读）/ `disposing`（释放中，占位未清）。卡在后两种状态不走才是最需要排障的形态，所以它们也如实出现在列表里。
 - `refs` 与 `sessions` 是**两个独立事实**：前者是引用计数，后者是真实持有它的存活会话数。健康时二者相等；`refs > sessions` 就是漏了引用（会话已销毁但引用没归还），后果是连接永不释放、配置永远刷不新。接口不把两者合成一个“健康”布尔，判读留给使用者。
 - `configStale` 为 `null` 表示无从判定（还没建连，或配置里已经没有这个 server），不伪造 `false`；读配置失败时原因在 `configError`。
+- `scopeError` 非空表示作用域视图不可用（工具落到了全局层，见「连接状态语义」的作用域故障）：这是「工具对所有会话可见、而面板看着一切正常」的唯一可见证据。
 - 全程只读：不改引用计数、不碰 fiber、不触发建连或释放。面板目前不接线，它是给排障留的接口。
 
 面板在详情页和编辑表单中默认掩码敏感值——URL 凭据、args、env/headers 的值都掩码，**明文与 `!!js`/`${VAR}` 引用一视同仁**：引用写法不该改变界面上显示什么，更不该把内部 `!!js` 表达式亮出来（旧实现把 `!!js process.env.X` 当“安全引用”原样保留，结果同一份配置一个掩码、一个泄底）。点击眼睛图标后经 Host 的 `reveal` 接口读取**有效运行值**（全局的 `!!js` 按该 entry 自己的 ctx 求值，项目层的 `${VAR}` 用建连同一个求值器解析）并在会话内临时显示，再点一次回到掩码；编辑时若未实际修改输入，保存仍保留原配置引用，不会把密钥写回配置。该读取只对当前 Web profile 管理的 server 开放。
