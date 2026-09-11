@@ -1,0 +1,39 @@
+name: ci
+
+# 行业标准：每次推到 main、每个 PR 都跑一遍测试，不要等到发版才发现坏。
+# 与 release.yml 共用同一套门槛（同一份 lockfile、同一 node 大版本、同一个 npm test），
+# 区别只是不发版——tag 推送由 release.yml 负责，这里的 branches 过滤保证 tag 不会重复触发。
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# 标准做法：同一分支的新推送取消上一次未跑完的运行，省 runner 也省等待。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install development dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 含真机集成用例（真 cordis/dsh-tools/dsh-scope/dsh-mcp-client + 真 stdio MCP 子进程）。
+      - name: Test
+        run: npm test
