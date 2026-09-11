@@ -85,25 +85,44 @@ dsh plugin --profile web update dsh-mcp-manager-ui
 
 ## 发布流程（维护者）
 
-npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，面板的更新提示查 GitHub Releases。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。
+npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，面板的更新提示查 GitHub Releases。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。这两件事现在由 `.github/workflows/release.yml` 在推 tag 时自动完成，并且会先校验「tag 与 package.json 版本一致」再跑测试。
+
+### 一次性准备（只需做一次）
+
+1. **首次发布必须本地交互式完成**：npm 要求发布带 2FA 挑战，而包必须先存在才能在包设置里配置 trusted publisher。
+
+   ```sh
+   npm login    # 会话 token 有效期 2 小时，发布时会弹 2FA 挑战
+   npm publish
+   ```
+
+2. 在 npmjs.com 该包的 Settings → **Trusted Publisher** → GitHub Actions，填：organization/user `Imzl-zl`、repository `dsh-mcp-manager-ui`、workflow filename `release.yml`（可另填 environment）。
+3. 之后可选但推荐：把包的 Publishing access 设为 **Require two-factor authentication and disallow tokens** —— trusted publishing 不受该限制影响（它用 OIDC，不是 token），而长期写凭据因此彻底用不上。
+
+### 每次发布
 
 ```sh
-# 1) 改版本：package.json + README/docs 里的版本与 tag 引用，并跑全量测试
+# 1) 改版本：package.json + README/docs 里的版本与 tag 引用，并本地跑一次全量测试
 npm test
 
-# 2) 提交并打 tag（tag 与上面提交必须一致）
+# 2) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
 git add -A && git commit -m "..."
 git push origin main
 git tag -a v1.2.1 -m "v1.2.1 ..." && git push origin v1.2.1
+```
 
-# 3) 发布到 npm（先 npm login；若开了 2FA 用 --otp）
-npm publish
+推 tag 后 CI 依次做：校验版本 → `pnpm install --frozen-lockfile` → `npm test` → `npm publish`（trusted publishing，无需 token）→ `gh release create`。想要手写 Release notes 就把稿子放到 `.github/release-notes/vX.Y.Z.md`（**不要**放 `docs/`，docs 会随包发布到 npm），没有的话用提交自动生成。
 
-# 4) 建 GitHub Release（面板更新提示的数据源）
+### 不用 CI 的手动路径（备选）
+
+`npm publish` 不会跑构建（包内已含 `lib/`，也没有 `prepare`/`prepublishOnly`），发布的就是提交里的文件；因此**先提交、再发布**，否则 npm 上的包会与 tag 内容不一致。发布前用 `npm pack --dry-run` 核对内容与体积。
+
+```sh
+npm publish          # 会弹 2FA 挑战；若用 bypass-2FA 的 granular token 则非交互
 gh release create v1.2.1 --title "dsh-mcp-manager-ui v1.2.1" --notes-file <notes>
 ```
 
-`npm publish` 不会跑构建（包内已含 `lib/`，也没有 `prepare`/`prepublishOnly`），发布的就是提交里的文件；因此**先提交、再发布**，否则 npm 上的包会与 tag 内容不一致。发布前用 `npm pack --dry-run` 核对内容与体积。
+`npm login` 的会话 token 只有 2 小时，超时需要重新登录；classic token 已被 npm 永久吊销，能非交互发布的只剩勾了 **Bypass 2FA** 的 granular access token——但它正在被 npm 收窄（已不能做账号/包管理类操作，且 2027-01 起将失去直接发布能力），所以长期方案是上面的 trusted publishing。
 
 ## 卸载
 

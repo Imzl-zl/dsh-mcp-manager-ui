@@ -1,0 +1,80 @@
+name: release
+
+# 一次发布 = 推一个 tag。CI 依次做：校验 tag 与 version 一致 -> 跑测试 -> 发 npm -> 建 GitHub Release。
+#
+# npm 侧用 **trusted publishing（OIDC）**：不需要任何长期 token，
+# 由 npm 用短时签名凭据认证（见 docs/installation.md 的发布流程）。
+#
+# 一次性准备（只需做一次）：
+#   1. 包必须已存在：首次发布要在本地交互式 `npm publish`（npm 要求 2FA 挑战）。
+#   2. npmjs.com -> 该包 -> Settings -> Trusted Publisher ->
+#      GitHub Actions: organization/user = Imzl-zl, repository = dsh-mcp-manager-ui,
+#      workflow filename = release.yml（可另填 environment）。
+#   3. 之后每次发布只需要：改 version、提交、`git push origin main`、`git push origin vX.Y.Z`。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # gh release create
+  id-token: write # npm trusted publishing（OIDC）
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 版本漂移是发布里最常见的错误：tag 与 package.json 不一致就直接失败，
+      # 不要发出一个「tag 说 1.2.2、包说 1.2.1」的版本。
+      - name: Verify the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${pkg} — bump the version, commit, then re-tag"
+            exit 1
+          fi
+          echo "releasing ${pkg}"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # trusted publishing 需要 npm CLI >= 11.5.1（OIDC 支持）
+      - name: Use a trusted-publishing capable npm
+        run: npm install -g npm@^11
+
+      - name: Install development dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 与本地 `npm test` 同一条门槛（含真机集成用例）。
+      # 若某次发布希望跳过，删掉这一步即可——发布的是已提交的预构建 lib/，没有构建步骤。
+      - name: Test
+        run: npm test
+
+      - name: Publish to npm
+        run: npm publish
+
+      # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
+      # 不放 docs/ —— docs 会随包发布到 npm。
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
+              --notes-file "$notes" --verify-tag
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
+              --generate-notes --verify-tag
+          fi
