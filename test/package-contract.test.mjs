@@ -41,7 +41,16 @@ test('package exposes one Web bundle entry', () => {
   //   @deepseek-ai/dsh-client-ui-slots —— 是纯核心库，从不声明 dsh.client / 导出 ./client
   // 死引用会被客户端模块系统静默跳过（不报错），所以只能靠这条断言拦住它回潮。
   assert.deepEqual(packageJson.dsh?.client?.inject, ['@deepseek-ai/dsh-api-remotes'])
-  assert.equal(packageJson.files?.includes('docs'), true)
+  // docs 的 markdown 随包发布（使用者能从包里读到设计与安装说明），
+  // 但 **截图不随包**：README 里的相对路径会被 npm 改写到 raw.githubusercontent 渲染
+  // （实测 5/5 张图正常），带进 tarball 只是白付 956KB。
+  assert.equal(packageJson.files?.includes('docs/*.md'), true)
+  assert.equal(packageJson.files?.includes('README.en.md'), true)
+  assert.equal(
+    packageJson.files?.some((entry) => entry === 'docs' || entry.startsWith('docs/images')),
+    false,
+    'docs 目录或截图不得整目录随包发布',
+  )
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
   assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)

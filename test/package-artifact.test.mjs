@@ -94,6 +94,16 @@ test('packed artifact resolves required DSH peers from the host fallback', async
       .join('\n')
     assert.doesNotMatch(packedText, /(?:0\.1\.0-)?rc\.6/)
 
+    // 发布体积：markdown 文档随包（使用者能读到设计与安装说明），但截图不随包。
+    // npm 页面上的图片来自 raw.githubusercontent（实测 5/5 张图正常渲染），
+    // 把 956KB 截图带进 tarball 属于白付。
+    const paths = entries.map((entry) => entry.path)
+    assert.equal(paths.some((path) => path.startsWith('package/docs/images/')), false, '截图不得随包发布')
+    assert.ok(paths.includes('package/docs/design.md'), 'docs/design.md 应在包里')
+    assert.ok(paths.includes('package/docs/installation.md'), 'docs/installation.md 应在包里')
+    assert.ok(paths.includes('package/docs/json-import.md'), 'docs/json-import.md 应在包里')
+    assert.ok(paths.includes('package/README.md') && paths.includes('package/README.en.md'), '两份 README 都应在包里')
+
     const profileModules = join(root, 'profiles', 'web', 'node_modules')
     const hostModules = join(root, 'profiles', 'node_modules')
     await linkPackage(profileModules, 'yaml')

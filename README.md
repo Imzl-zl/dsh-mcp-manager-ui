@@ -1,5 +1,7 @@
 # dsh-mcp-manager-ui
 
+中文 | [English](README.en.md)
+
 <p align="center">
   <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
 </p>
