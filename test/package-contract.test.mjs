@@ -8,6 +8,9 @@ const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'u
 const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
 const hostIndex = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
 const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
+// 深层设计（共享连接模型、连接状态语义、已知限制、依赖细节）单独成文，
+// README 只留使用路径；下面这些断言跟着内容走，就近检查。
+const designDoc = await readFile(new URL('../docs/design.md', import.meta.url), 'utf8')
 const installationGuide = await readFile(new URL('../docs/installation.md', import.meta.url), 'utf8')
 const lockfile = parse(await readFile(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8'))
 const dshHostPackages = [
@@ -407,17 +410,17 @@ test('project MCP: the shared-connection reference is owned by cordis, not by ou
   assert.match(runtime, /if \(entry\.released\) continue/)
 })
 
-test('project MCP: the README states the protocol claim per spec revision and names no false escape hatch', () => {
+test('project MCP: the design doc states the protocol claim per spec revision and names no false escape hatch', () => {
   // 随包 SDK 协商的是 2025-11-25（没有 Statelessness 一节），无状态那套要求来自 2026-07-28。
   // 不写清版本，等于把“按 2025-11-25 维护连接级状态”的服务器说成有缺陷。
-  assert.match(readme, /2026-07-28[^]*?Statelessness/)
-  assert.match(readme, /2025-11-25[^]*?没有\*\*\s?Statelessness/)
-  assert.doesNotMatch(readme, /那是服务器自身的缺陷/)
+  assert.match(designDoc, /2026-07-28[^]*?Statelessness/)
+  assert.match(designDoc, /2025-11-25[^]*?没有\*\*\s?Statelessness/)
+  assert.doesNotMatch(designDoc, /那是服务器自身的缺陷/)
   // 「放到全局作用域」「项目内另起 serverName」都给不了 per-session 隔离，不能当建议给出。
-  assert.match(readme, /不支持 per-session 隔离/)
-  assert.match(readme, /把它挪到全局作用域也没用/)
+  assert.match(designDoc, /不支持 per-session 隔离/)
+  assert.match(designDoc, /把它挪到全局作用域也没用/)
   // #28860 属于 anthropics/claude-code，不是 DSH 的提案。
-  assert.doesNotMatch(readme, /DSH 的 shared-daemon 提案/)
+  assert.doesNotMatch(designDoc, /DSH 的 shared-daemon 提案/)
 })
 
 test('project MCP: the tools contract carries wsPath, so the detail pane is not permanently empty', async () => {
@@ -444,8 +447,8 @@ test('project MCP: the read-only diagnostics RPC is declared, implemented and do
   assert.match(host, /async projectConnections\(\) \{/)
   assert.match(host, /projectConnectionsView\(this\.ctx\)/)
   assert.match(client, /mcpManager\/projectConnections/)
-  // refs 与 sessions 是两个独立事实（相等=健康），README 必须把这条判读方式写清楚，
+  // refs 与 sessions 是两个独立事实（相等=健康），设计文档必须把这条判读方式写清楚，
   // 否则这个接口的返回值没人知道怎么用。
-  assert.match(readme, /projectConnections/)
-  assert.match(readme, /refs\s*>\s*sessions/)
+  assert.match(designDoc, /projectConnections/)
+  assert.match(designDoc, /refs\s*>\s*sessions/)
 })
