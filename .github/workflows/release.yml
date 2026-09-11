@@ -11,10 +11,20 @@ name: release
 #      GitHub Actions: organization/user = Imzl-zl, repository = dsh-mcp-manager-ui,
 #      workflow filename = release.yml（可另填 environment）。
 #   3. 之后每次发布只需要：改 version、提交、`git push origin main`、`git push origin vX.Y.Z`。
+#
+# 想先确认流水线本身健康（不改任何版本、不发布），手动跑一次：
+#   gh workflow run release.yml --ref main -f dry_run=true
+# 它会跑同样的安装 + 测试，只在最后跳过发布与建 Release。
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只跑安装与测试，不发布 npm、不建 Release'
+        type: boolean
+        default: true
 
 permissions:
   contents: write # gh release create
@@ -28,7 +38,9 @@ jobs:
 
       # 版本漂移是发布里最常见的错误：tag 与 package.json 不一致就直接失败，
       # 不要发出一个「tag 说 1.2.2、包说 1.2.1」的版本。
+      # 手动试跑（workflow_dispatch）没有 tag，跳过这项比较。
       - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
@@ -37,6 +49,12 @@ jobs:
             exit 1
           fi
           echo "releasing ${pkg}"
+
+      - name: Report the version under test
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          echo "dry run on ${GITHUB_REF_NAME}: ${pkg}"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -60,11 +78,13 @@ jobs:
         run: npm test
 
       - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
         run: npm publish
 
       # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
       # 不放 docs/ —— docs 会随包发布到 npm。
       - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
