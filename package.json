@@ -53,6 +53,7 @@
     "@deepseek-ai/dsh-mcp-client": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-scope": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-loader": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2"
   },
   "dsh": {

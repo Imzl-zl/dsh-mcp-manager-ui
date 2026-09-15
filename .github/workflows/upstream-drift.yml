@@ -1,0 +1,89 @@
+name: upstream-drift
+
+# 为什么需要它：peer 范围只回答"能不能装"，回答不了"装上还对不对"。上游在 master 上
+# 把 typert codec 从 schema: 改成 create() 那一次，就满足我们声明的范围——插件的兼容性
+# 声明天生拦不住这类破坏性变更，面对宿主升级我们必然是"慢一步"的那个。
+# 所以按周主动去问 npm：有没有和开发基线不同的宿主渠道？有就把宿主整套换到那个版本、
+# 跑契约用例（含真机集成：真 cordis / dsh-tools / dsh-scope / dsh-mcp-client + 真 stdio
+# MCP 子进程）。
+#
+# 只做检测与报告：仅由 schedule / 手动触发，不参与任何 PR 的合并门槛。红了就是"该做的事
+# 来了"——先分清失败的是契约用例还是版本 pin 断言，判读方法见 docs/design.md「版本范围
+# 怎么定」。
+on:
+  schedule:
+    # 每周一 03:00 UTC。官方发布节奏快，但一周一次已足够"不慢太多"。
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install development dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 对每个宿主渠道跑契约用例
+        run: |
+          set -u
+
+          # 开发基线 = package.json 里 dsh-agent 的 pin，也就是我们声明"已验证"的那一版
+          # （去掉 ^ / ~ 前缀）。package-contract 用例会把这条 pin 钉住。
+          baseline="$(node -p "require('./package.json').devDependencies['@deepseek-ai/dsh-agent'].replace(/^[^0-9]*/, '')")"
+          echo "开发基线: $baseline"
+
+          # 契约用例 = 除 package-contract 之外的全部用例。package-contract 断言的是
+          # "pin 等于某个已验证版本 / lockfile 只把宿主当开发基线"——漂移模式下这些断言
+          # 按定义就该失败，回答不了"契约还成立吗"，所以不参与判定。
+          files="$(ls test/*.test.mjs | grep -v 'package-contract')"
+
+          # latest 也测：那是 npx 默认取到、用户实际在跑的版本，通常比开发基线旧。
+          failed=0
+          for tag in latest next alpha; do
+            version="$(npm view "@deepseek-ai/dsh@$tag" version 2>/dev/null || true)"
+            if [ -z "$version" ]; then
+              echo "::notice::@deepseek-ai/dsh@$tag 不存在，跳过"
+              continue
+            fi
+            if [ "$version" = "$baseline" ]; then
+              echo "::notice::$tag == 开发基线（$version），跳过"
+              continue
+            fi
+
+            echo "::group::$tag → $version"
+            # 宿主整套换到该版本；传递依赖（dsh-llm / dsh-scope / dsh-system-prompt …）
+            # 由 pnpm 一起带到同一版本。此时插件自己的 peer 范围并不满足，pnpm 只给警告
+            # ——这正是要测的场景。pnpm 会自行补 minimumReleaseAgeExclude，无需手工维护。
+            if pnpm add -D \
+              "@deepseek-ai/dsh-agent@$version" \
+              "@deepseek-ai/dsh-agent-loop@$version" \
+              "@deepseek-ai/dsh-atomic-write@$version" \
+              "@deepseek-ai/dsh-mcp-client@$version" \
+              "@deepseek-ai/dsh-scope@$version" \
+              "@deepseek-ai/dsh-tools@$version" \
+              "@deepseek-ai/dsh-typert-loader@$version" \
+              "@deepseek-ai/dsh-typert-protocol@$version"; then
+              # 不解析输出、不吞失败：失败时整段用例输出留在日志里供判读。
+              node --test $files || failed=1
+            else
+              # 装不上就不能拿旧版本的结果冒充通过。
+              echo "::error::安装 @deepseek-ai/dsh@$version 失败"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+
+          exit $failed

@@ -93,7 +93,22 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 旧版本不再兼容，也不再为它们保留降级分支。
 
-开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
+### 版本范围怎么定（以及它管不到什么）
+
+三条取舍规则，改动范围前先读这里：
+
+1. **下限是硬要求，上限只是信号灯**。`0.1.5` 之前没有上面那两个能力，装上必坏，所以下限不能松。上限 `0.2.0` 只在宿主确实会向后破坏时才有意义——DSH 自称「开发者预览…未来将出现破坏兼容性的变更」，而插件面对宿主升级必然慢一步，所以留一个**粗**上限：它的作用是把「你正跑在一个我们没验证过的大版本上」变成一句看得见的警告（pnpm 打 `[WARN] Issues with peer dependencies found`，npm 直接 ERESOLVE），而不是静默装上再出怪问题。**下限不会挡住任何新版本，只有上限可能「限死」，所以上限宁粗不细。**
+2. **预发布不需要特殊照顾**。按 npm 的 semver 规则，`0.1.6-alpha.1` 会落在 `>=0.1.5-rc.1 <0.2.0` 之外（预发布只在同名 `major.minor.patch` 元组内被承认）；但 DSH profile 用的安装器是 pnpm（`nodeLinker: hoisted` + `autoInstallPeers: false`），它对 peer 校验**不套用**这条规则：实测同区间的预发布完全静默，只有「正式版不匹配」才会警告。所以这个范围既不会挡住 0.1.6 或以后 0.1.x 的预发布，也不会挡住 0.1.x 的正式版——不必为「覆盖未来预发布」去改范围（semver 也表达不了这种意思）。
+3. **范围回答不了「装上还对不对」，而 CI 也只能盖住一半**。上游在 master 上把 typert codec 从 `schema:` 改成 `create()` 那次，就满足上面这个范围。真正的保护分两层：**(a) 运行时契约**由 [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) 每周把宿主整套换到 `latest` / `next` / `alpha` 三个渠道跑契约用例（`test/*.test.mjs` 去掉 `package-contract`，因为那份断言的是 pin 本身）；**(b) 宿主侧的加载期契约**（`lib/typert.js` 的形状由宿主 loader 校验，不由我们校验）由 `test/typert-manifest.test.mjs` 覆盖：它直接调宿主自己的 `validateTypertManifest` 验这份产物，形状一变就红。这一层原本是缺口——既有用例只保证 `lib/typert.js` 与 `lib/client.js` 两份产物彼此一致（`client-lifecycle.test.mjs`），宿主改了要求也不会变红，而后果是用户升级 DSH 后面板整个不可用。它也是 `@deepseek-ai/dsh-typert-loader` 只进 `devDependencies`、不进 peer 的原因：校验发生在宿主进程里，插件运行时不 import 它。
+
+漂移任务红了怎么读：
+
+- **只有 `package-contract.test.mjs` 的 pin / lockfile 断言失败** → 宿主可用，去同步 pin：`package.json` 的 devDeps、两份测试里的 `COMPAT_WINDOW` 常量、README 与 installation 的「已验证至」，然后 `npm test` 确认全绿。
+- **契约用例（含真机集成）失败** → 上游契约真的变了，按失败点修插件并发补丁。
+
+已实测：`0.1.6-alpha.1` 与 `latest`（`0.1.5-rc.1`）上契约用例均 129/129 通过；`0.1.6-alpha.1` 上全套 169 项里唯一失败的是 pin 断言，属上面第一类。
+
+开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）；唯一的例外是 `@deepseek-ai/dsh-typert-loader`，它只供测试用（见上文第 3 条），不是运行期宿主契约。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
 
 两个不在 `@deepseek-ai/dsh-*` 契约面里、但在真实安装中位于宿主模块层的依赖，值得点名：
 
