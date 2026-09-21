@@ -83,6 +83,8 @@ Two entry points, one panel:
 
 The panel floats above the session; closing it ("Close" or Esc) does not affect the conversation.
 
+Both entries can be turned off independently: the panel header's "Entry" control offers `Floating button + sidebar` (default), `Floating button only`, or `Sidebar only`. They **cannot both be hidden** — the panel is only reachable through these two entries, so this is a three-way choice, not two independent switches. The choice is stored in the browser (localStorage), so a different browser or a cleared cache starts from the default again.
+
 ### Global vs project
 
 Tabs switch between "Global" and each project:

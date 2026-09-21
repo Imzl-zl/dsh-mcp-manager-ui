@@ -21,3 +21,26 @@ test('lib/typert.js passes the host loader own validator', () => {
   // （例如 `invocation "..." result codec has no create() factory`）。
   validateTypertManifest(packageName, TYPERT)
 })
+
+// 为什么还要额外钉一条：本地 devDependency 的 loader 是**开发基线**（写这份时是
+// 0.1.5-rc.2），它只校验 `schema`，看不见 0.1.6-alpha.2 起的 `create()` 要求——上面那条
+// 用例因此在基线 loader 上永远是绿的，形状缺一半要等每周的漂移任务才知道（2026-09-21
+// 就是这样红的）。所以这里把「strict codec 同时带 schema 与 create()」这条双渠道契约直接
+// 钉住：不依赖装了哪个版本的 loader，也不等 CI。取舍理由见 docs/design.md「版本范围怎么定」。
+test('every strict codec carries both the schema value and the create() factory', () => {
+  const codecs = []
+  for (const invocation of TYPERT.invocations) {
+    if (invocation.invocation.codec !== undefined) codecs.push([invocation.id + ' receiver', invocation.invocation.codec])
+    for (const parameter of invocation.parameters) codecs.push([invocation.id + ' parameter ' + parameter.wire, parameter.codec])
+    codecs.push([invocation.id + ' result', invocation.result])
+  }
+  assert.ok(codecs.length > 0)
+  for (const [subject, codec] of codecs) {
+    assert.equal(codec.mode, 'strict', subject + ' 必须是 strict codec')
+    // 0.1.5-rc.x 的 loader/registry 走这条。
+    assert.equal(typeof codec.schema?.parse, 'function', subject + ' 缺少 schema（最新 RC 会加载即拒）')
+    // 0.1.6-alpha.2 起的 loader/registry 走这条。
+    assert.equal(typeof codec.create, 'function', subject + ' 缺少 create() 工厂（alpha 会加载即拒）')
+    assert.equal(typeof codec.create().parse, 'function', subject + ' 的 create() 没有返回可用的 schema')
+  }
+})

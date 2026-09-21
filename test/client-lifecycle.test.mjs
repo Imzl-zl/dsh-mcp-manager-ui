@@ -91,7 +91,10 @@ test('client Remote contribution matches the generated Typert contract', async (
     }))
     assert.deepEqual(actual, expected)
     const nameCodec = contribution.descriptors.find((descriptor) => descriptor.method === 'status').parameters[0].codec
+    // 两条路径都要能拒非法值：`schema` 是 0.1.5-rc.x registry 走的那条，`create()` 是
+    // 0.1.6-alpha.2 起走的那条（registry 用 `record.value ??= record.create()` 物化）。
     assert.throws(() => nameCodec.schema.parse(42), /string/i)
+    assert.throws(() => nameCodec.create().parse(42), /string/i)
     await dispose()
   } finally {
     cleanup()

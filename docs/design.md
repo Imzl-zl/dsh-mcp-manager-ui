@@ -4,6 +4,7 @@
 
 - [项目 MCP 的共享连接模型](#项目-mcp-的共享连接模型)
 - [连接状态语义](#连接状态语义)
+- [入口显示偏好](#入口显示偏好为什么不能两个都关)
 - [已知限制](#已知限制)
 - [兼容性与依赖细节](#兼容性与依赖细节)
 - [设计约束](#设计约束)
@@ -70,6 +71,19 @@ mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, r
 - `scopeError` 非空表示作用域视图不可用（工具落到了全局层，见上文的作用域故障）：这是「工具对所有会话可见、而面板看着一切正常」的唯一可见证据。
 - 全程只读：不改引用计数、不碰 fiber、不触发建连或释放。面板目前不接线，它是给排障留的接口。
 
+## 入口显示偏好（为什么不能两个都关）
+
+面板只有两个入口：右下角悬浮按钮（`shell.overlay`）与左侧栏底部「MCP」（`sidebar.footer.action`，0.1.5 起声明）。两个都能单独关掉，但**不能同时关**——真关了两者，面板就再也打不开（只能手改 localStorage 才能回来）。
+
+这条不靠 UI 的禁用逻辑保证，而靠**数据模型**：偏好存的是一个三值枚举（`both` / `fab` / `sidebar`），不是一个入口一个 boolean。「两个都关」这个组合在类型里不存在，所以不需要守卫、灰置的按钮或「至少留一个」的提示文案；`test/client-entry.test.mjs` 直接对那张可见性表断言「每一项至少一个入口可见」，将来新增入口时先在那里红，而不是等用户把自己锁在门外。
+
+两个实现要点值得写下来，因为都是踩过的坑：
+
+- **面板的挂载点与悬浮按钮是同一个 slot 注册**（`shell.overlay`），所以「关掉悬浮按钮」只能是不渲染那个按钮，注册必须留着——侧栏入口只改 `panelVisibility`，真正渲染面板的是这个组件。把整个组件也用偏好门住 = 侧栏入口点了没反应，用户直接锁死。渲染决策抽成纯函数 `overlaySeats()`，就为了把这条能脱离 React 测出来（组件在 node 里渲染不起来，测试替身的 hooks 是空实现）。
+- **侧栏入口隐藏用「渲染 null」，不注销注册**：宿主 list 型 slot 把每个条目的组件直接渲染进侧栏的 `.footerActions`（`display:flex`、无 gap/padding），外层 outlet 锚点又是 `display:contents`，所以空子树不占布局、也不留空行（对着 0.1.5-rc.2 的 `dsh-client-ui-renderer` 确认过）。注销注册要多管一份生命周期，换不来任何可观测差别。
+
+偏好存 localStorage（`dsh-mcp-manager-ui/entry`），与悬浮按钮位置（`dsh-mcp-manager-ui/fab-pos`）同一条路。不进 profile 配置：本插件没有 Config 面，客户端半也拿不到插件配置，为一个显示偏好加一条 host→client 投递不划算，而且改配置还要等宿主热加载。localStorage 是外部输入（旧版本写的、手改的、原型链上的键），一律归一化回默认；存储被禁用时本次会话内仍然生效，只是不跨会话记忆。
+
 ## 已知限制
 
 - **首轮就绪时序**：项目 MCP 默认异步建连，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
@@ -99,14 +113,25 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 1. **下限是硬要求，上限只是信号灯**。`0.1.5` 之前没有上面那两个能力，装上必坏，所以下限不能松。上限 `0.2.0` 只在宿主确实会向后破坏时才有意义——DSH 自称「开发者预览…未来将出现破坏兼容性的变更」，而插件面对宿主升级必然慢一步，所以留一个**粗**上限：它的作用是把「你正跑在一个我们没验证过的大版本上」变成一句看得见的警告（pnpm 打 `[WARN] Issues with peer dependencies found`，npm 直接 ERESOLVE），而不是静默装上再出怪问题。**下限不会挡住任何新版本，只有上限可能「限死」，所以上限宁粗不细。**
 2. **预发布不需要特殊照顾**。按 npm 的 semver 规则，`0.1.6-alpha.1` 会落在 `>=0.1.5-rc.1 <0.2.0` 之外（预发布只在同名 `major.minor.patch` 元组内被承认）；但 DSH profile 用的安装器是 pnpm（`nodeLinker: hoisted` + `autoInstallPeers: false`），它对 peer 校验**不套用**这条规则：实测同区间的预发布完全静默，只有「正式版不匹配」才会警告。所以这个范围既不会挡住 0.1.6 或以后 0.1.x 的预发布，也不会挡住 0.1.x 的正式版——不必为「覆盖未来预发布」去改范围（semver 也表达不了这种意思）。
-3. **范围回答不了「装上还对不对」，而 CI 也只能盖住一半**。上游在 master 上把 typert codec 从 `schema:` 改成 `create()` 那次，就满足上面这个范围。真正的保护分两层：**(a) 运行时契约**由 [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) 每周把宿主整套换到 `latest` / `next` / `alpha` 三个渠道跑契约用例（`test/*.test.mjs` 去掉 `package-contract`，因为那份断言的是 pin 本身）；**(b) 宿主侧的加载期契约**（`lib/typert.js` 的形状由宿主 loader 校验，不由我们校验）由 `test/typert-manifest.test.mjs` 覆盖：它直接调宿主自己的 `validateTypertManifest` 验这份产物，形状一变就红。这一层原本是缺口——既有用例只保证 `lib/typert.js` 与 `lib/client.js` 两份产物彼此一致（`client-lifecycle.test.mjs`），宿主改了要求也不会变红，而后果是用户升级 DSH 后面板整个不可用。它也是 `@deepseek-ai/dsh-typert-loader` 只进 `devDependencies`、不进 peer 的原因：校验发生在宿主进程里，插件运行时不 import 它。
+3. **范围回答不了「装上还对不对」，而 CI 也只能盖住一半**。`0.1.6-alpha.2` 把 typert strict codec 从 `schema:`（zod v4 实例）换成 `create()`（进程内 realm 的懒工厂，registry 用 `record.value ??= record.create()` 物化）就是这么一次：它落在 `>=0.1.5-rc.1 <0.2.0` 之内，插件的兼容性声明天生拦不住，2026-09-21 的漂移任务因此变红（那一次 130 项里唯一失败的就是加载期契约那条）。真正的保护分两层：**(a) 运行时契约**由 [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) 每周把宿主整套换到 `latest` / `next` / `alpha` 三个渠道跑契约用例（`test/*.test.mjs` 去掉 `package-contract`，因为那份断言的是 pin 本身）；**(b) 宿主侧的加载期契约**（`lib/typert.js` 的形状由宿主 loader 校验，不由我们校验）由 `test/typert-manifest.test.mjs` 覆盖：它直接调宿主自己的 `validateTypertManifest` 验这份产物，形状一变就红；同一文件里还有一条**不依赖 loader 版本**的形状断言，钉住「strict codec 同时带 `schema` 与 `create()`」（下一条理由）——本地 devDependency 的 loader 是开发基线，看不见 alpha 的要求，只靠前者要等一周才知道。这一层原本是缺口——既有用例只保证 `lib/typert.js` 与 `lib/client.js` 两份产物彼此一致（`client-lifecycle.test.mjs`），宿主改了要求也不会变红，而后果是用户升级 DSH 后面板整个不可用。它也是 `@deepseek-ai/dsh-typert-loader` 只进 `devDependencies`、不进 peer 的原因：校验发生在宿主进程里，插件运行时不 import 它。
+
+**为什么 strict codec 两个键都写**（`lib/typert.js` 与 `lib/client.js` 各一份，`client-lifecycle.test.mjs` 钉住两者一致）：宿主在两个渠道上查**不同的键**，且都忽略对方的键——`0.1.5-rc.x`（= 当时的 `latest` / `next`，也就是 `npx` 默认装到的那条）查 `codec.schema.parse` 必须是 zod v4 实例；`0.1.6-alpha.2` 起查 `typeof codec.create === 'function'`。少写 `schema` 会在最新 RC 上加载即拒，少写 `create` 会在 alpha 上加载即拒；`mode: 'src-json'` 不是出路（loader 强制 invocation 的 codec 必须是 strict）。拿三个版本的 loader 直接跑自己的产物：
+
+| codec 形状 | loader `0.1.5-rc.2` | loader `0.1.6-alpha.1` | loader `0.1.6-alpha.2` |
+|---|---|---|---|
+| 只有 `schema` | PASS | PASS | 拒：`has no create() factory` |
+| 只有 `create()` | 拒：`is not backed by a zod v4 schema` | 拒 | PASS |
+| **双写** | PASS | PASS | PASS |
+| `mode: 'src-json'` | 拒 | 拒 | 拒 |
+
+浏览器半（`@deepseek-ai/dsh-typert-registry` 的 `lib/client.js`）做同一份校验，所以 `lib/client.js` 里的 codec 必须同步改——只改 host 那份会变成「面板能加载，一调用就炸」。
 
 漂移任务红了怎么读：
 
 - **只有 `package-contract.test.mjs` 的 pin / lockfile 断言失败** → 宿主可用，去同步 pin：`package.json` 的 devDeps、两份测试里的 `COMPAT_WINDOW` 常量、README 与 installation 的「已验证至」，然后 `npm test` 确认全绿。
 - **契约用例（含真机集成）失败** → 上游契约真的变了，按失败点修插件并发补丁。
 
-已实测：`0.1.6-alpha.1` 与 `latest`（`0.1.5-rc.1`）上契约用例均 129/129 通过；`0.1.6-alpha.1` 上全套 169 项里唯一失败的是 pin 断言，属上面第一类。
+已实测：`latest` / `next`（`0.1.5-rc.2`）与 `0.1.6-alpha.1` 上契约用例全绿；`0.1.6-alpha.2` 上修复前唯一失败的就是 `typert-manifest` 那条，双写后按漂移任务的文件清单 137/137 全绿（复现方式：把宿主整套换到 alpha.2 再跑那份清单）。`0.1.6-alpha.1` 上全套 169 项里唯一失败的是 pin 断言，属上面第一类。
 
 开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）；唯一的例外是 `@deepseek-ai/dsh-typert-loader`，它只供测试用（见上文第 3 条），不是运行期宿主契约。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
 
