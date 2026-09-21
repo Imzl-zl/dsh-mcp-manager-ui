@@ -34,7 +34,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.2.1')
+  assert.equal(packageJson.version, '1.3.0')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -110,9 +110,9 @@ test('documentation targets the verified DSH and plugin releases', () => {
     // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.2\.1/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.3\.0/)
     // npm 是主安装路径（它让 `dsh plugin update` 能在 ^1.x 内自动升级），必须写进两份文档。
-    assert.match(document, /dsh plugin --profile web add dsh-mcp-manager-ui@\^1\.2\.1/)
+    assert.match(document, /dsh plugin --profile web add dsh-mcp-manager-ui@\^1\.3\.0/)
     assert.match(document, /dsh plugin --profile web update dsh-mcp-manager-ui/)
   }
 })
