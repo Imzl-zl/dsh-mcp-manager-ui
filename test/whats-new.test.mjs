@@ -133,7 +133,14 @@ test('the notice is decided by the pure rule and only recorded when dismissed', 
   assert.match(clientSource, /call\('whatsNew'\)/)
   assert.match(clientSource, /whatsNewFor\(res\.current, seen, res\.entries\)/)
   assert.match(clientSource, /localStorage\.getItem\(WHATS_NEW_SEEN_KEY\)/)
-  assert.match(clientSource, /localStorage\.setItem\(WHATS_NEW_SEEN_KEY, whatsNew\.current\)/)
-  // 提示挂在 shell.overlay 那个注册里（面板关着也要能弹），不是面板内部。
-  assert.match(clientSource, /whatsNew \? h\(WhatsNewModal/)
+  assert.match(clientSource, /localStorage\.setItem\(WHATS_NEW_SEEN_KEY, notice\.current\)/)
+})
+
+test('the notice is triggered by opening the panel, not by loading the page', () => {
+  // 它是面板的弹层：和添加 MCP / 导入 JSON 挂在同一处，由面板挂载/卸载决定生死。
+  // 挂到 shell.overlay 那个座位上（页面加载就挂载）会变成升级后首次启动被弹框挡住，
+  // 而且提示的本来就是面板里多出来的东西，在面板里说才用得上。
+  assert.match(clientSource, /h\(JsonImportModal,[\s\S]{0,400}?h\(WhatsNewModal, \{ call \}\)/)
+  assert.match(clientSource, /const WhatsNewModal = \(\{ call \}\) =>/)
+  assert.doesNotMatch(clientSource, /seats[\s\S]{0,200}WhatsNewModal/)
 })

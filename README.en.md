@@ -45,7 +45,7 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 - Import `mcpServers` JSON from Claude, Cursor, Cline, or Roo, and `servers` JSON from VS Code, with a preview before writing; "merge" and "replace" modes
 - Follows the DSH dark/light theme and adapts to narrow/mobile widths
 - Non-intrusive update notice: a dismissible banner when a newer release exists (at most one check per day, never auto-updates, disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`)
-- **What changed, said once**: after the version changes, the first load shows a small card listing what's new and where to find it (e.g. that the "Entry" control sits in the panel header); confirming it never shows it again, and it uses no network and sends nothing
+- **What changed, said once**: after the version changes, the first time you open the panel a small card lists what's new and where to find it (e.g. that the "Entry" control sits in the panel header); confirming it never shows it again, and it uses no network and sends nothing
 
 ## Install
 
