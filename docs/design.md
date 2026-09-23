@@ -112,6 +112,7 @@ mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, r
 - **关掉最后一个会话后立刻重开会稍等**：新连接要等旧连接完全销毁才建（避免撞名），这段等待取决于 MCP 服务端退出的快慢。**上界约 9 秒**：MCP SDK 的 stdio 关闭本身最多等 2s（stdin 关掉）+ 2s（SIGTERM）再 SIGKILL，mcp-client 对关闭确认又有 5 秒上限。同一会话的多个 server 是并行释放的，不累加。实测正常服务器远低于这个上界（Windows、SDK 1.30.0）：`transport.close()` 对 `@modelcontextprotocol/server-memory` 35ms、`mcp-deepwiki` 43ms、`fast-context-mcp` 34ms、`serena` 167ms；整个 `dsh web` 进程的优雅退出（同时拆 4 个 stdio + 2 个 HTTP 连接）约 0.5s。慢的前提是服务器不理 stdin EOF，见下一条。
 - **Windows：忽略 stdin EOF 的 stdio 服务器会漏孙进程**。stdio 服务器在 Windows 上通常是一条进程链（`npx` 解析成 `npx.cmd`，于是 `dsh → cmd.exe → node`），而 MCP SDK 的 `StdioClientTransport.close()` 只对**直接子进程**发 SIGTERM/SIGKILL（`sdk/dist/esm/client/stdio.js` 的 `close()`），没有 job object，孙进程不在射程内。实测常见服务器（memory、deepwiki、fast-context、serena、chrome-devtools）都在 stdin EOF 时自行退出，因此 DSH 正常退出与被强杀都**不残留进程**；但这份干净来自服务器行为，不是 transport 的保证——故意忽略 stdin EOF 的服务器会让 `close()` 吃满 4 秒（2s + 2s）并留下一个孤儿孙进程。遇到这类服务器请让它自己处理退出，或改用 `streamable-http`。
 - **DSH 的退出宽限是 5 秒**：官方启动器在 SIGINT/SIGTERM 后只给整棵插件树 5 秒（`dsh/lib/profile-boot-*.js` 的 `PROCESS_SHUTDOWN_TIMEOUT_MS`），超时就 `process.exit()`。正常情形绰绰有余（实测 ~0.5s），但若同时有多个“退得慢”的服务器，退出可能在 teardown 完成前被强行截止。
+- **来源导入只取用户级 `mcpServers`**：`~/.claude.json` 里的 `projects[*].mcpServers` 不展开（那会把每个历史项目都铺出来）；项目级配置请从项目标签导入 `.mcp.json`。单文件超过 8 MB 的来源会被跳过。
 - **插件热重载会清空运行中会话的项目工具**：HMR/卸载时会撤回所有投射并释放连接（否则会留下指向已销毁连接的僵尸工具）。已在运行的会话要重新拿到项目 MCP 工具需新开会话。
 
 ## 兼容性与依赖细节
@@ -160,6 +161,23 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` 带 `nodeLinker: hoisted` + **`autoInstallPeers: false`**（`initProfile` 写入，注释写明理由：让缺失的 peer 走 `profiles/node_modules` 安装回退层，「so every plugin shares the installation's single cordis instance instead of a duplicate」）。因此本插件的 9 个 peer **不会**被 pnpm 装进 profile 的 `node_modules`，而是与宿主共用同一份包实例——这一点对 `@deepseek-ai/dsh-scope` 是硬要求：作用域标签是模块内的 `Symbol`，两份实例会让工具投射静默失效（见「连接状态语义」的作用域故障）。如果面板报「作用域隔离失败」，先确认这个配置没被改掉。
 
+## 从本机客户端导入的读边界
+来源导入是 Host 唯一一处去读「用户没有通过本插件指定过的路径」（其他客户端自己的配置文件）。边界钉在三处，改动前先读这里：
+
+1. **文件名由来源表固定，目录只来自既有作用域参数**：全局位置从 `HOME` 与各客户端自己的环境变量（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`XDG_CONFIG_HOME`…）推出，项目位置只往 `wsPath` 后面接固定文件名。浏览器送的是 `sourceId` + `scope`（项目作用域再带既有的 `wsPath`），没有「读哪个文件」这个参数，所以接口面不会变成通用文件读取器。
+2. **值不出 Host**：扫描回给浏览器的是名称、传输、掩码字段名三类投影；`maskedSourceFields` 复用列表投影的掩码规则，只报字段名不报值。导入时由 Host 重读文件取真值，不然用户主目录里的密钥就进了浏览器会话。
+3. **内容指纹**：预览返回文件内容的 sha256，导入必须回传且一致——没有它，「预览的是 A、导入的是 B」只差一次文件改动。
+
+写盘路径没有新增：全局来源导入复用 `applyManagedImport`，项目来源导入复用 `applyWorkspaceImport`，与粘贴 JSON 是同一个函数。
+
+导入进来的环境变量引用必须是个**总值表达式**（`!!js (process.env.X ?? "")`）：裸引用在变量缺失时求值为 `undefined`，而 mcp-client 的 Config 只接受字符串，会让宿主在启动时整棵树加载失败。这条边界适用于任何新增的导入路径。
+
+同一个地方还要保证**同一作用域内 `serverName` 唯一**：官方 mcp-client 按注册作用域预留 `serverName`，同作用域重名会让插件加载直接抛（`mcp-client: serverName "x" is already in use`，整棵树起不来），项目层则会被 `mcpServers` 的对象键静默覆盖、丢条目。处理方式是**保留先出现的那条、跳过其余**，并把跳过的名字写进预览与导入结果：同批里一条重名不该让其余条目一条也导不进来。名字被 bundle / Agent preset 占用（外部层）是同一类问题，走同一取舍——跳过并提示，而不是整批失败。**读一份项目配置文件时相反**：文件自相矛盾就整份拒绝，静默少一条更糟。
+
+这条规则收在 `lib/import-admission.js` 的 `admitImportedServers` 里，并由两个写盘入口（`applyManagedImport` / `applyWorkspaceImport`）各自调用一次（幂等）：写盘口不依赖调用方记得做，以后新增的导入器也不会漏。`normalizeMcpImport` 只负责归一化与**检测**同名（`duplicateServerNames`），不做策略——策略属于知道赌注的那个边界。
+
+`!!js` 语法只在 `lib/env-expression.js` 里实现（生成 / 校验 / 抽取变量名 / 反转模板 / 求值）。**不要在其他文件里另写解析**：接受面比产出面宽一格，就足以让裸引用直通、把宿主拖下水。
+
 ## 设计约束
 
 `dsh-mcp-manager-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
@@ -173,6 +191,9 @@ peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` �
 - `lib/workspace-runtime.js`：项目配置读写状态、按 `(项目, serverName)` 引用计数的共享 mcp-client 连接，以及把其工具投射进每个会话作用域
 - `lib/workspace-config.js`：项目级 `.dsh/mcp.json` 的读写与转换
 - `lib/mcp-config.js`：JSON 规范化与 YAML patch 结构化读写
+- `lib/mcp-import-sources.js`：本机其他客户端的来源表（位置 + 格式转换）与按条目容错的归一化
+- `lib/env-expression.js`：受限 `!!js` 表达式的唯一实现（生成 / 校验 / 抽取 / 反转 / 求值）
+- `lib/import-admission.js`：导入结果的写盘前准入（同作用域 `serverName` 唯一、环境变量引用归一为总值形式）
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
 - `lib/typert.js`：Remote 契约描述

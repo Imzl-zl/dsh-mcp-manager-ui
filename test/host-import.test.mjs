@@ -439,13 +439,18 @@ test('duplicate cross-layer server names are exposed once as a read-only conflic
       json: { mcpServers: { shared: { command: 'updated' } } },
     })
     assert.deepEqual(preview.conflicts, ['shared'])
-    await assert.rejects(
-      McpManagerGateway.prototype.importJson.call(gateway, {
-        mode: 'merge',
-        json: { mcpServers: { shared: { command: 'updated' } } },
-      }),
-      /不能覆盖.*shared|同名 MCP.*shared/,
-    )
+    // 被其他配置层占用不再让整批失败：跳过这一条、导入其余，并在预览与结果里都说明。
+    // （外部层的条目不在本 patch 文件里，跳过它既不会覆盖也不会删掉它；硬写下去才是同作用域重名。）
+    const imported = await McpManagerGateway.prototype.importJson.call(gateway, {
+      mode: 'merge',
+      json: { mcpServers: { shared: { command: 'updated' } } },
+    })
+    assert.deepEqual(imported.added, [])
+    assert.ok(imported.warnings.some((warning) => warning.includes('已跳过被其他配置层占用的同名 MCP：shared')))
+    assert.match(imported.note, /跳过 1 条同名条目：shared/)
+    const written = await readFile(fixture.patchPath, 'utf8')
+    assert.match(written, /serverName: shared/)
+    assert.equal(written.includes('updated'), false, '被其他层占用的条目不得被覆盖')
   } finally {
     await fixture.cleanup()
   }

@@ -42,7 +42,7 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 - **Global + project scopes**: global servers live in the Web profile and are available to every project; project servers live in that project's `.dsh/mcp.json` and are visible only to its sessions. A project can also hide any global MCP
 - **Two entry points, one panel**: the draggable floating button (position remembered) and the official sidebar entry share the same state; the "Entry" control in the panel header can keep just one of them (never neither)
 - Install Exa, Tavily, Firecrawl, Chrome DevTools, or Playwright from the built-in catalog in one step (already-configured entries are detected and skipped, never overwritten)
-- Import `mcpServers` JSON from Claude, Cursor, Cline, or Roo, and `servers` JSON from VS Code, with a preview before writing; "merge" and "replace" modes
+- Import MCP configuration from other clients installed on this machine: Claude Code, Codex (`config.toml`), OpenCode (including `.jsonc`), pi, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI, Roo Code, and the cross-tool shared config are detected and listed, and one click imports from any of them; you can also paste `mcpServers` JSON from Claude, Cursor, Cline, or Roo, or `servers` JSON from VS Code. Everything is previewed before writing, with "merge" and "replace" modes
 - Follows the DSH dark/light theme and adapts to narrow/mobile widths
 - Non-intrusive update notice: a dismissible banner when a newer release exists (at most one check per day, never auto-updates, disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`)
 - **What changed, said once**: after the version changes, the first time you open the panel a small card lists what's new and where to find it (e.g. that the "Entry" control sits in the panel header); confirming it never shows it again, and it uses no network and sends nothing
@@ -51,10 +51,10 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 
 ```sh
 # Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.3.0
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.4.0
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.3.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.4.0
 ```
 
 Then **restart `dsh web`**. To upgrade:

@@ -4,7 +4,82 @@
 
 > `.dsh/mcp.json` 是本插件的私有约定：DSH 自身没有项目级 MCP 配置文件（官方只有 profile 的 `cordis.yml` / `cordis.patch.yml` 行，以及 ACP 客户端的 per-session `mcpServers`）。文件里的 `mcpServers` schema 与各客户端一致，但**路径不兼容**：Claude Code 读项目根的 `.mcp.json`，DSH 不读 `.dsh/mcp.json`，其他工具也不会。本文件只在装了本插件时才有意义。
 
-## 支持的根格式
+## 从本机其他客户端导入
+
+打开「导入 MCP」时，面板会扫描本机已知客户端的配置文件，把检测到的来源列出来（名称、路径、条目数、哪些字段会被掩码）——点一条即从它导入。**写入目标仍由当前标签页决定**（全局 → profile，项目 → `.dsh/mcp.json`），与粘贴路径完全一致。
+
+| 客户端 | 位置 | 读取的段落 |
+|---|---|---|
+| Claude Code | `~/.claude.json`（`CLAUDE_CONFIG_DIR` 可覆盖） | 用户级 `mcpServers` |
+| Claude Code（项目） | `<项目>/.mcp.json` | `mcpServers` |
+| Codex | `~/.codex/config.toml`（`CODEX_HOME` 可覆盖） | `[mcp_servers]` |
+| Codex（项目） | `<项目>/.codex/config.toml` | `[mcp_servers]` |
+| OpenCode | `~/.config/opencode/opencode.json` 或 `.jsonc`（`OPENCODE_CONFIG` 可覆盖；XDG 路径，Windows 也是 `~/.config`） | `mcp` |
+| OpenCode（项目） | `<项目>/opencode.json` 或 `opencode.jsonc` | `mcp` |
+| pi | `~/.pi/agent/mcp.json`（`PI_CODING_AGENT_DIR` 可覆盖） | `mcpServers` |
+| pi（项目） | `<项目>/.pi/mcp.json` | `mcpServers` |
+| Claude Desktop | Windows `%APPDATA%\Claude\claude_desktop_config.json`；macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；Linux `~/.config/Claude/claude_desktop_config.json` | `mcpServers` |
+| Cursor | `~/.cursor/mcp.json` 与 `<项目>/.cursor/mcp.json` | `mcpServers` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers`（远端用 `serverUrl`） |
+| VS Code | `%APPDATA%\Code\User\mcp.json`（macOS/Linux 对应路径同理）与 `<项目>/.vscode/mcp.json` | `servers` |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` |
+| Roo Code | `~/.roo/mcp.json` 与 `<项目>/.roo/mcp.json` | `mcpServers` |
+| 共享 MCP 配置 | `~/.config/mcp/mcp.json`、`~/.agents/mcp.json`、`~/.agents/mcp/mcp.json` | `mcpServers` |
+
+**按层过滤**：全局标签只列本机客户端的**全局**来源，项目标签只列**当前项目**的项目级来源——「选全局就导全局、选项目就导项目」，你不需要判断某一行会写到哪儿去。这条不变量在 Host 侧强制，不是只靠界面不显示：跨层调用（例如带着 wsPath 却送 `scope: 'global'`）会被明确拒绝。要把某一层的配置搬到另一层（例如把全局的 Claude 配置也放进项目），请用下面的粘贴框。
+
+两点容易误会的：
+
+- **`.mcp.json` 是跨工具的共享约定**（Claude Code、pi 的适配器等都读项目根的同一个文件），所以面板只在「Claude Code（项目）」那一行列它一次，不会重复列。
+- **有多个候选文件时按顺序取第一个存在的**（如 OpenCode 先看 `opencode.json`、再看 `opencode.jsonc`），面板显示的是**真正读到的那个文件**。`.jsonc` 的注释与尾随逗号会被吃掉。
+
+粘贴框仍然只吃 JSON：Codex 的 TOML 与 OpenCode 的 JSONC 走上面的来源列表。
+
+### Codex 字段映射
+
+| Codex | DSH |
+|---|---|
+| `command`、`args`、`env`、`cwd` | 同名移植 |
+| `url` | `url`（`streamable-http`） |
+| `http_headers` | `headers`（字面值原样保留） |
+| `env_http_headers` | `headers`，值变成 `${VAR}` |
+| `bearer_token_env_var` | `headers.Authorization = "Bearer ${VAR}"` |
+| `tool_timeout_sec` | `toolCallTimeoutMs`（秒 → 毫秒） |
+| `enabled: false` | `disabled: true` |
+| `env_vars`、`startup_timeout_sec/ms`、`required`、`enabled_tools`、`disabled_tools`、`default_tools_approval_mode`、`tools`、`auth`/`oauth*`、`bearer_token`、`http_headers_helper`、`experimental_environment`、`experimental_use_rmcp_client` | 没有对应项，逐条给提示后忽略 |
+
+单条转换失败（例如同时写了 `command` 和 `url`）只影响它自己：同文件其余条目照常可导入，失败原因显示在那一行。
+
+### OpenCode 字段映射
+
+OpenCode 的格式和其他客户端差得最多（键叫 `mcp`、命令是一个数组、环境变量叫 `environment`、插值写 `{env:VAR}`）：
+
+| OpenCode | DSH |
+|---|---|
+| `mcp` | 面板取的就是这一段（不是 `mcpServers`） |
+| `type: "local"` | `stdio` |
+| `type: "remote"` | `streamable-http` |
+| `command: ["npx", "-y", "srv"]` | 拆成 `command: npx` + `args: [-y, srv]` |
+| `environment` | `env` |
+| `cwd` | `cwd` |
+| `url`、`headers` | 同名移植 |
+| `{env:VAR}` | `${env:VAR}`（OpenCode 的插值没有 `$`，不转换就会当成普通字面量写进 profile） |
+| `enabled: false` | `disabled: true` |
+| `timeout` | **不自动转换**：它是 OpenCode「取工具清单」的超时（默认 5000ms），与 DSH 的 `toolCallTimeoutMs` 不是一回事，会逐条提示 |
+| `oauth`（对象） | 没有对应项，逐条提示后忽略（`oauth: false` 是「用我的 PAT、别走 OAuth」，不需要映射） |
+
+`$schema` 之类的顶层非 MCP 键会被忽略。
+
+### 四条边界
+
+- **只读**：整个过程只读这些文件，不修改它们，也不会把它们变成 DSH 的配置来源。
+- **凭据不出 Host**：检测结果只含 MCP 名称、传输方式和「哪些字段会被掩码」，不含任何值；要导入哪些条目由你勾选，真值由 Host 自己重读文件取得，所以来源里的密钥不会被送到浏览器。
+- **内容指纹防错位**：预览会返回该文件的内容指纹，导入时必须带回；期间文件被改动（例如你同时开着 Codex 存了配置）会被拒绝并要求重新预览。
+- **写盘前准入**：导入结果在写入前统一校验。两类同名（同一份来源里两条归一化后同名；名字已被 bundle / Agent preset 占用）都**保留先出现的那条、跳过其余**，并把跳过的名字写进预览与导入结果——一条重名不该把同批其余条目挡在门外。同时所有环境变量引用都归一成总值形式。
+
+单文件超过 8 MB 的来源会被跳过（`~/.claude.json` 里混着大量与 MCP 无关的历史数据）；Cline 的配置在 VS Code 扩展私有存储里、结构随版本变化，暂不识别。
+
+## 粘贴 JSON 支持的根格式
 
 Claude、Cursor、Cline、Roo 等客户端常用：
 
@@ -41,7 +116,7 @@ VS Code 常用：
 | 合并 | 是 | 是 | 否 |
 | 替换当前 Profile | 是 | 是 | 是，仅限当前 profile 管理的 MCP |
 
-来自其他 bundle、Agent preset 或存在同名冲突的条目不会被覆盖。替换不会删除非 MCP patch，也不会删除其他配置层拥有的 MCP。
+来自其他 bundle、Agent preset 或存在同名冲突的条目不会被覆盖（会被跳过，并在预览的提示与导入结果里说明是哪几条）。替换不会删除非 MCP patch，也不会删除其他配置层拥有的 MCP。
 
 ## Transport 映射
 
@@ -77,7 +152,13 @@ DSH 没有间接工具模式，MCP 工具始终注册为 `mcp__<server>__<tool>`
 }
 ```
 
-导入器会将引用转换为受限的 `!!js process.env.NAME` 表达式。任意 JavaScript、未识别的模板变量和需要交互取值的 VS Code `inputs` 会被拒绝，不会静默执行。
+导入器会把引用转换成受限的 `!!js` 表达式，并且**总是带 `?? ""`**：`${VAR}` → `!!js (process.env.VAR ?? "")`。变量缺失时该处退化为空字符串，服务器自己连不上（面板里看得见），而不会把宿主拖下去。这条不是写好看：裸的 `!!js process.env.VAR` 在变量未设置时求值为 `undefined`，而 mcp-client 的 Config 只接受字符串，结果是 `dsh: plugin tree failed to load`——**整棵插件树都加载不出来**，用户连面板都打不开（本地实测复现过）。
+
+来源文件里**现成**的 `!!js` 值（例如从别处抄来的表达式）在写盘前也会被归一成同一个总值形式：不会因为"不是我生成的"就直通。
+
+来源列表和预览会直接标出当前未设置（或为空）的环境变量名（只有名字，没有值），导入前就能看到哪些位置会拿到空值。
+
+任意 JavaScript、未识别的模板变量和需要交互取值的 VS Code `inputs` 会被拒绝，不会静默执行。
 
 面板的 list/status Remote 不返回字面 Header、env 或 args 值；带凭据/query 的 URL 也会被脱敏。args 只要存在就整体显示为“保留原值”标记：未修改时由 Host 整体保留，若要调整则必须完整重填参数，不会把原参数发送到浏览器。
 

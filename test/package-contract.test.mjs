@@ -34,7 +34,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.3.0')
+  assert.equal(packageJson.version, '1.4.0')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -103,6 +103,14 @@ test('runtime YAML parser includes the nested-collection stack overflow fix', ()
   assert.ok(minor > 8 || (minor === 8 && patchVersion >= 3))
 })
 
+test('the TOML parser used for Codex import stays a runtime dependency', () => {
+  // Codex 的 config.toml 是 TOML，插件**运行期**就要解析它。挪到 devDependencies 会让
+  // 装好的插件在加载 lib/mcp-import-sources.js 时直接 ERR_MODULE_NOT_FOUND；
+  // package-artifact 用例能拦住，但它跑在打包阶段，这里给出就近的理由。
+  assert.match(packageJson.dependencies['smol-toml'], /^\^?1\./)
+  assert.equal(packageJson.devDependencies?.['smol-toml'], undefined)
+})
+
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
     assert.match(document, /0\.1\.5-rc\.2/)
@@ -110,9 +118,9 @@ test('documentation targets the verified DSH and plugin releases', () => {
     // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)
     assert.doesNotMatch(document, /(?:0\.1\.0-)?rc\.6/)
-    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.3\.0/)
+    assert.match(document, /dsh plugin --profile web add github:Imzl-zl\/dsh-mcp-manager-ui#v1\.4\.0/)
     // npm 是主安装路径（它让 `dsh plugin update` 能在 ^1.x 内自动升级），必须写进两份文档。
-    assert.match(document, /dsh plugin --profile web add dsh-mcp-manager-ui@\^1\.3\.0/)
+    assert.match(document, /dsh plugin --profile web add dsh-mcp-manager-ui@\^1\.4\.0/)
     assert.match(document, /dsh plugin --profile web update dsh-mcp-manager-ui/)
   }
 })
@@ -285,6 +293,22 @@ test('client Remote contract includes JSON preview and import operations', () =>
   assert.match(client, /mcpManager\/importJson/)
 })
 
+test('importing from other MCP clients goes through the Host, with no client-supplied path', async () => {
+  const { TYPERT } = await import('../lib/typert.js')
+  for (const method of ['scanImportSources', 'previewImportSource', 'importSource']) {
+    // 契约有、Host 没有 = 调用必失败；Host 有、契约没有 = 客户端永远调不到。三边都要在。
+    assert.ok(TYPERT.invocations.some((entry) => entry.method === method), `契约缺少 ${method}`)
+    assert.match(hostIndex, new RegExp(`async ${method}\\(payload\\) \\{`), `Host 缺少 ${method}`)
+    assert.match(client, new RegExp(`call\\('${method}'`), `客户端没有调用 ${method}`)
+  }
+  // 扫描结果只带名称、传输与「哪些字段会被掩码」，条目本体（含 `!!js` 表达式与字面密钥）不出 Host。
+  assert.match(hostIndex, /maskedFields: entry\.spec \? maskedSourceFields\(entry\.spec\) : \[\]/)
+  // 导入必须带上预览时的内容指纹，否则等于允许「预览的是 A、导入的是 B」。
+  assert.match(client, /contentHash: sourcePreview\.contentHash/)
+  // 路径只由 Host 的来源表拼出；客户端一旦开始传 path，接口面就退化成「读任意文件」。
+  assert.doesNotMatch(client, /call\('(?:previewImportSource|importSource)', \{[^}]*path:/)
+})
+
 test('client places an explicit selectable builtin installer before manual add', () => {
   assert.match(client, /BuiltinInstallModal/)
   assert.match(client, /call\('builtins'\)/)
@@ -294,7 +318,7 @@ test('client places an explicit selectable builtin installer before manual add',
   assert.match(client, /\.dsh-mcp-builtin-modal\{[^}]*display:flex[^}]*flex-direction:column/)
   assert.match(client, /\.dsh-mcp-builtin-list\{[^}]*overflow-y:auto/)
   assert.match(client, /checked: allSelected/)
-  const importPosition = client.indexOf("children: '导入 JSON")
+  const importPosition = client.indexOf("children: '导入 MCP")
   const builtinPosition = client.indexOf("children: '内置 MCP")
   const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
   assert.ok(importPosition >= 0 && importPosition < builtinPosition && builtinPosition < addPosition)

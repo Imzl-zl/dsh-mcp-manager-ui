@@ -81,7 +81,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     }
 
     const packedManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
-    assert.equal(packedManifest.version, '1.3.0')
+    assert.equal(packedManifest.version, '1.4.0')
     for (const name of dshHostPackages) {
       assert.equal(packedManifest.dependencies?.[name], undefined)
       assert.equal(packedManifest.optionalDependencies?.[name], undefined)
@@ -108,6 +108,9 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     const hostModules = join(root, 'profiles', 'node_modules')
     await linkPackage(profileModules, 'yaml')
     await linkPackage(profileModules, 'zod')
+    // 与 yaml / zod 一样是插件自己声明的运行期依赖（Codex 的 config.toml 是 TOML）：
+    // 打包产物必须能从 profile 的 node_modules 解析到它，否则插件加载即失败。
+    await linkPackage(profileModules, 'smol-toml')
     for (const name of dshHostPackages) await linkPackage(hostModules, name)
     // 不在 dsh-* 命名空间（版本线不同），但同样从宿主机层解析：
     // reveal 用它把 `!!js` 配置节点求值成有效运行值。真实 DSH_HOME 的

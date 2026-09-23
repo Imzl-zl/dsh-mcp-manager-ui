@@ -51,13 +51,15 @@ test('spec_to_entry roundtrips through normalizeMcpImport', () => {
     disabled: false,
   })
   const back = normalizeMcpImport({ mcpServers: { local: entry } }).servers[0]
+  // 回读不是逐字复原：`${VAR}` 模板一律规范成带 `?? ""` 的表达式（裸引用在变量缺失时
+  // 求值为 undefined，全局层会因此整棵插件树加载失败）。
   assert.deepEqual(back, {
     name: 'local',
     transport: 'stdio',
-    command: '!!js process.env.NPX',
-    args: ['-y', 'example-mcp', '!!js process.env.MODE'],
+    command: '!!js (process.env.NPX ?? "")',
+    args: ['-y', 'example-mcp', '!!js (process.env.MODE ?? "")'],
     env: {
-      API_KEY: '!!js process.env.API_KEY',
+      API_KEY: '!!js (process.env.API_KEY ?? "")',
       GREETING: '!!js "hi " + (process.env.WHO ?? "you")',
     },
     cwd: 'C:\\proj',
@@ -98,7 +100,7 @@ test('readWorkspaceConfig parses valid file and surfaces errors', async () => {
     assert.equal(config.error, '')
     assert.deepEqual(config.servers.map((s) => s.name), ['local', 'remote'])
     assert.deepEqual(config.exclude, ['github'])
-    assert.deepEqual(config.servers[0].env, { KEY: '!!js process.env.KEY' })
+    assert.deepEqual(config.servers[0].env, { KEY: '!!js (process.env.KEY ?? "")' })
 
     const missing = await readWorkspaceConfig(join(root, 'nope'), read)
     assert.equal(missing.error, '')
@@ -124,15 +126,35 @@ test('readWorkspaceConfig parses valid file and surfaces errors', async () => {
   }
 })
 
+test('a project file whose entries collide after normalization is rejected, not silently trimmed', async () => {
+  // 文件是"一整份配置"：`"a"` 与 `" a"` 归一化后同名，说明这份文件自相矛盾，静默少一条更糟。
+  // （导入一批来源/粘贴的取舍不同：那里只跳过重复项，不能让一条重名挡住其余条目。）
+  const root = await mkdtemp(join(tmpdir(), 'dsh-ws-dup-'))
+  const read = (path) => readFile(path, 'utf8')
+  try {
+    const dir = join(root, '.dsh')
+    await import('node:fs/promises').then((fs) => fs.mkdir(dir, { recursive: true }))
+    await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { a: { command: 'node' }, ' a': { command: 'node' } } }))
+    const config = await readWorkspaceConfig(root, read)
+    assert.match(config.error, /归一化后同名/)
+    assert.deepEqual(config.servers, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('writeWorkspaceConfig produces Claude-compatible JSON and roundtrips', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-ws-'))
   const read = (path) => readFile(path, 'utf8')
   const write = (path, text) => writeFile(path, text)
   const mkdir = (path, opts) => import('node:fs/promises').then((fs) => fs.mkdir(path, opts))
   try {
+    // `?? ""` 是 `${VAR}` 模板转换后的规范形式（裸的 `!!js process.env.X` 在变量缺失时
+    // 会求值成 undefined，全局层会因此让整棵插件树加载失败）。写回文件仍是 `${VAR}`，
+    // 所以「写→读」对规范形式是幂等的。
     const servers = [
-      { name: 'local', transport: 'stdio', command: 'npx', args: ['-y', 'demo'], env: { KEY: '!!js process.env.KEY' } },
-      { name: 'remote', transport: 'streamable-http', url: 'https://example.test/mcp', headers: { A: '!!js process.env.T' } },
+      { name: 'local', transport: 'stdio', command: 'npx', args: ['-y', 'demo'], env: { KEY: '!!js (process.env.KEY ?? "")' } },
+      { name: 'remote', transport: 'streamable-http', url: 'https://example.test/mcp', headers: { A: '!!js (process.env.T ?? "")' } },
     ]
     const { path } = await writeWorkspaceConfig(root, { servers, exclude: ['github'] }, write, mkdir)
     const text = await readFile(path, 'utf8')

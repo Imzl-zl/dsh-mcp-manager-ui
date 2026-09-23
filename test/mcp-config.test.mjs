@@ -32,7 +32,7 @@ test('normalizes Claude and Cursor JSON server maps into DSH config', () => {
       command: 'npx',
       args: ['-y', 'example-mcp'],
       cwd: 'C:\\tools',
-      env: { API_KEY: '!!js process.env.API_KEY' },
+      env: { API_KEY: '!!js (process.env.API_KEY ?? "")' },
     },
     {
       name: 'remote',
@@ -61,6 +61,44 @@ test('escapes literal text around environment interpolation without enabling arb
     () => normalizeMcpImport({ mcpServers: { bad: { type: 'http', url: 'https://example.test/mcp', headers: { X: 'Bearer ${TOKEN} ${globalThis.process.exit()}' } } } }),
     /不支持的变量表达式/i,
   )
+})
+
+test('rejects unsupported template values without echoing the value into the error', () => {
+  const secret = 'sk-live-LEAKCHECK-9000'
+  // 关键在密钥位于第一个 `${` 之后：旧实现把这一整段切片贴进错误信息，而错误信息会
+  // 经 previewImport 回到浏览器；而来源导入读的是用户机器上的文件，用户并没敲过这串值。
+  const value = 'Bearer ${globalThis.process.exit()} ' + secret
+  assert.throws(
+    () => normalizeMcpImport({ mcpServers: { bad: { type: 'http', url: 'https://example.test/mcp', headers: { X: value } } } }),
+    (error) => {
+      assert.equal(String(error.message).includes(secret), false, '错误信息不得回显配置值')
+      return /不支持的变量表达式/.test(String(error.message))
+    },
+  )
+})
+
+test('an imported env reference is always total, so an unset variable cannot break the host boot', () => {
+  // 实测过的事故：`!!js process.env.X` 在 X 未设置时求值为 undefined，而 mcp-client 的 Config
+  // 只接受字符串——host loader 会因此**整棵插件树加载失败**（`dsh: plugin tree failed to load`）。
+  // 导入的引用因此必须带 `?? ""`：变量缺失时退化为空字符串，服务器自己连不上（面板里看得见），
+  // 而不是把宿主一起拖下去。
+  const result = normalizeMcpImport({
+    mcpServers: {
+      remote: { type: 'http', url: 'https://example.test/mcp', headers: { Authorization: '${TOKEN}', 'X-Key': '${env:OTHER}' } },
+      withFallback: { type: 'http', url: 'https://example.test/mcp', headers: { Authorization: '${TOKEN:-anonymous}' } },
+    },
+  })
+  const remote = result.servers.find((server) => server.name === 'remote')
+  assert.deepEqual(remote.headers, {
+    Authorization: '!!js (process.env.TOKEN ?? "")',
+    'X-Key': '!!js (process.env.OTHER ?? "")',
+  })
+  assert.equal(
+    result.servers.find((server) => server.name === 'withFallback').headers.Authorization,
+    '!!js (process.env.TOKEN ?? "anonymous")',
+  )
+  // 写回项目文件时仍可逆（`?? ""` 与裸引用都还原成 `${TOKEN}`），由 workspace-config 的
+  // jsExpressionToTemplate 覆盖。
 })
 
 test('maps directTools true and false to enablement while absent preserves existing state', () => {

@@ -40,7 +40,7 @@ DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏�
 - **全局 + 项目双作用域**：全局写 Web profile，一次注册所有项目可用；项目写该项目 `.dsh/mcp.json`，只该项目会话可见；项目里还能「屏蔽」某个全局 MCP
 - **两个入口，同一个面板**：右下角悬浮按钮（可拖拽、记忆位置）与官方侧栏入口（展开态在「设置」上方显示「MCP」，收起成 56px 轨道时只剩图标）共享同一开关状态；面板右上角「入口」可以把两者只留一个（不能都关）
 - 从「内置 MCP」目录一键安装 Exa、Tavily、Firecrawl、Chrome DevTools、Playwright（已配置的只识别并跳过，不覆盖）
-- 导入 Claude、Cursor、Cline、Roo 的 `mcpServers` 与 VS Code 的 `servers` JSON，写入前预览，支持「合并（同名更新）」与「替换」
+- 导入本机其他客户端的 MCP 配置：自动检测 Claude Code、Codex（`config.toml`）、OpenCode（含 `.jsonc`）、pi、Claude Desktop、Cursor、Windsurf、VS Code、Gemini CLI、Roo Code 与跨工具的共享配置，逐个列出，点一条即导入；也能粘贴 Claude/Cursor/Cline/Roo 的 `mcpServers` 或 VS Code 的 `servers` JSON。写入前预览，支持「合并（同名更新）」与「替换」
 - 跟随 DSH 深色/浅色主题，适配窄屏与移动宽度
 - 非强制更新提示：有新版时在面板顶部显示可关闭的提示条，每天最多查一次、绝不自动更新，可用 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭
 - **升级后主动说一次变了什么**：版本变了后第一次打开面板弹一张小卡片，列出本次更新内容，并指路新功能在哪（例如「入口」开关在面板右上角）；确认一次后不再提示，不联网、不发任何数据
@@ -49,10 +49,10 @@ DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏�
 
 ```sh
 # 推荐：npm 安装 —— 之后 `dsh plugin update` 会在 ^1.x 内自动升到最新小版本
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.3.0
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.4.0
 
 # 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.3.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.4.0
 ```
 
 装完**重启 `dsh web`**。升级：
