@@ -111,6 +111,22 @@ test('the TOML parser used for Codex import stays a runtime dependency', () => {
   assert.equal(packageJson.devDependencies?.['smol-toml'], undefined)
 })
 
+test('the current release has a hand-written GitHub Release note', async () => {
+  // 发布闸门（与 whats-new 同一条理由，只是对象换成 Release 页面）：本仓库的发布全部直接提交
+  // 到 main、没有 PR，所以 `gh release create --generate-notes` 几乎生成不出内容——v1.3.0 及
+  // 之前每个 Release 页面都只有一行 compare 链接，而面板的更新提示正是把用户指到那一页。
+  // release.yml 在推 tag 时会优先用 .github/release-notes/v<version>.md，所以当前版本必须
+  // 有一份手写稿：bump 版本时一起写，否则本地就红（tag 之前就能发现）。
+  const notesPath = new URL(`../.github/release-notes/v${packageJson.version}.md`, import.meta.url)
+  const notes = await readFile(notesPath, 'utf8').catch(() => '')
+  assert.ok(
+    notes.trim().length > 0,
+    `缺少 .github/release-notes/v${packageJson.version}.md：这就是 Release 页面与面板更新提示指过去的内容，bump 版本时要一起写`,
+  )
+  // 至少要回答"升级怎么做"——只有标题的稿子和自动生成的一样没用。
+  assert.match(notes, /dsh plugin --profile web (?:add|update)/, 'Release notes 里要写清升级命令')
+})
+
 test('documentation targets the verified DSH and plugin releases', () => {
   for (const document of [readme, installationGuide]) {
     assert.match(document, /0\.1\.5-rc\.2/)
