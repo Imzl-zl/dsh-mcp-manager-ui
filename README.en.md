@@ -153,7 +153,7 @@ No. Uninstalling the plugin leaves existing `@deepseek-ai/dsh-mcp-client` rows i
 
 | Item | Verified |
 |---|---|
-| DeepSeek Harness | `0.1.5-rc.1` and above (verified through `0.1.5-rc.2`) |
+| DeepSeek Harness | `0.1.5-rc.1` and above (verified through `0.1.7-rc.1`) |
 | Node.js | whatever runtime DSH ships/supports |
 | Platform | Windows; Linux/macOS share the same DSH Web contracts |
 

@@ -151,7 +151,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 
 | 项目 | 已验证 |
 |---|---|
-| DeepSeek Harness | `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.2`） |
+| DeepSeek Harness | `0.1.5-rc.1` 及以上（已验证至 `0.1.7-rc.1`） |
 | Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 

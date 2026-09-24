@@ -143,14 +143,32 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 | **双写** | PASS | PASS | PASS |
 | `mode: 'src-json'` | 拒 | 拒 | 拒 |
 
+`0.1.7-rc.1`（当前开发基线）的 loader 实测与 `0.1.6-alpha.2` 同列：只有 `create()` 通过、只有 `schema` 被拒。也就是说**基线已经落在「只查 `create()`」那一侧**，而只查 `schema` 的 `0.1.5-rc.x`（= 现在 `latest` 渠道、`npx` 默认装到的）仍是大多数用户实际在跑的版本。两个键都不能删，且本地测试已看不到 `schema` 那半边（由 `test/typert-manifest.test.mjs` 里那条不依赖 loader 版本的形状断言钉住）。
+
 浏览器半（`@deepseek-ai/dsh-typert-registry` 的 `lib/client.js`）做同一份校验，所以 `lib/client.js` 里的 codec 必须同步改——只改 host 那份会变成「面板能加载，一调用就炸」。
 
 漂移任务红了怎么读：
 
-- **只有 `package-contract.test.mjs` 的 pin / lockfile 断言失败** → 宿主可用，去同步 pin：`package.json` 的 devDeps、两份测试里的 `COMPAT_WINDOW` 常量、README 与 installation 的「已验证至」，然后 `npm test` 确认全绿。
-- **契约用例（含真机集成）失败** → 上游契约真的变了，按失败点修插件并发补丁。
+- **契约用例（含真机集成）失败** → 上游契约真的变了，按失败点修插件并发补丁（2026-09-21 那次就是这样红的）。
+- **本地 `npm test` 里 `package-contract.test.mjs` 的 pin / lockfile 断言失败** → 宿主可用，去同步 pin：`package.json` 的 devDeps、`DEV_BASELINE`、README / README.en / installation 的「已验证至」，然后 `pnpm install && npm test` 确认全绿。
 
-已实测：`latest` / `next`（`0.1.5-rc.2`）与 `0.1.6-alpha.1` 上契约用例全绿；`0.1.6-alpha.2` 上修复前唯一失败的就是 `typert-manifest` 那条，双写后按漂移任务的文件清单 137/137 全绿（复现方式：把宿主整套换到 alpha.2 再跑那份清单）。`0.1.6-alpha.1` 上全套 169 项里唯一失败的是 pin 断言，属上面第一类。
+  这一条**不会**由漂移任务报出来：它的 `files` 是 `grep -v 'package-contract'`，pin 断言按定义就不参与漂移判定。所以「漂移任务绿」不等于 pin 没过期——2026-09-10 到 09-24 之间 pin 停在 `0.1.5-rc.2`，而 `latest` 已经是 `0.1.5-rc.3`、`next` 是 `0.1.7-rc.1`，两周无人发现，就是这条缺口。同步 pin 只有两个触发源：人注意到新 RC，或本地跑完整套件。
+
+  改的时候**别动 `COMPAT_WINDOW`**：它是 peer 窗口（`>=0.1.5-rc.1 <0.2.0`），下限是硬要求、上限只是信号灯；把它收窄到新版本会挡住仍在 `0.1.5-rc.x` 上的大多数用户。要改的常量只有 `package-contract.test.mjs` 的 `DEV_BASELINE`，锁文件里那个具体版本从它推导（原来那里硬编码了一份，是两个真源）。
+
+已实测（2026-09-24，漂移任务 [run 35943153431](https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/runs/35943153431)，三个渠道各 190 项全绿、0 跳过）：
+
+| 渠道 | 宿主 | 结果 |
+|---|---|---|
+| `latest` | `0.1.5-rc.3` | 190/190 |
+| `next` | `0.1.7-rc.1` | 190/190 |
+| `alpha` | `0.1.7-alpha.2` | 190/190 |
+
+更早：`0.1.6-alpha.1` 上契约用例全绿；`0.1.6-alpha.2` 上修复前唯一失败的是 `typert-manifest` 那条，双写后按漂移任务的文件清单 137/137 全绿（复现方式：把宿主整套换到 alpha.2 再跑那份清单）。
+
+**alpha 全绿不等于它进了「已验证」**：这次它绿是因为我们的改动恰好是追加式（codec 双写 + 结构探测 cordis 私有字段），不是因为它稳定。所以兼容性表只写 `0.1.7-rc.1`——那是承诺；alpha 交给漂移任务每周探测，不承诺。这与上文第 2 条（预发布不需要特殊照顾）是同一个取舍。
+
+**这份证据盖不到的地方**：客户端侧是替身测试（组件在 node 里渲染不起来），所以上表证明的是 **slot 注册契约**成立，不是 slot 在 0.1.7 宿主上**渲染**正常。而 `0.1.6-alpha.2` 的发布说明里有「客户端 Session 会话支持多实例共存，相关 API 及 slot 有变化」。这类失败的表现是面板白屏、不会让任何用例变红，所以它属于发布前的人工检查，不进 CI。
 
 开发基线（`devDependencies`）跟随已验证的最新 RC，并按官方约定**镜像每一个 peer 依赖**（含 `@deepseek-ai/cordis`）；唯一的例外是 `@deepseek-ai/dsh-typert-loader`，它只供测试用（见上文第 3 条），不是运行期宿主契约。这条镜像不是冗余：`dsh plugin ... add <本地目录>` 是 `link:` 安装，Node 会从插件自己的路径向上解析，插件若只声明 peer 而没有本地副本，连它自己那份宿主依赖都找不到；反过来本地副本的传递依赖缺一个（例如旧配置遗漏 `@deepseek-ai/cordis`），整个插件树会在启动时直接加载失败。升级 DSH 后用 `pnpm install && npm test` 验证。
 

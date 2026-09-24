@@ -22,11 +22,14 @@ test('lib/typert.js passes the host loader own validator', () => {
   validateTypertManifest(packageName, TYPERT)
 })
 
-// 为什么还要额外钉一条：本地 devDependency 的 loader 是**开发基线**（写这份时是
-// 0.1.5-rc.2），它只校验 `schema`，看不见 0.1.6-alpha.2 起的 `create()` 要求——上面那条
-// 用例因此在基线 loader 上永远是绿的，形状缺一半要等每周的漂移任务才知道（2026-09-21
-// 就是这样红的）。所以这里把「strict codec 同时带 schema 与 create()」这条双渠道契约直接
-// 钉住：不依赖装了哪个版本的 loader，也不等 CI。取舍理由见 docs/design.md「版本范围怎么定」。
+// 为什么还要额外钉一条：本地 devDependency 的 loader 是**开发基线**，而它只校验两个渠道里
+// 的**一个**键，看不见另一个——上面那条用例因此在基线 loader 上永远盖不住缺口：
+//   · 基线 ≤ 0.1.5-rc.x：只校验 `schema`，看不见 `create()`（2026-09-21 就是这样红的）
+//   · 基线 ≥ 0.1.6-alpha.2（含现在的 0.1.7-rc.1）：只校验 `create()`，看不见 `schema`——
+//     而 `schema` 正是 0.1.5-rc.x 那条线（= 现在 `latest`、npx 默认装到的、大多数用户
+//     实际在跑的）要的。所以 bump 基线反而把「缺 `schema`」换成了本地测不出的那一半。
+// 这里把「strict codec 同时带 schema 与 create()」这条双渠道契约直接钉住：不依赖装了哪个
+// 版本的 loader，也不等 CI。取舍理由见 docs/design.md「版本范围怎么定」。
 test('every strict codec carries both the schema value and the create() factory', () => {
   const codecs = []
   for (const invocation of TYPERT.invocations) {
@@ -37,10 +40,10 @@ test('every strict codec carries both the schema value and the create() factory'
   assert.ok(codecs.length > 0)
   for (const [subject, codec] of codecs) {
     assert.equal(codec.mode, 'strict', subject + ' 必须是 strict codec')
-    // 0.1.5-rc.x 的 loader/registry 走这条。
-    assert.equal(typeof codec.schema?.parse, 'function', subject + ' 缺少 schema（最新 RC 会加载即拒）')
-    // 0.1.6-alpha.2 起的 loader/registry 走这条。
-    assert.equal(typeof codec.create, 'function', subject + ' 缺少 create() 工厂（alpha 会加载即拒）')
+    // 0.1.5-rc.x 的 loader/registry 走这条（= 现在 `latest` 渠道，大多数用户实际在跑的）。
+    assert.equal(typeof codec.schema?.parse, 'function', subject + ' 缺少 schema（0.1.5-rc.x 那条线会加载即拒）')
+    // 0.1.6-alpha.2 起的 loader/registry 走这条（含当前基线 0.1.7-rc.1 与 `next`）。
+    assert.equal(typeof codec.create, 'function', subject + ' 缺少 create() 工厂（0.1.6-alpha.2 起会加载即拒）')
     assert.equal(typeof codec.create().parse, 'function', subject + ' 的 create() 没有返回可用的 schema')
   }
 })

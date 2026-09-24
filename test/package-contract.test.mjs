@@ -8,6 +8,7 @@ const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'u
 const client = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
 const hostIndex = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
 const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
+const readmeEn = await readFile(new URL('../README.en.md', import.meta.url), 'utf8')
 // 深层设计（共享连接模型、连接状态语义、已知限制、依赖细节）单独成文，
 // README 只留使用路径；下面这些断言跟着内容走，就近检查。
 const designDoc = await readFile(new URL('../docs/design.md', import.meta.url), 'utf8')
@@ -26,7 +27,10 @@ const dshHostPackages = [
 // 而 mcp-client 也是 0.1.5 起才按注册作用域判 serverName 唯一性。旧版本不再兼容。
 const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
 // 开发基线跟随已验证的最新 RC；发布边界由 peer 窗口表达。
-const DEV_BASELINE = '^0.1.5-rc.2'
+const DEV_BASELINE = '^0.1.7-rc.1'
+// 锁文件里解析出的具体版本。**从 DEV_BASELINE 推导**，不要另写一处：这里原本硬编码
+// /^0\.1\.5-rc\.2/，于是 bump 基线时就有了第二个真源。
+const DEV_BASELINE_VERSION = DEV_BASELINE.replace(/^[^0-9]*/, '')
 // cordis 锁补丁位：ensureLogCapture 读写 logger.exporters / logger._snExporter 私有字段。
 const CORDIS_PEER = '~4.0.2'
 // reveal 用 loader 的 interpolate 求值 `!!js` 节点；范围跟随 dsh 自身对它的要求。
@@ -91,7 +95,11 @@ test('lockfile resolves DSH host packages only as a development baseline on the 
   for (const name of dshHostPackages) {
     assert.equal(importer.dependencies?.[name], undefined)
     assert.equal(importer.devDependencies?.[name]?.specifier, DEV_BASELINE)
-    assert.match(importer.devDependencies?.[name]?.version, /^0\.1\.5-rc\.2(?:\(|$)/)
+    const resolved = importer.devDependencies?.[name]?.version ?? ''
+    assert.ok(
+      resolved === DEV_BASELINE_VERSION || resolved.startsWith(DEV_BASELINE_VERSION + '('),
+      `${name} 的锁文件版本应解析到开发基线 ${DEV_BASELINE_VERSION}，实际 ${resolved}`,
+    )
   }
   assert.equal(importer.dependencies?.['@deepseek-ai/cordis'], undefined)
   assert.equal(importer.devDependencies?.['@deepseek-ai/cordis']?.specifier, CORDIS_PEER)
@@ -128,8 +136,9 @@ test('the current release has a hand-written GitHub Release note', async () => {
 })
 
 test('documentation targets the verified DSH and plugin releases', () => {
-  for (const document of [readme, installationGuide]) {
-    assert.match(document, /0\.1\.5-rc\.2/)
+  // README.en.md 同样随包发布，一并纳入：它原来不在清单里，所以英文版可以悄悄停在旧版本上。
+  for (const document of [readme, readmeEn, installationGuide]) {
+    assert.match(document, /0\.1\.7-rc\.1/)
     // 不再**声称**兼容 0.1.0-rc.x：peer 窗口已收窄到 0.1.5 起。
     // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)

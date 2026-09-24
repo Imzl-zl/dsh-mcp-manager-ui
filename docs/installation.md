@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- DeepSeek Harness `0.1.5-rc.1` 及以上（已验证至 `0.1.5-rc.2`）
+- DeepSeek Harness `0.1.5-rc.1` 及以上（已验证至 `0.1.7-rc.1`）
 - 已初始化的 `web` profile
 - Node.js 和 pnpm 可由 DSH 的插件命令正常调用
 
