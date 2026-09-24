@@ -106,13 +106,20 @@ npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm �
 #    + .github/release-notes/v<新版本>.md（后面两项缺一项，下面的 npm test 就会红）
 npm test
 
-# 2) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
+# 2) 真机过一遍（触发条件见下），**必须在打 tag 之前**
+dsh web    # 打开面板点一遍
+
+# 3) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
 git add -A && git commit -m "..."
 git push origin main
 git tag -a v1.4.0 -m "v1.4.0 ..." && git push origin v1.4.0
 ```
 
 推 tag 后 CI 依次做：校验版本 → `pnpm install --frozen-lockfile` → `npm test` → `npm publish`（trusted publishing，无需 token）→ `gh release create`。
+
+**第 2 步的真机检查什么时候必须做**：客户端那一半是替身测试——组件在 node 里渲染不起来（见[设计与限制](design.md#版本范围怎么定以及它管不到什么)），所以 CI 全绿也证明不了面板能显示。因此**只要本次改动碰了 `lib/client.js`、或推进了 DSH 基线，就必须做**：起 `dsh web`，确认侧栏入口能打开面板、悬浮按钮在位，然后导入 / 预览 / 启停各点一次。
+
+为什么不能交给 CI：这类失败的表现是**面板白屏**，不会让任何用例变红（注册契约是好的，渲染不出来而已）。宿主改 slot 就是这种改动的典型——`0.1.6-alpha.2` 的发布说明里有「客户端 Session 会话支持多实例共存，相关 API 及 slot 有变化」，2026-09-24 推进基线到 `0.1.7-rc.1` 时也属于这一类，所以它固定成检查单而不是靠记得。纯 Host 侧改动（`lib/index.js`、`lib/workspace-*.js` 等）可以跳过这一步。
 
 **Release notes 是必写的**，稿子放 `.github/release-notes/vX.Y.Z.md`（**不要**放 `docs/`，docs 会随包发布到 npm）；有稿子就用它，没有才退回 `--generate-notes`。为什么必写：本仓库全部直接提交到 main、没有 PR，自动生成几乎生成不出内容（v1.3.0 及之前每个 Release 页面都只有一行 compare 链接），而面板的更新提示正是把用户指到那一页。`test/package-contract.test.mjs` 会拦下「bump 了版本却没写稿」，所以在打 tag 之前本地就会红。
 
