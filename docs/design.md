@@ -130,8 +130,12 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 三条取舍规则，改动范围前先读这里：
 
-1. **下限是硬要求，上限只是信号灯**。`0.1.5` 之前没有上面那两个能力，装上必坏，所以下限不能松。上限 `0.2.0` 只在宿主确实会向后破坏时才有意义——DSH 自称「开发者预览…未来将出现破坏兼容性的变更」，而插件面对宿主升级必然慢一步，所以留一个**粗**上限：它的作用是把「你正跑在一个我们没验证过的大版本上」变成一句看得见的警告（pnpm 打 `[WARN] Issues with peer dependencies found`，npm 直接 ERESOLVE），而不是静默装上再出怪问题。**下限不会挡住任何新版本，只有上限可能「限死」，所以上限宁粗不细。**
-2. **预发布不需要特殊照顾**。按 npm 的 semver 规则，`0.1.6-alpha.1` 会落在 `>=0.1.5-rc.1 <0.2.0` 之外（预发布只在同名 `major.minor.patch` 元组内被承认）；但 DSH profile 用的安装器是 pnpm（`nodeLinker: hoisted` + `autoInstallPeers: false`），它对 peer 校验**不套用**这条规则：实测同区间的预发布完全静默，只有「正式版不匹配」才会警告。所以这个范围既不会挡住 0.1.6 或以后 0.1.x 的预发布，也不会挡住 0.1.x 的正式版——不必为「覆盖未来预发布」去改范围（semver 也表达不了这种意思）。
+1. **下限是硬要求，上限是宿主执行的硬闸门**。`0.1.5` 之前没有上面那两个能力，装上必坏，所以下限不能松。上限 `0.2.0` 只在宿主确实会向后破坏时才有意义——DSH 自称「开发者预览…未来将出现破坏兼容性的变更」，而插件面对宿主升级必然慢一步，所以留一个**粗**上限：它的作用是把「你正跑在一个我们没验证过的大版本上」变成宿主明确的拒绝，而不是静默装上再出怪问题。
+
+   **这道闸门由 DSH 自己执行，不是 pnpm/npm**——安装器的 peer 警告（如 pnpm 的 `[WARN] Issues with peer dependencies found`）既不是判定依据，也不与它一致。`dsh-app-boot` 的 `evaluatePluginCompatibility` 拿 `dsh --version` 的实际版本比对本插件的 `peerDependencies`：不兼容的 bundle 会被跳过并打印 `skipping profile bundle …`，插件根本不加载（走 profile 清单的 `preflight` 路径时则是 `disabling profile plugin …`）。用户不想升级时可以授予**精确版本**豁免继续用：`dsh plugin --profile <profile> allow-version <name>@<version> --dsh-version <exact> --accept-risk`（豁免按 `name@version` × 精确宿主版本记账，落在 profile 目录的 `compatibility.json`）。**下限不会挡住任何新版本，只有上限可能「限死」，所以上限宁粗不细。**
+2. **预发布不需要特殊照顾**。按 npm 的 semver 规则，`0.1.6-alpha.1` 会落在 `>=0.1.5-rc.1 <0.2.0` 之外（预发布只在同名 `major.minor.patch` 元组内被承认）。但**上面那道闸门不套用这条规则**：`evaluatePluginCompatibility` 调 `semver.satisfies` 时带的是 `{ includePrerelease: true }`，预发布因此按数值参与比较——`0.1.6-alpha.1`、`0.1.7-rc.2` 乃至 `0.2.0-rc.1` 都落在范围内，只有 `0.2.0` 及以后的正式版（以及 `0.3.0-rc.1` 这种更高元组的预发布）才越界。所以这个范围既不会挡住 0.1.x 的预发布，也不会挡住 0.1.x 的正式版——不必为「覆盖未来预发布」去改范围。
+
+   注意这条**只对宿主自己的闸门成立**：拿不带 `includePrerelease` 的严格 semver 去判，`0.1.7-rc.2` 会被判为不满足 `>=0.1.5-rc.1 <0.2.0`（下限元组是 `0.1.5`，认不了 `0.1.7-rc.x`）。谁要复核这个范围，必须用宿主自己的 `evaluatePluginCompatibility`，而不是 `semver.satisfies(range)` 或 pnpm 的 peer 检查——那两者会给出相反的结论。实测（用宿主导出的函数跑本插件的真实 `package.json`）：`0.1.5-rc.1` / `0.1.5-rc.3` / `0.1.6` / `0.1.7-rc.1` / `0.1.7-rc.2` / `0.1.7` / `0.1.8-rc.1` / `0.1.8` / `0.2.0-rc.1` 全部无 issue，仅 `0.2.0` 与 `0.3.0-rc.1` 被拒。
 3. **范围回答不了「装上还对不对」，而 CI 也只能盖住一半**。`0.1.6-alpha.2` 把 typert strict codec 从 `schema:`（zod v4 实例）换成 `create()`（进程内 realm 的懒工厂，registry 用 `record.value ??= record.create()` 物化）就是这么一次：它落在 `>=0.1.5-rc.1 <0.2.0` 之内，插件的兼容性声明天生拦不住，2026-09-21 的漂移任务因此变红（那一次 130 项里唯一失败的就是加载期契约那条）。真正的保护分两层：**(a) 运行时契约**由 [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) 每周把宿主整套换到 `latest` / `next` / `alpha` 三个渠道跑契约用例（`test/*.test.mjs` 去掉 `package-contract`，因为那份断言的是 pin 本身）；**(b) 宿主侧的加载期契约**（`lib/typert.js` 的形状由宿主 loader 校验，不由我们校验）由 `test/typert-manifest.test.mjs` 覆盖：它直接调宿主自己的 `validateTypertManifest` 验这份产物，形状一变就红；同一文件里还有一条**不依赖 loader 版本**的形状断言，钉住「strict codec 同时带 `schema` 与 `create()`」（下一条理由）——本地 devDependency 的 loader 是开发基线，看不见 alpha 的要求，只靠前者要等一周才知道。这一层原本是缺口——既有用例只保证 `lib/typert.js` 与 `lib/client.js` 两份产物彼此一致（`client-lifecycle.test.mjs`），宿主改了要求也不会变红，而后果是用户升级 DSH 后面板整个不可用。它也是 `@deepseek-ai/dsh-typert-loader` 只进 `devDependencies`、不进 peer 的原因：校验发生在宿主进程里，插件运行时不 import 它。
 
 **为什么 strict codec 两个键都写**（`lib/typert.js` 与 `lib/client.js` 各一份，`client-lifecycle.test.mjs` 钉住两者一致）：宿主在两个渠道上查**不同的键**，且都忽略对方的键——`0.1.5-rc.x`（= 当时的 `latest` / `next`，也就是 `npx` 默认装到的那条）查 `codec.schema.parse` 必须是 zod v4 实例；`0.1.6-alpha.2` 起查 `typeof codec.create === 'function'`。少写 `schema` 会在最新 RC 上加载即拒，少写 `create` 会在 alpha 上加载即拒；`mode: 'src-json'` 不是出路（loader 强制 invocation 的 codec 必须是 strict）。拿三个版本的 loader 直接跑自己的产物：
@@ -143,7 +147,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 | **双写** | PASS | PASS | PASS |
 | `mode: 'src-json'` | 拒 | 拒 | 拒 |
 
-`0.1.7-rc.1`（当前开发基线）的 loader 实测与 `0.1.6-alpha.2` 同列：只有 `create()` 通过、只有 `schema` 被拒。也就是说**基线已经落在「只查 `create()`」那一侧**，而只查 `schema` 的 `0.1.5-rc.x`（= 现在 `latest` 渠道、`npx` 默认装到的）仍是大多数用户实际在跑的版本。两个键都不能删，且本地测试已看不到 `schema` 那半边（由 `test/typert-manifest.test.mjs` 里那条不依赖 loader 版本的形状断言钉住）。
+`0.1.7-rc.2`（当前开发基线）的 loader 实测与 `0.1.6-alpha.2` 同列：只有 `create()` 通过、只有 `schema` 被拒。也就是说**基线已经落在「只查 `create()`」那一侧**，而只查 `schema` 的 `0.1.5-rc.x` 是更早的渠道——`latest`/`next` 在 2026-09-24 就一起推进到了 `0.1.7-rc.2`，所以它不再是「npx 默认装到的版本」，但仍有用户停在那一批（peer 范围为 `>=0.1.5-rc.1 <0.2.0` 允许，`COMPAT_WINDOW` 不动的原因见上一条）。两个键都不能删，且本地测试已看不到 `schema` 那半边（由 `test/typert-manifest.test.mjs` 里那条不依赖 loader 版本的形状断言钉住）。
 
 浏览器半（`@deepseek-ai/dsh-typert-registry` 的 `lib/client.js`）做同一份校验，所以 `lib/client.js` 里的 codec 必须同步改——只改 host 那份会变成「面板能加载，一调用就炸」。
 
@@ -154,7 +158,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
   这一条**不会**由漂移任务报出来：它的 `files` 是 `grep -v 'package-contract'`，pin 断言按定义就不参与漂移判定。所以「漂移任务绿」不等于 pin 没过期——2026-09-10 到 09-24 之间 pin 停在 `0.1.5-rc.2`，而 `latest` 已经是 `0.1.5-rc.3`、`next` 是 `0.1.7-rc.1`，两周无人发现，就是这条缺口。同步 pin 只有两个触发源：人注意到新 RC，或本地跑完整套件。
 
-  改的时候**别动 `COMPAT_WINDOW`**：它是 peer 窗口（`>=0.1.5-rc.1 <0.2.0`），下限是硬要求、上限只是信号灯；把它收窄到新版本会挡住仍在 `0.1.5-rc.x` 上的大多数用户。要改的常量只有 `package-contract.test.mjs` 的 `DEV_BASELINE`，锁文件里那个具体版本从它推导（原来那里硬编码了一份，是两个真源）。
+  改的时候**别动 `COMPAT_WINDOW`**：它是 peer 窗口（`>=0.1.5-rc.1 <0.2.0`），下限是硬要求、上限是宿主的硬闸门；把它收窄到新版本会挡住仍在 `0.1.5-rc.x` 上的用户（宿主闸门带 `includePrerelease`，所以老版本确实装得上，见上文第 2 条）。要改的常量只有 `package-contract.test.mjs` 的 `DEV_BASELINE`，锁文件里那个具体版本从它推导（原来那里硬编码了一份，是两个真源）。
 
 已实测（2026-09-24，漂移任务 [run 35943153431](https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/runs/35943153431)，三个渠道各 190 项全绿、0 跳过）：
 
@@ -166,7 +170,7 @@ DSH 宿主 API 通过 `peerDependencies` 以 `>=0.1.5-rc.1 <0.2.0` 声明。
 
 更早：`0.1.6-alpha.1` 上契约用例全绿；`0.1.6-alpha.2` 上修复前唯一失败的是 `typert-manifest` 那条，双写后按漂移任务的文件清单 137/137 全绿（复现方式：把宿主整套换到 alpha.2 再跑那份清单）。
 
-**alpha 全绿不等于它进了「已验证」**：这次它绿是因为我们的改动恰好是追加式（codec 双写 + 结构探测 cordis 私有字段），不是因为它稳定。所以兼容性表只写 `0.1.7-rc.1`——那是承诺；alpha 交给漂移任务每周探测，不承诺。这与上文第 2 条（预发布不需要特殊照顾）是同一个取舍。
+**alpha 全绿不等于它进了「已验证」**：这次它绿是因为我们的改动恰好是追加式（codec 双写 + 结构探测 cordis 私有字段），不是因为它稳定。所以兼容性表只写 `0.1.7-rc.2`——那是承诺；alpha 交给漂移任务每周探测，不承诺。这与上文第 2 条（预发布不需要特殊照顾）是同一个取舍。
 
 **这份证据盖不到的地方**：客户端侧是替身测试（组件在 node 里渲染不起来），所以上表证明的是 **slot 注册契约**成立，不是 slot 在 0.1.7 宿主上**渲染**正常。而 `0.1.6-alpha.2` 的发布说明里有「客户端 Session 会话支持多实例共存，相关 API 及 slot 有变化」。这类失败的表现是面板白屏、不会让任何用例变红，所以它属于发布前的人工检查（触发条件见 [安装与升级](installation.md#每次发布) 的「每次发布」），不进 CI。
 

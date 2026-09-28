@@ -27,7 +27,7 @@ const dshHostPackages = [
 // 而 mcp-client 也是 0.1.5 起才按注册作用域判 serverName 唯一性。旧版本不再兼容。
 const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
 // 开发基线跟随已验证的最新 RC；发布边界由 peer 窗口表达。
-const DEV_BASELINE = '^0.1.7-rc.1'
+const DEV_BASELINE = '^0.1.7-rc.2'
 // 锁文件里解析出的具体版本。**从 DEV_BASELINE 推导**，不要另写一处：这里原本硬编码
 // /^0\.1\.5-rc\.2/，于是 bump 基线时就有了第二个真源。
 const DEV_BASELINE_VERSION = DEV_BASELINE.replace(/^[^0-9]*/, '')
@@ -138,7 +138,9 @@ test('the current release has a hand-written GitHub Release note', async () => {
 test('documentation targets the verified DSH and plugin releases', () => {
   // README.en.md 同样随包发布，一并纳入：它原来不在清单里，所以英文版可以悄悄停在旧版本上。
   for (const document of [readme, readmeEn, installationGuide]) {
-    assert.match(document, /0\.1\.7-rc\.1/)
+    // 从 DEV_BASELINE 推导，别硬编码：这里原本写死 /0\.1\.7-rc\.1/，于是 bump 基线时
+    // 又多了第三个真源（前两个是 DEV_BASELINE 与锁文件版本）。
+    assert.match(document, new RegExp(DEV_BASELINE_VERSION.replace(/\./g, '\\.')))
     // 不再**声称**兼容 0.1.0-rc.x：peer 窗口已收窄到 0.1.5 起。
     // （文档里可以提到旧版本，但只能出现在解释历史差异的上下文里，不能写成兼容声明。）
     assert.doesNotMatch(document, /0\.1\.0-rc\.7`?\s*(?:及以上|以上)/)

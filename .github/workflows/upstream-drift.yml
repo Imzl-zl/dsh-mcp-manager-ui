@@ -65,8 +65,15 @@ jobs:
 
             echo "::group::$tag → $version"
             # 宿主整套换到该版本；传递依赖（dsh-llm / dsh-scope / dsh-system-prompt …）
-            # 由 pnpm 一起带到同一版本。此时插件自己的 peer 范围并不满足，pnpm 只给警告
-            # ——这正是要测的场景。pnpm 会自行补 minimumReleaseAgeExclude，无需手工维护。
+            # 由 pnpm 一起带到同一版本。
+            #
+            # 注意这里换的是 devDependencies（本地开发副本），不是插件的 peer 声明：
+            # 三个渠道的版本都落在 COMPAT_WINDOW（>=0.1.5-rc.1 <0.2.0）内——宿主自己的
+            # evaluatePluginCompatibility 用 includePrerelease 比较，预发布按数值参与，
+            # 所以 0.1.5-rc.x / 0.1.7-alpha.2 都算满足。pnpm 的 peer 警告不是判定依据。
+            #
+            # minimumReleaseAgeExclude 需要手工维护：pnpm 不会自行补充（只有
+            # `pnpm audit --fix` 会），这里新增高版本号时记得同步 pnpm-workspace.yaml。
             if pnpm add -D \
               "@deepseek-ai/dsh-agent@$version" \
               "@deepseek-ai/dsh-agent-loop@$version" \
