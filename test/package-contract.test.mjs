@@ -27,7 +27,7 @@ const dshHostPackages = [
 // 而 mcp-client 也是 0.1.5 起才按注册作用域判 serverName 唯一性。旧版本不再兼容。
 const COMPAT_WINDOW = '>=0.1.5-rc.1 <0.2.0'
 // 开发基线跟随已验证的最新 RC；发布边界由 peer 窗口表达。
-const DEV_BASELINE = '^0.1.7-rc.2'
+const DEV_BASELINE = '^0.2.0-rc.2'
 // 锁文件里解析出的具体版本。**从 DEV_BASELINE 推导**，不要另写一处：这里原本硬编码
 // /^0\.1\.5-rc\.2/，于是 bump 基线时就有了第二个真源。
 const DEV_BASELINE_VERSION = DEV_BASELINE.replace(/^[^0-9]*/, '')
@@ -389,6 +389,19 @@ test('server lists keep a minimum visible height and never get clipped to zero o
   assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-body\{flex-direction:column;overflow-y:auto/)
   assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-section\.local \.dsh-mcp-list\{max-height:30vh\}/)
   assert.match(client, /@media \(max-width:760px\)\{[^]*?\.dsh-mcp-global-list\{max-height:30vh\}/)
+})
+
+test('overflowing scope tabs keep their popover outside the scrolling strip', () => {
+  // .dsh-mcp-tabs 是 overflow-x:auto 的裁剪盒：弹层挂在它内部时会被整块裁掉
+  // （实测溢出时可见高度为 0），隐藏的项目标签就永远点不到。弹层必须挂在
+  // 非滚动的 .dsh-mcp-tabs-wrap 上。
+  assert.match(client, /\.dsh-mcp-tabs-wrap\{[^}]*position:relative/)
+  assert.match(client, /\.dsh-mcp-tabs\{[^}]*overflow-x:auto/)
+  assert.doesNotMatch(client, /\.dsh-mcp-tabs\{[^}]*position:relative/)
+  // 弹层节点由 wrap 渲染，而不是滚动的 tabs 容器。
+  assert.match(client, /className: 'dsh-mcp-tabs-wrap', ref: rootRef/)
+  assert.match(client, /className: 'dsh-mcp-tabs', ref: barRef/)
+  assert.match(client, /^ {4}popover,$/m)
 })
 
 test('workspace MCPs stay toggleable and share the global status vocabulary', () => {
