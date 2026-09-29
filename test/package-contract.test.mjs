@@ -38,7 +38,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.4.1')
+  assert.equal(packageJson.version, '1.4.2')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -405,6 +405,22 @@ test('overflowing scope tabs keep their popover outside the scrolling strip', ()
   assert.match(client, /className: 'dsh-mcp-tabs-wrap', ref: rootRef/)
   assert.match(client, /className: 'dsh-mcp-tabs', ref: barRef/)
   assert.match(client, /^ {4}popover,$/m)
+  // 光「挪出来」还不够：复用 .dsh-mcp-tab 作弹层行时它带 padding+border，
+  // 而 .dsh-mcp-tab 是 content-box，`width:100%` 会把内边距和边框再加一遍，
+  // 整行比弹层宽出一圈而溢出（实测 19px，chip 右边界越过了弹层右边界）。
+  // 这条与 .dsh-mcp-entry-item 那条注释是同一个坑，必须一起钉住。
+  const popRowRule = client.match(/\.dsh-mcp-tab-pop \.dsh-mcp-tab\{([^}]*)\}/)
+  assert.ok(popRowRule, '.dsh-mcp-tab-pop .dsh-mcp-tab 规则必须存在')
+  assert.match(popRowRule[1], /box-sizing:border-box/)
+  assert.match(popRowRule[1], /width:100%/)
+  // 弹层还必须贴着触发它的「…N」按钮，而不是贴标签条右边缘：标签条右侧常有
+  // 大段空白（可见标签按保守估算提前截断），贴右边缘会让弹层离点击处很远
+  // （实测水平差 50px）。锚点用内联 right 表达，并夹取到不溢出左边。
+  assert.match(client, /const POPOVER_MIN_WIDTH = 170/)
+  assert.match(client, /min-width:170px/)
+  assert.match(client, /style: \{ right: moreRight \+ 'px' \}/)
+  assert.match(client, /ref: moreRef/)
+  assert.match(client, /syncMoreAnchor/)
 })
 
 test('workspace MCPs stay toggleable and share the global status vocabulary', () => {
