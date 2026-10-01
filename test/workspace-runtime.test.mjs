@@ -96,9 +96,16 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {}, idle
   // 宿主创建事务的替身。真实宿主在 publish 前 await `agent/created` 的串行监听器，而本插件现在
   // 就挂在那上面（不再包装 agents.create/resume）。所以这里把旧调用点 `.setup(agentCtx, agent)`
   // 转发成一次**真实的事件派发**：测试驱动的是新路径，而不是替身自己编的捷径。
+  // 刻意**不用 `?.`**：订阅缺失时必须当场抛错，否则挂载静默不发生，而"什么都没发生"类断言
+  //（例如禁用 server 时 mounts.length === 0）会空过 —— 那种绿是假的。
+  const dispatch = (agent) => {
+    const listener = handlers['agent/created']
+    if (typeof listener !== 'function') throw new Error('夹具：本测试没有安装 agent/created 订阅（installAgentRuntime 未调用？）')
+    return listener({ agent })
+  }
   const agentsService = {
-    create() { return { setup: (_agentCtx, agent) => handlers['agent/created']?.({ agent }) } },
-    resume() { return { setup: (_agentCtx, agent) => handlers['agent/created']?.({ agent }) } },
+    create() { return { setup: (_agentCtx, agent) => dispatch(agent) } },
+    resume() { return { setup: (_agentCtx, agent) => dispatch(agent) } },
   }
   // 共享连接的 createScope 替身：建一个 scopeKey 的工具表，plugin() 时按 config.serverName
   // 注册两个工具（模拟 mcp-client 连接就绪后注册 mcp__<server>__*）。
@@ -440,7 +447,9 @@ test('readiness budget protects the first turn but never blocks a config write',
     const result = await reconcileWorkspaceConnections(fixture.ctx, fixture.wsRoot)
     const writeMs = Date.now() - writeStart
     assert.equal(result.remounted, 2, '两个存活会话都要重新对齐')
-    assert.ok(writeMs < 250, `配置对齐不得逐个会话等就绪（实测 ${writeMs}ms，预算 400ms×2）`)
+    // 判据来自夹具的机制而不是"跑得快"：就绪预算是 400ms，而这个 fixture 的 fiber 永不 settle，
+    // 所以只要 reconcile 真的逐个会话等就绪，这里必然 ≥400ms；对齐路径自己的活儿是微秒级。
+    assert.ok(writeMs < 300, `配置对齐不得逐个会话等就绪（实测 ${writeMs}ms，预算 400ms×2）`)
   } finally {
     await fixture.cleanup()
   }
@@ -450,7 +459,7 @@ test('readiness budget protects the first turn but never blocks a config write',
 // （这是空闲回收唯一的危险窗口：refs 归零起计时器，之后又有人 acquire。）
 test('shared project connection: a re-acquired connection is not disposed by a stale idle timer', async () => {
   const { installAgentRuntime: install, projectConnectionsView } = await import('../lib/workspace-runtime.js')
-  const fixture = await createRuntimeFixture({ idleTimeoutMs: 30, deferTools: false })
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 150, deferTools: false })
   try {
     install(fixture.ctx)
     const A = makeSession(fixture, 'A')
@@ -461,8 +470,10 @@ test('shared project connection: a re-acquired connection is not disposed by a s
     assert.equal(fixture.createdScopes.length, 1, '必须复用同一条连接')
     assert.equal((await projectConnectionsView(fixture.ctx))[0].idle, false, '重新被引用后不再是空闲态')
     assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'], '复用的连接必须照旧可投射工具')
-    // 等过空闲阈值的 3 倍：被持有的连接不得被那个已经失效的计时器拆掉。
-    await new Promise((resolve) => setTimeout(resolve, 90))
+    // 等过空闲阈值的 ~2.7 倍：被持有的连接不得被那个已经失效的计时器拆掉。
+    // 两个余量都要够宽：重取用要在 150ms 内完成（否则计时器先到、用例在 :468 就失败），
+    // 而这里要等到远超 150ms 才算证明了计时器确实被取消。
+    await new Promise((resolve) => setTimeout(resolve, 400))
     assert.equal(fixture.connectionCount, 1, '被持有的连接不得被过期的空闲计时器拆掉')
     assert.equal(fixture.createdScopes[0].disposed, false)
   } finally {
@@ -510,6 +521,49 @@ test('workspace view projects the fields the edit form has to carry back', async
     assert.equal(row.readyTimeoutMs, 1234, '就绪预算同样要投影出去')
     const offRow = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, { name: 'off', transport: 'stdio', disabled: true }, undefined)
     assert.equal(offRow.enabled, false, '禁用状态由 enabled 表达，表单据此带回 disabled')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// 按需重建（重连耗尽的终态）必须让**同项目所有存活会话**都重新指到新连接上。
+// 旧实现只顺手修好了"正在挂载的那个"：其余会话的槽位一直指向已销毁的连接，永久读不到工具 ——
+// 正是这次改动要消灭的症状，只不过换了个触发场景。这条测试就是它的回归守卫。
+test('on-demand rebuild of an exhausted connection keeps every live session on the new connection', async (t) => {
+  const rt = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture({ deferTools: false })
+  try {
+    rt.installAgentRuntime(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    await fixture.connectAll()
+    assert.deepEqual(fixture.ownToolNames(A), ['mcp__db__x', 'mcp__db__y'])
+    const firstScope = fixture.createdScopes[0]
+
+    // 制造终态：mcp-client 重连耗尽时会**注销工具而保留作用域** —— 夹具里就是清空这张表。
+    // 注意不能调 connectAll()：那会按生产路径把工具**重新发布**回来。这里只派发 tools/change，
+    // 也就是"服务器那边工具没了，宿主通知工具集变了"这一件事。
+    fixture.scopedTools.get(firstScope.key).clear()
+    await fixture.handlers['tools/change']()
+    assert.deepEqual(fixture.ownToolNames(A), [], '前置：工具确实被注销了')
+
+    // 让它"老到"足以被判为终态（阈值 5s）。只 mock Date，不动真实定时器（夹具的 dispose 依赖真定时器）。
+    // `now` 必须显式给：这个 Node 版本里 enable({apis:['Date']}) 把时钟置 0，而 entry.createdAt 是
+    // 真实时钟（1.79e12），差值会是巨大的负数，age 判定永远不成立。
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+    t.mock.timers.tick(6_000)
+
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B, B.sessionAgent)
+    assert.equal(fixture.createdScopes.length, 2, '终态连接必须在这次挂载被拆掉并按配置重建')
+    assert.equal(firstScope.disposed, true, '旧连接必须被销毁')
+
+    await fixture.connectAll()
+    assert.deepEqual(fixture.ownToolNames(A), ['mcp__db__x', 'mcp__db__y'], '先前那个会话必须被重新投射到新连接上（旧的 bug 就在这里）')
+    assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'])
+    const row = (await rt.projectConnectionsView(fixture.ctx))[0]
+    assert.equal(row.refs, 2, '两个会话各持一份引用')
+    assert.equal(row.toolCount, 2)
   } finally {
     await fixture.cleanup()
   }

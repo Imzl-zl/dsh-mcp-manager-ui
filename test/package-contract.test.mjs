@@ -184,8 +184,12 @@ test('agent mount takes the agent from the official agent/created payload, never
   // 官方途径：宿主在创建事务里派发 `agent/created` 并 await 串行监听器（dsh-agent 的 announce()），
   // 载荷里的 agent 公开 ctx 与 session。方向永远是 agent → ctx：反过来从 ctx 上读 agent 会被
   // cordis 的服务守卫拒绝（`cannot get property "agent" without inject`）。
-  assert.match(runtime, /ctx\.on\("agent\/created", async \(\{ agent \}\) =>/)
-  assert.match(runtime, /mountProjectMcpForAgent\(ctx, agent, generation\)/)
+  // 签名刻意**不在参数位置解构**：解构发生在 try 之前，一个 null 载荷就能让监听器 reject，
+  // 而宿主把 reject 当作「否决这次会话创建」—— 取值必须留在 try 里面。
+  assert.match(runtime, /ctx\.on\("agent\/created", async \(payload\) =>/)
+  assert.match(runtime, /const payloadAgent = payload\?\.agent;/)
+  assert.match(runtime, /mountProjectMcpForAgent\(ctx, payloadAgent, generation, \{ signal: payload\?\.signal \}\)/)
+  assert.doesNotMatch(runtime, /ctx\.on\("agent\/created", async \(\{ agent \}\)/)
   assert.match(runtime, /const agentCtx = agent\?\.ctx;/)
   assert.match(runtime, /if \(!agentCtx\)/)
   assert.doesNotMatch(runtime, /agentCtx\.agent/)
@@ -511,6 +515,11 @@ test('project MCP: what the README promises the panel shows, the panel actually 
   // README 承诺的「重连出口」必须有对应 RPC（而不是只有一句文案）。
   assert.match(host, /async reconnectWorkspaceServer\(payload\)/)
   assert.match(client, /'reconnectWorkspaceServer'/)
+  // 对齐连接必须发生在**写锁之外**、并经一个吞错误的小助手：reconcile 会 await 整条 teardown，
+  // 放在写锁里会让「移除一个卡住的 server」把该项目之后每次保存都卡住；而它的失败不该把一个
+  // 已经落盘的写报成失败。所以 RPC 里不再直接调用它。
+  assert.match(host, /async function alignWorkspaceConnections\(ctx, wsPath\)/)
+  assert.doesNotMatch(host, /await reconcileWorkspaceConnections\(this\.ctx/)
   // 编辑表单是"重建 spec"：表单不渲染的字段必须原样带回，否则编辑一次就抹掉它们
   //（disabled 会让被禁用的 server 悄悄启用；项目级预算旋钮则会被静默清空）。
   assert.match(client, /if \(initial\.enabled === false\) spec\.disabled = true;/)

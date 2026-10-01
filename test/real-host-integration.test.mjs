@@ -251,7 +251,9 @@ test('real host: one shared mcp-client per project, tools projected into each se
   await writeFile(server, FIXTURE_SERVER)
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
     // 空闲回收设得很短，好在用例里等到「会话都结束 → 连接保留 → 空闲超时才拆」这条链。
-    mcpServers: { fixture: { command: process.execPath, args: [server, sentinel], idleTimeoutMs: 300 } },
+    // 空闲回收设得比"两次会话销毁 + 断言"长得多（2.5s vs 通常几十毫秒）：3 秒的余地在负载高的
+    // CI 上才不会被两次 scope teardown 吃掉而误判。真正的回收边界由下面的 waitFor 断言。
+    mcpServers: { fixture: { command: process.execPath, args: [server, sentinel], idleTimeoutMs: 2500 } },
   }, null, 2))
 
   const host = await createRealHost(wsRoot)
