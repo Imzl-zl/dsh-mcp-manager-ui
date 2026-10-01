@@ -511,6 +511,11 @@ test('project MCP: what the README promises the panel shows, the panel actually 
   // README 承诺的「重连出口」必须有对应 RPC（而不是只有一句文案）。
   assert.match(host, /async reconnectWorkspaceServer\(payload\)/)
   assert.match(client, /'reconnectWorkspaceServer'/)
+  // 编辑表单是"重建 spec"：表单不渲染的字段必须原样带回，否则编辑一次就抹掉它们
+  //（disabled 会让被禁用的 server 悄悄启用；项目级预算旋钮则会被静默清空）。
+  assert.match(client, /if \(initial\.enabled === false\) spec\.disabled = true;/)
+  assert.match(client, /for \(const key of \['idleTimeoutMs', 'readyTimeoutMs'\]\)/)
+  assert.match(host, /"idleTimeoutMs", "readyTimeoutMs"\]\) if \(server\[field\] !== undefined\)/)
   // 详情页空态不能承诺“刷新即可看到工具”：那要求 tools RPC 真能枚举共享作用域层，
   // 而 toolInventory 只认 loader 条目 + 全局视图。要么能枚举，要么别承诺。
   assert.doesNotMatch(client, /刷新即可看到工具/)

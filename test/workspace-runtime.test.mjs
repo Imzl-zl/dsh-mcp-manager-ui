@@ -495,6 +495,26 @@ test('agent runtime: a throwing agent payload is swallowed by the listener, neve
   }
 })
 
+// 面板的编辑表单是"重建 spec"而不是增量改 spec，所以视图层必须把**表单不渲染的字段**也投影出去，
+// 否则用户编辑一次就把它们抹掉：`disabled`（会让被禁用的 server 被悄悄启用）与项目级预算旋钮。
+test('workspace view projects the fields the edit form has to carry back', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const { summarizeWorkspaceRow } = await import('../lib/index.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const row = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, {
+      name: 'db', transport: 'stdio', idleTimeoutMs: 0, readyTimeoutMs: 1234,
+    }, undefined)
+    assert.equal(row.idleTimeoutMs, 0, '空闲预算必须投影出去（0 是合法值，不能被当成未设置）')
+    assert.equal(row.readyTimeoutMs, 1234, '就绪预算同样要投影出去')
+    const offRow = summarizeWorkspaceRow(fixture.ctx, fixture.wsRoot, { name: 'off', transport: 'stdio', disabled: true }, undefined)
+    assert.equal(offRow.enabled, false, '禁用状态由 enabled 表达，表单据此带回 disabled')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 test('agent runtime install subscribes to agent/created, mounts through it, and cleanup unsubscribes', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
