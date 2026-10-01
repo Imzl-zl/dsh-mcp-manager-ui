@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, clearRevealState, consumeRevision, copyText, startVisibilityAwarePolling };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, clearRevealState, consumeRevision, copyText, startVisibilityAwarePolling, wsSub };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -185,4 +185,31 @@ test('polling pauses while the tab is hidden and refreshes on return', () => {
   dispose()
   assert.equal(intervalDisposed, true)
   assert.equal(listeners.visibilitychange, undefined, '监听器必须解绑')
+})
+
+// 项目行的文案把**两个独立事实**分开说：连接在不在、几个会话在用。
+// 旧实现把两者压成一句「待会话挂载」，用户读成"还没连上/排队中"，而事实常常是
+// "连接在、只是当前没会话用" —— 这条测试就是钉住这个区分。
+test('project row wording separates connection state from projection scope', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { wsSub } = internals
+  const base = { status: 'connected', refs: 0, toolCount: 41 }
+
+  // 连接在、没人用：必须说清"连接保留"，而不是含糊的"待挂载"。
+  assert.equal(wsSub(base), '已连接 · 当前无会话使用（连接保留，下次直接用） · 41 工具')
+  assert.equal(wsSub({ ...base, refs: 2 }), '已连接 · 2 个会话在用 · 41 工具')
+
+  // 连接不在、以及各类失败，各自可辨（不再互相冒充）。
+  assert.equal(wsSub({ status: 'stopped', refs: 0 }), '尚未建立连接（新会话自动挂载）')
+  assert.equal(wsSub({ status: 'loading' }), '连接中…')
+  assert.equal(wsSub({ status: 'failed' }), '连接失败')
+  assert.equal(wsSub({ status: 'failed', mountFailed: true }), '挂载失败')
+  assert.equal(wsSub({ status: 'connected', scopeFailed: true }), '作用域隔离失败')
+  assert.equal(wsSub({ status: 'disabled' }), '已禁用')
+  assert.equal(wsSub({ status: 'unknown' }), '状态未知')
+
+  // 任何分支都不得回到那句被误解的合成文案。
+  for (const row of [base, { ...base, refs: 3 }, { status: 'failed' }, { status: 'stopped' }]) {
+    assert.doesNotMatch(wsSub(row), /待会话挂载/)
+  }
 })

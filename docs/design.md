@@ -48,15 +48,36 @@
 - **已连接（connected）**：只有该 server 的工具已注册（`mcp__<server>__*` 数量 > 0）才判定为已连接。插件 fiber 处于 ACTIVE 只说明 mcp-client 在跑，不能证明握手成功——`failOnStartupError: false`（默认）时连接失败也会让 fiber 保持 ACTIVE。
 - **连接失败（failed）**：fiber 已 ACTIVE（mcp-client 的 `apply` 要等首次连接与 `tools/list` 结束才让 fiber ACTIVE）却没有任何工具，或者 fiber 本身处于失败态。具体原因取自 mcp-client 最近的日志（通过 `ctx.logger.exporter` 订阅并按 `mcp-client(<serverName>)` 过滤），例如 `connection attempt failed: ECONNREFUSED`、`giving up after 10 consecutive failed reconnect attempts`；拿不到日志时就如实写“未注册任何工具”。
 - **连接中（loading）**：fiber 尚未 ACTIVE（还在跑 apply）。不猜测成功也不猜测失败。
-- **已停止（stopped）**：没有 fiber。全局意为条目未加载；项目语境里意为「尚无会话持有这份共享连接」，面板显示为「待会话挂载」。
+- **已停止（stopped）**：没有 fiber。全局意为条目未加载；项目语境里意为「这条共享连接还没建立」（新会话挂载时才建），面板显示为「尚未建立连接（新会话自动挂载）」。
 
-全局与项目行走的是**同一个判定函数**（`mcp-observability.deriveMcpPhase`）与同一个取值域，只有文案不同（项目行的 connected 写作「已连接（本项目会话共享）」、stopped 写作「待会话挂载」）。面板还会在项目行标出 `配置待生效`（配置改过但仍在复用旧连接）与 `N 个会话共用`。**三类**失败分开告知，不混为一谈：
+全局与项目行走的是**同一个判定函数**（`mcp-observability.deriveMcpPhase`）与同一个取值域，只有文案不同。**项目行刻意把两件独立的事分开说**，不合成一个状态：
 
-- **挂载失败**（`mountFailed`）：本插件在会话 setup 阶段就挂不上（配置里的 `${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。
+- **连接在不在** —— 由上面那套判定给出：`已连接` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`。连接按空闲策略保留（见「生效时机语义表」），所以"当前没有会话在用"不会显示成"没连上"。
+- **几个会话在用** —— `refs`：`已连接 · N 个会话在用 · M 工具` / `已连接 · 当前无会话使用（连接保留，下次直接用）`。
+
+早先的文案把两者压成一句「待会话挂载」，用户读成"还没连上/排队中"，而事实常常是"连接在、只是当前没会话用"——这正是它被改掉的原因（文案推导现在是模块作用域的纯函数 `wsSub`，由 `test/client-behavior.test.mjs` 直接断言）。**三类**失败分开告知，不混为一谈：
+
+- **挂载失败**（`mountFailed`）：本插件在**会话挂载阶段**（`agent/created` 串行监听器）就挂不上（配置里的 `${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。
 - **连接失败**（`status === 'failed'`）：mcp-client 那边的事。两者由 Host 分开标记，客户端不再用「lastError 存在」反推挂载失败。
 - **作用域故障**（`scopeFailed`）：连接是好的，但工具不在共享作用域层——工具落到了全局层，说明 `@deepseek-ai/dsh-scope` 在宿主与插件之间解析成了两份模块实例（作用域标签是模块内的 Symbol）。这是最隐蔽的故障形态：`tools.schemas(scopeKey)` 认不出标签时会**退回全局层**，面板因此显示「已连接 N 工具」，而工具其实对所有会话、所有项目都可见。所以判定直接对比全局视图（同名前缀的工具出现在全局视图 ⇒ 它们不属于本作用域），并把原因写在 `scopeFailed` 行与 `mcpManager/projectConnections` 的 `scopeError` 上。判定刻意保守：只有「没有同名全局条目、也没有其他项目用同名」时才断言，否则无法与「别人的同名实例的工具」区分；同一连接只判定一次（结论缓存在连接上，不在轮询里重复开销）。
 
 项目 MCP 的工具注册在它自己的共享作用域层里，全局工具视图看不到，所以面板按该作用域枚举（不是走全局 `tools.schemas()`）。
+
+## 生效时机语义表
+
+项目配置的每一种改动各自在什么时候生效，只有一条规则：**写盘即对齐**（`reconcileWorkspaceConnections` 是「配置 → 连接集 → 会话投射」的唯一同步点）。
+
+| 改动 | 生效时机 | 机制 |
+|---|---|---|
+| 新增 server | **立刻**（含正在运行的会话） | 写盘后 reconcile → 为存活会话 acquire 连接并投射工具 |
+| 删除 server | **立刻**（含正在运行的会话） | 连接立刻 retire，指向它的会话投射整批撤掉（不留僵尸工具） |
+| 改已有 server 的配置 | **立刻**，就地重载 | 指纹变了就销毁旧连接、按新配置重建，并把所有会话的槽位改指新连接 |
+| 屏蔽 / 取消屏蔽（`exclude`） | 立刻 | 重算 `restrict` 写入会话作用域 |
+| 手工编辑 `.dsh/mcp.json` | 下一次会话挂载时 | 挂载路径自己会做同一套对齐（没有文件监听器，所以不是"立刻"） |
+
+「改配置就地重载」不是自创的取舍，而是宿主对配置条目的既有语义（`dsh-mcp-client` README：*"Editing the configuration entry reloads the server connection in place, and unchanged names stay unchanged"*），而且它安全：**工具名是 `(serverName, rawName)` 的纯函数**，重载后名字不变，所以会话历史与权限规则不受影响。旧实现选择"复用旧连接 + 面板标 `配置待生效` + 等所有会话结束"，代价是用户改了配置却看不到变化——那条路已删除。
+
+**连接的生命周期跟配置走，不跟会话走**：最后一个会话结束只归还引用并起一个空闲计时器（`idleTimeoutMs`，默认 5 分钟，`0` = 永不回收），连接与 stdio 子进程都留着，下次会话直接复用。这既符合 MCP 规范对 session 的关闭时机（"不再需要（例如用户要离开客户端应用）"），也避免反复起停进程（社区里"重连一次泄漏一个进程"的那类问题）。真正销毁只在：配置删除/改动、面板「重连」、插件卸载、或空闲超时。
 
 ### 只读诊断接口（排障用）
 
@@ -104,12 +125,13 @@ mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, r
 
 ## 已知限制
 
-- **首轮就绪时序**：项目 MCP 默认异步建连，新会话的**首轮对话可能还未就绪**，第二轮起可用。若服务器配置了 `failOnStartupError: true`，会等待连接确认后才继续创建会话（与 mcp-client 全局行为一致）。
+- **首轮就绪**：挂载时会在**共享就绪预算**内等待连接就绪（`readyTimeoutMs`，默认 5s，`0` = 不等），所以首轮请求里就有工具——这是宿主自己的契约（`dsh-mcp-client` README：*"The server's tools appear before the harness starts its first turn"*）。超时**不算失败、也不阻断会话**：预算用尽就先开起来，就绪后由 `tools/change` 补投射；连接状态由 fiber 状态与工具数如实呈现。预算是"这次会话创建"的总预算（取各 server 上限的最大值），不是每个 server 各发一份——否则 5 个连不上的服务器会给每次会话创建加上 5 倍等待。若某个服务器配置了 `failOnStartupError: true`，则按官方语义等它出结论（这条是用户显式选择的等待，不受预算约束）。
 - **屏蔽不释放全局实例**：「屏蔽」全局 MCP 只隐藏它的工具，该 serverName 的全局实例仍在运行（占用它自己那个作用域）。DSH 0.1.5 起项目可以直接用同名服务器独立连接，不需要先把全局那份禁用；更早的宿主按全进程唯一判定，那时同名会启动失败。
 - **同名按注册作用域隔离（0.1.5 起）**：`mcp-client` 按**注册作用域**判定 `serverName` 唯一性（`scopeOf(ctx) ?? ctx.root`），而本插件给每个 `(项目, serverName)` 一个独立作用域，所以项目之间、全局与项目之间同名都是合法配置，各自独立连接、各自注册工具（实测：同一作用域内同名仍被拒绝）。
-- **共享连接与配置粘性**：见 README 的「配置生效时机」——运行中连接沿用首会话配置，全部会话结束后新连接才用新配置；期间面板标 `配置待生效`。
+- **共享连接按配置就地重载**：见上文「生效时机语义表」——改配置立刻重载连接并改指会话槽位；连接不再随会话结束而销毁（空闲保留）。
+- **连接进入终态后要有人拉一把**：mcp-client 的重连有次数上限，耗尽后它注销工具并停止，只能靠重载配置或重启宿主恢复（它的 README 明写）。项目 MCP 不是常驻服务（VS 重启、脚本结束都会让它消失），所以这个终态几乎必然出现：挂载路径会在下次有人用时把已死的连接拆掉重建，面板的「重连」按钮提供立即出口。
 - **不支持 per-session 隔离**：见上文「不适合共享的服务器」。
-- **关掉最后一个会话后立刻重开会稍等**：新连接要等旧连接完全销毁才建（避免撞名），这段等待取决于 MCP 服务端退出的快慢。**上界约 9 秒**：MCP SDK 的 stdio 关闭本身最多等 2s（stdin 关掉）+ 2s（SIGTERM）再 SIGKILL，mcp-client 对关闭确认又有 5 秒上限。同一会话的多个 server 是并行释放的，不累加。实测正常服务器远低于这个上界（Windows、SDK 1.30.0）：`transport.close()` 对 `@modelcontextprotocol/server-memory` 35ms、`mcp-deepwiki` 43ms、`fast-context-mcp` 34ms、`serena` 167ms；整个 `dsh web` 进程的优雅退出（同时拆 4 个 stdio + 2 个 HTTP 连接）约 0.5s。慢的前提是服务器不理 stdin EOF，见下一条。
+- **会话结束后不再需要"等旧连接销毁"**：连接不随会话结束而销毁（空闲保留），所以"关掉最后一个会话后立刻重开"不会撞上释放窗口——直接复用同一条连接。只有真正重建（改配置、点重连、空闲回收后重建）时才需要等旧连接 teardown，这段等待取决于 MCP 服务端退出的快慢。**上界约 9 秒**：MCP SDK 的 stdio 关闭本身最多等 2s（stdin 关掉）+ 2s（SIGTERM）再 SIGKILL，mcp-client 对关闭确认又有 5 秒上限。同一会话的多个 server 是并行释放的，不累加。实测正常服务器远低于这个上界（Windows、SDK 1.30.0）：`transport.close()` 对 `@modelcontextprotocol/server-memory` 35ms、`mcp-deepwiki` 43ms、`fast-context-mcp` 34ms、`serena` 167ms；整个 `dsh web` 进程的优雅退出（同时拆 4 个 stdio + 2 个 HTTP 连接）约 0.5s。慢的前提是服务器不理 stdin EOF，见下一条。
 - **Windows：忽略 stdin EOF 的 stdio 服务器会漏孙进程**。stdio 服务器在 Windows 上通常是一条进程链（`npx` 解析成 `npx.cmd`，于是 `dsh → cmd.exe → node`），而 MCP SDK 的 `StdioClientTransport.close()` 只对**直接子进程**发 SIGTERM/SIGKILL（`sdk/dist/esm/client/stdio.js` 的 `close()`），没有 job object，孙进程不在射程内。实测常见服务器（memory、deepwiki、fast-context、serena、chrome-devtools）都在 stdin EOF 时自行退出，因此 DSH 正常退出与被强杀都**不残留进程**；但这份干净来自服务器行为，不是 transport 的保证——故意忽略 stdin EOF 的服务器会让 `close()` 吃满 4 秒（2s + 2s）并留下一个孤儿孙进程。遇到这类服务器请让它自己处理退出，或改用 `streamable-http`。
 - **DSH 的退出宽限是 5 秒**：官方启动器在 SIGINT/SIGTERM 后只给整棵插件树 5 秒（`dsh/lib/profile-boot-*.js` 的 `PROCESS_SHUTDOWN_TIMEOUT_MS`），超时就 `process.exit()`。正常情形绰绰有余（实测 ~0.5s），但若同时有多个“退得慢”的服务器，退出可能在 teardown 完成前被强行截止。
 - **来源导入只取用户级 `mcpServers`**：`~/.claude.json` 里的 `projects[*].mcpServers` 不展开（那会把每个历史项目都铺出来）；项目级配置请从项目标签导入 `.mcp.json`。单文件超过 8 MB 的来源会被跳过。

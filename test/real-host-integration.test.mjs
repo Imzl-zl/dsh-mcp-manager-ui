@@ -13,6 +13,8 @@ import * as scope from '@deepseek-ai/dsh-scope'
 import {
   installAgentRuntime,
   projectConnectionsView,
+  reconcileWorkspaceConnections,
+  reconnectWorkspaceServer,
   workspaceMountErrorsView,
   workspaceScopeErrorsView,
   workspaceToolSchemas,
@@ -69,6 +71,50 @@ process.stdin.on('data', (chunk) => {
 })
 `
 
+// 可控版夹具：多一个 `exit` 工具（让服务器自己退出，用来制造真实的断连），并在启动时读一个
+// 控制文件——文件内容为 fail 时立刻退出，用来让"重连预算耗尽"这件事在测试里几分钟变几百毫秒。
+// 单独一份、不动 FIXTURE_SERVER，是为了不改变其他用例看到的工具数。
+const FIXTURE_SERVER_CONTROLLABLE = `
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+const sentinel = process.argv[2]
+const control = process.argv[3]
+if (control && existsSync(control) && readFileSync(control, 'utf8').trim() === 'fail') process.exit(0)
+process.stdin.setEncoding('utf8')
+let buf = ''
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+process.stdin.on('end', () => process.exit(0))
+process.on('exit', () => { try { writeFileSync(sentinel, 'bye') } catch {} })
+process.stdin.on('data', (chunk) => {
+  buf += chunk
+  let index
+  while ((index = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, index)
+    buf = buf.slice(index + 1)
+    if (!line.trim()) continue
+    const message = JSON.parse(line)
+    if (message.method === 'initialize') {
+      send({ jsonrpc: '2.0', id: message.id, result: {
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'fixture', version: '1.0.0' },
+      } })
+    } else if (message.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id: message.id, result: { tools: [
+        { name: 'echo', description: 'Echo the given text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+        { name: 'exit', description: 'Terminate this server process.', inputSchema: { type: 'object', properties: {} } },
+      ] } })
+    } else if (message.method === 'tools/call') {
+      if (message.params?.name === 'exit') { process.exit(0) }
+      send({ jsonrpc: '2.0', id: message.id, result: {
+        content: [{ type: 'text', text: 'echo:' + String(message.params.arguments?.text ?? '') }],
+      } })
+    } else if (message.id !== undefined) {
+      send({ jsonrpc: '2.0', id: message.id, result: {} })
+    }
+  }
+})
+`
+
 async function waitFor(predicate, timeoutMs = WAIT_MS) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -111,7 +157,7 @@ async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
 
   const agentScopes = []
   const agents = {
-    async create(options) {
+    async create(options = {}) {
       const created = {}
       const ready = new Promise((resolve) => { created.resolve = resolve })
       // 生产形状：agent scope 建在注入了 tools 的 fiber 下（dsh-agent-loop 的 AgentLoop.inject 同样含 tools），
@@ -123,12 +169,16 @@ async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
         created.resolve(created.scope)
       })
       await ready
-      const agent = { session: { header: { cwd: wsRoot } } }
-      const commit = await options.setup(created.scope.ctx, agent)
+      // 真实宿主的创建事务（dsh-agent-loop 在 publish 之前）：先 await 调用方的 setup，再 await
+      // `agent/created` 的**串行**监听器，全部跑完才把 agent 交还调用方。插件现在就挂在那上面，
+      // 所以这个替身必须真的派发该事件 —— 否则用例会「绿着但什么都没挂」。
+      const agent = { session: { header: { cwd: wsRoot } }, ctx: created.scope.ctx }
+      const commit = await options.setup?.(created.scope.ctx, agent)
       commit?.commit?.()
+      await ctx.serial(ctx, 'agent/created', { agent, source: 'startup' })
       return { key: created.key, scope: created.scope }
     },
-    async resume(options) { return this.create(options) },
+    async resume(options = {}) { return this.create(options) },
   }
   ctx.provide('agents', agents)
   installAgentRuntime(ctx)
@@ -200,7 +250,8 @@ test('real host: one shared mcp-client per project, tools projected into each se
   await mkdir(join(wsRoot, '.dsh'), { recursive: true })
   await writeFile(server, FIXTURE_SERVER)
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
-    mcpServers: { fixture: { command: process.execPath, args: [server, sentinel] } },
+    // 空闲回收设得很短，好在用例里等到「会话都结束 → 连接保留 → 空闲超时才拆」这条链。
+    mcpServers: { fixture: { command: process.execPath, args: [server, sentinel], idleTimeoutMs: 300 } },
   }, null, 2))
 
   const host = await createRealHost(wsRoot)
@@ -209,11 +260,13 @@ test('real host: one shared mcp-client per project, tools projected into each se
     const first = await host.createAgent()
     const second = await host.createAgent()
 
-    const projected = await waitFor(() => {
-      const names = host.tools.schemas(first.key).map((schema) => schema.name)
-      return names.includes('mcp__fixture__echo') ? names : undefined
-    })
-    assert.ok(projected, '项目 MCP 的工具必须投射进会话自己的层')
+    // 首轮之前就绪：从 create() 返回的那一刻起（没有任何 waitFor）工具就必须已经在声明里。
+    // 这是宿主自己的契约（mcp-client README: "The server's tools appear before the harness starts
+    // its first turn"），也是「用的时候必须已经连上」这条要求的最小可验证形式。
+    assert.ok(
+      host.tools.schemas(first.key).some((schema) => schema.name === 'mcp__fixture__echo'),
+      '共享连接必须在会话创建事务内就绪：工具不得晚于首轮',
+    )
 
     // 第二个会话看到同一份工具集（共享连接的投射是幂等的、按会话各一份）
     assert.ok(host.tools.schemas(second.key).some((schema) => schema.name === 'mcp__fixture__echo'),
@@ -250,14 +303,194 @@ test('real host: one shared mcp-client per project, tools projected into each se
       assert.deepEqual(result, { content: [{ type: 'text', text: 'echo:hi' }] })
     }
 
-    // 会话全部结束 -> 共享连接释放 -> stdio 子进程退出（不留孤儿）
+    // 会话全部结束：连接**保留**（空闲），子进程也留着 —— 这正是「下一次要用时已经就绪」。
     await first.scope.dispose()
     await second.scope.dispose()
-    const exited = await waitFor(() => existsSync(sentinel))
-    assert.ok(exited, '最后一个会话结束后，共享连接的 stdio 子进程必须退出')
+    const idle = await projectConnectionsView(host.ctx)
+    assert.equal(idle.length, 1, '会话结束不等于连接结束：连接留在空闲池里')
+    assert.equal(idle[0].refs, 0)
+    assert.equal(idle[0].sessions, 0)
+    assert.equal(idle[0].idle, true, '空闲等待必须从诊断视图看出来')
+    assert.equal(existsSync(sentinel), false, '空闲期间子进程不得退出（复用而不是重建）')
 
-    const afterRelease = await projectConnectionsView(host.ctx)
-    assert.equal(afterRelease.length, 0, '引用归零后共享连接必须从诊断视图消失')
+    // 空闲超时到点才真的拆，且不留孤儿子进程。
+    const exited = await waitFor(() => existsSync(sentinel))
+    assert.ok(exited, '空闲超时后共享连接必须释放，stdio 子进程必须退出')
+    // teardown 是异步的：诊断视图在释放完成前会如实显示 disposing 占位，所以这里等到它清空。
+    assert.ok(
+      await waitFor(async () => (await projectConnectionsView(host.ctx)).length === 0),
+      '回收完成后必须从诊断视图消失',
+    )
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// 挂载点换成 agent/created 串行监听器之后的两条契约，都在真实宿主事务里验：
+//   1. 监听器在 caller 拿到 agent 之前跑完 → create() 一返回，连接就已经存在（无需轮询）；
+//   2. 夹具保真度：宿主把监听器的抛错当作**否决创建** —— 这条成立，下一条断言才不是空过。
+test('real host: the mount runs inside the creation transaction, and a throwing listener vetoes creation', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-created-'))
+  const wsRoot = join(root, 'workspace')
+  const server = join(root, 'fixture-server.mjs')
+  await mkdir(join(wsRoot, '.dsh'), { recursive: true })
+  await writeFile(server, FIXTURE_SERVER)
+  await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: { command: process.execPath, args: [server, join(root, 'unused-sentinel')] } },
+  }, null, 2))
+
+  const host = await createRealHost(wsRoot)
+  try {
+    await host.createAgent()
+    // 没有任何 waitFor：创建事务里 await 过监听器，所以此刻连接必然已经建好。
+    const connections = await projectConnectionsView(host.ctx)
+    assert.equal(connections.length, 1, 'agent/created 监听器必须在 caller 拿到 agent 之前完成挂载')
+    assert.equal(connections[0].serverName, 'fixture')
+
+    // 夹具保真度对照：一个抛错的监听器必须让创建失败（否则「失败不否决创建」无从证伪）。
+    const offBomb = host.ctx.on('agent/created', () => { throw new Error('listener veto') })
+    await assert.rejects(() => host.createAgent(), /listener veto/, '宿主语义：监听器抛错否决创建')
+    offBomb()
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// 本次任务的核心场景：**先开会话、后写配置**（用户实际遇到的那个故障），以及随后的移除。
+// 面板写盘路径写完就调 reconcileWorkspaceConnections；挂载不再只发生在会话创建那一刻。
+test('real host: project config written while a session is live reaches it, and removal retracts it', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-live-'))
+  const wsRoot = join(root, 'workspace')
+  const sentinel = join(root, 'server-exited')
+  const server = join(root, 'fixture-server.mjs')
+  await mkdir(join(wsRoot, '.dsh'), { recursive: true })
+  await writeFile(server, FIXTURE_SERVER)
+  // 开局：项目里没有任何 server（会话先开）。
+  await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({ mcpServers: {} }, null, 2))
+
+  const host = await createRealHost(wsRoot)
+  try {
+    const agent = await host.createAgent()
+    assert.deepEqual(
+      host.tools.schemas(agent.key).filter((schema) => schema.name.startsWith('mcp__fixture__')),
+      [],
+      '开局没有任何项目 server',
+    )
+
+    // 会话还开着的时候写入配置 + 对齐（= 面板写盘路径做的两件事）。
+    await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+      mcpServers: { fixture: { command: process.execPath, args: [server, sentinel], idleTimeoutMs: 0 } },
+    }, null, 2))
+    const reconciled = await reconcileWorkspaceConnections(host.ctx, wsRoot)
+    assert.equal(reconciled.remounted, 1, '必须对存活会话重跑一次挂载')
+
+    const names = await waitFor(() => {
+      const current = host.tools.schemas(agent.key).map((schema) => schema.name)
+      return current.includes('mcp__fixture__echo') ? current : undefined
+    })
+    assert.ok(names, '写配置后，仍然活着的会话必须拿到工具 —— 不需要重开会话')
+
+    // 再移除：连接立刻销毁，工具从存活会话里撤掉，子进程退出。
+    await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({ mcpServers: {} }, null, 2))
+    const removed = await reconcileWorkspaceConnections(host.ctx, wsRoot)
+    assert.deepEqual(removed.retired, ['fixture'])
+    assert.ok(
+      await waitFor(() => host.tools.schemas(agent.key).every((schema) => !schema.name.startsWith('mcp__fixture__'))),
+      '移除后工具必须从存活会话里撤掉（不留僵尸工具）',
+    )
+    assert.ok(await waitFor(() => existsSync(sentinel)), '移除后 stdio 子进程必须退出')
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('real host: an exhausted connection can be rebuilt on demand (no host restart)', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-rebuild-'))
+  const wsRoot = join(root, 'workspace')
+  const sentinel = join(root, 'server-exited')
+  const control = join(root, 'control.txt')
+  const server = join(root, 'fixture-server.mjs')
+  await mkdir(join(wsRoot, '.dsh'), { recursive: true })
+  await writeFile(server, FIXTURE_SERVER_CONTROLLABLE)
+  await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: {
+      fixture: {
+        command: process.execPath,
+        args: [server, sentinel, control],
+        // 让「重连预算耗尽」在几百毫秒内发生（默认 500ms→30s × 10 在用例里等不起）。
+        reconnect: { initialDelayMs: 20, maxDelayMs: 50, maxAttempts: 2 },
+        idleTimeoutMs: 0,
+      },
+    },
+  }, null, 2))
+
+  const host = await createRealHost(wsRoot)
+  try {
+    const agent = await host.createAgent()
+    const echoTool = () => host.tools.get('mcp__fixture__echo', agent.key)
+
+    // 正常态：工具可用。
+    let definition = await waitFor(() => echoTool())
+    assert.ok(definition, '初始连接必须就绪')
+    assert.deepEqual(
+      await definition.execute({ text: 'hi' }, { signal: new AbortController().signal }),
+      { content: [{ type: 'text', text: 'echo:hi' }] },
+    )
+
+    // 制造终态：先让"下一次启动必然失败"，再让服务器自己退出 —— 重连会不断重生一个立刻退出的进程，
+    // 预算耗尽后 mcp-client 注销工具并停止（README 明写的终态）。
+    await writeFile(control, 'fail\n')
+    const exitTool = host.tools.get('mcp__fixture__exit', agent.key)
+    assert.ok(exitTool, '夹具必须暴露 exit 工具')
+    await assert.rejects(() => exitTool.execute({}, { signal: new AbortController().signal }))
+
+    const gone = await waitFor(() =>
+      host.tools.schemas(agent.key).every((schema) => !schema.name.startsWith('mcp__fixture__')),
+    )
+    assert.ok(gone, '预算耗尽后工具必须被注销（这是 mcp-client 的终态，不是我们的判断）')
+
+    // 恢复条件具备后按需重建：这就是面板「重连」走的同一条路径。
+    await rm(control, { force: true })
+    const rebuilt = await reconnectWorkspaceServer(host.ctx, wsRoot, 'fixture')
+    assert.equal(rebuilt.hadLiveConnection, true, '重建必须先拆掉那条已死的连接')
+
+    definition = await waitFor(() => echoTool(), WAIT_MS)
+    assert.ok(definition, '重连后工具必须回来 —— 不需要重开会话，也不需要重启宿主')
+    assert.deepEqual(
+      await definition.execute({ text: 'again' }, { signal: new AbortController().signal }),
+      { content: [{ type: 'text', text: 'echo:again' }] },
+      '重建后的连接必须真的可用（能调用，不只是出现在列表里）',
+    )
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// MCP 出任何问题都不得把用户挡在会话门外：启动命令不存在时，create 仍必须成功。
+// 失败以**连接失败**的形式如实呈现（工具数为 0 + fiber ACTIVE 的终态证据），而不是挂载失败 ——
+// 两类失败刻意分开，这里把这条区分也钉住。
+test('real host: a failing project MCP server is reported as a connection failure, never a veto on session creation', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-broken-'))
+  const wsRoot = join(root, 'workspace')
+  await mkdir(join(wsRoot, '.dsh'), { recursive: true })
+  await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { broken: { command: join(root, 'no-such-binary'), args: [] } },
+  }, null, 2))
+
+  const { summarizeWorkspaceRow } = await import('../lib/index.js')
+  const host = await createRealHost(wsRoot)
+  try {
+    await host.createAgent()
+    const row = await waitFor(() => {
+      const current = summarizeWorkspaceRow(host.ctx, wsRoot, { name: 'broken', transport: 'stdio' }, undefined)
+      return current.status === 'failed' ? current : undefined
+    })
+    assert.ok(row, '连不上的 server 必须被如实报成连接失败（0 工具 + fiber ACTIVE 的终态证据）')
+    assert.notEqual(row.mountFailed, true, '连接失败不得与挂载阶段失败混为一谈')
   } finally {
     await host.cleanup()
     await rm(root, { recursive: true, force: true })

@@ -37,6 +37,8 @@ test('spec_to_entry roundtrips through normalizeMcpImport', () => {
     toolCallTimeoutMs: 30000,
     failOnStartupError: true,
     reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
+    // 插件自己的项目级字段：必须原样往返，否则面板每次保存都会把它丢掉。
+    idleTimeoutMs: 60000,
     disabled: false,
   }
   const entry = specToMcpEntry(spec)
@@ -48,6 +50,7 @@ test('spec_to_entry roundtrips through normalizeMcpImport', () => {
     toolCallTimeoutMs: 30000,
     failOnStartupError: true,
     reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
+    idleTimeoutMs: 60000,
     disabled: false,
   })
   const back = normalizeMcpImport({ mcpServers: { local: entry } }).servers[0]
@@ -66,8 +69,21 @@ test('spec_to_entry roundtrips through normalizeMcpImport', () => {
     toolCallTimeoutMs: 30000,
     failOnStartupError: true,
     reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
+    idleTimeoutMs: 60000,
     disabled: false,
   })
+})
+
+test('idleTimeoutMs is a project-level policy and never reaches the mcp-client config', () => {
+  const spec = { name: 'local', transport: 'stdio', command: 'node', idleTimeoutMs: 0 }
+  // 0 = 不回收：必须能被写出、也必须能被读回（0 是合法值，不能被当成“未设置”）。
+  assert.equal(specToMcpEntry(spec).idleTimeoutMs, 0)
+  const back = normalizeMcpImport({ mcpServers: { local: specToMcpEntry(spec) } }).servers[0]
+  assert.equal(back.idleTimeoutMs, 0)
+  // 它不下发给 mcp-client：那边是未知字段（配置 schema 会拒绝），生命周期由插件自己管。
+  assert.equal('idleTimeoutMs' in toMcpClientConfig(back, '/ws'), false)
+  assert.throws(() => normalizeMcpImport({ mcpServers: { local: { command: 'node', idleTimeoutMs: -1 } } }), /idleTimeoutMs 必须是非负整数/)
+  assert.throws(() => normalizeMcpImport({ mcpServers: { local: { command: 'node', idleTimeoutMs: 1.5 } } }), /idleTimeoutMs 必须是非负整数/)
 })
 
 test('http spec roundtrip keeps type/url/headers', () => {

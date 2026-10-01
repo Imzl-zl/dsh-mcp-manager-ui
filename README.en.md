@@ -123,11 +123,17 @@ The detail pane lists the tools a server currently registers; expand one for its
 | Scope | When a change takes effect |
 |---|---|
 | Global | DSH hot-reloads it, usually immediately (including running sessions) |
-| Project | **The next newly created connection**; running sessions are unaffected |
+| Project | **As soon as it is written**: an added server mounts into live sessions, a removed one retracts its tools, and a changed one reloads in place (tool names stay the same) |
 
-Project MCPs are assembled into a session from `.dsh/mcp.json` as it was at creation/resume time, and configuration is not re-read mid-session — **editing inside a session not taking effect is expected** (Claude Code, Codex, and friends also require a new session for project-level MCPs). "Hide" behaves the same way: it applies to later sessions only. No "reconnect" click and no Host restart is needed.
+Project MCPs are shared by every session of that project and configured in `.dsh/mcp.json`. Saving in the panel aligns the running sessions immediately — **no need to reopen a session and no Host restart**; editing the file by hand is picked up at the **next session mount**.
 
-> **Boundary of the shared connection**: a project's MCPs are shared by all of that project's sessions, and the connection is established from the configuration in effect when the **first** such session opened. So "open a new session" does not always mean "pick up new configuration": if the project has **no sessions running**, the new session creates a fresh connection and uses the new configuration immediately; if the project **still has sessions running**, the new session reuses the existing connection and keeps the old configuration, and the panel marks that project's row `配置待生效` (pending configuration). Once all sessions end, the next session connects with the new configuration. The panel only reports this; it never swaps the connection out from under a live conversation.
+> **The connection follows the configuration, not the sessions**: when the last session ends the connection is not torn down — it goes idle and the next session reuses it, so it is already up when you need it (this is also the host's own contract: tools must appear before the first turn). Idle recycling defaults to 5 minutes; `idleTimeoutMs` tunes it and `0` means never recycle automatically.
+>
+> **How to read the state**: a project row states two independent facts instead of merging them.
+> - **Is the connection there**: `已连接 · 当前无会话使用（连接保留，下次直接用）` / `已连接 · N 个会话在用` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`.
+> - **How many sessions use it**: the `N 个会话在用` part above. The old "待会话挂载" wording merged both into one phrase and read like "not connected yet".
+>
+> **Reconnect is a required exit**: mcp-client has a bounded reconnect budget and, once exhausted, it unregisters the tools and stops until the configuration is reloaded or the harness restarts (its README says so). A project MCP is not a resident service, so the panel's "reconnect" button tears the old connection down, rebuilds it from the current configuration, and re-projects it into live sessions.
 
 ## FAQ
 

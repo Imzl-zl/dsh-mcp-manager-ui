@@ -7,6 +7,16 @@ import { installAgentRuntime } from '../lib/workspace-runtime.js'
 // 把一份 session 展开成真实 setup 契约的两个参数：setup(agentCtx, agent)。
 const spawn = (s) => [s, s.sessionAgent]
 
+/** 轮询等待一个条件成立（空闲回收这类计时器行为需要它）。 */
+async function waitFor(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await predicate()) return true
+    if (Date.now() > deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
 // 模拟 cordis `ctx.effect()` 的返回语义：立即同步执行 factory、把它返回的 disposer 交给一个
 // 幂等 wrapper（cordis 用 runner.epoch 保证同一 effect 只 dispose 一次），wrapper 透传 disposer
 // 的返回值（异步 disposer 的 teardown promise 会被 Fiber._unload await）。
@@ -33,12 +43,17 @@ function makeInactiveEffect() {
 // deferTools 默认 true = 生产时序：真实 mcp-client 的 apply 在 cordis 的微任务里才跑，工具要等
 // connect + tools/list 才注册，所以 setup 当场看到的一定是空集，投射完全依赖后续 tools/change。
 // 需要「工具已就绪」的用例显式调用 await fixture.connectAll()。
-async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {}) {
+async function createRuntimeFixture({ deferTools = true, extraServers = {}, idleTimeoutMs, readyTimeoutMs, pendingFiber = false } = {}) {
   const wsRoot = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
   await mkdir(join(wsRoot, '.dsh'), { recursive: true })
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
     mcpServers: {
-      db: { command: 'psql', env: { KEY: '${KEY}' } },
+      db: {
+        command: 'psql',
+        env: { KEY: '${KEY}' },
+        ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
+        ...(readyTimeoutMs === undefined ? {} : { readyTimeoutMs }),
+      },
       ...extraServers,
     },
     exclude: ['github'],
@@ -48,6 +63,7 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {
   const effects = []
   const handlers = {}
   const warns = []
+  const errors = []
   // 模拟宿主 ToolRuntime 的“按作用域”工具表：scopeKey -> [{name, ...}]。
   // 共享连接把工具注册进它的作用域层，会话侧按 scopeKey 读取并投射进 own 层。
   const scopedTools = new Map() // scopeKey -> Map<name, def>
@@ -77,9 +93,12 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {
     effect: makeEffect([effects]),
   }
   ctxAgentObj.ctx = agentCtx
+  // 宿主创建事务的替身。真实宿主在 publish 前 await `agent/created` 的串行监听器，而本插件现在
+  // 就挂在那上面（不再包装 agents.create/resume）。所以这里把旧调用点 `.setup(agentCtx, agent)`
+  // 转发成一次**真实的事件派发**：测试驱动的是新路径，而不是替身自己编的捷径。
   const agentsService = {
-    create(options) { return { setup: options.setup }; },
-    resume(options) { return { setup: options.setup }; },
+    create() { return { setup: (_agentCtx, agent) => handlers['agent/created']?.({ agent }) } },
+    resume() { return { setup: (_agentCtx, agent) => handlers['agent/created']?.({ agent }) } },
   }
   // 共享连接的 createScope 替身：建一个 scopeKey 的工具表，plugin() 时按 config.serverName
   // 注册两个工具（模拟 mcp-client 连接就绪后注册 mcp__<server>__*）。
@@ -116,9 +135,11 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {
           connectionCount += 1                       // 每 (ws,server) 只应 +1
           publishTargets.set(scopeKey, config.serverName)
           if (!deferTools) publish(scopeKey, config.serverName)
-          const fiber = Promise.resolve()
+          // pendingFiber：模拟"连接还没就绪"（真实 mcp-client 的 apply 要等 connect + tools/list 结束）。
+          // 永不 settle 的 thenable 因此能把"等就绪"这件事变成可测的时序，而不是靠注入定时器。
+          const fiber = pendingFiber ? new Promise(() => {}) : Promise.resolve()
           fiber.catch = () => fiber
-          fiber.state = 2
+          fiber.state = pendingFiber ? 0 : 2
           return fiber
         },
       }
@@ -154,10 +175,11 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {
       get: (name, scope) => (scope !== undefined ? scopedTools.get(scope)?.get(name) : undefined),
     },
     get(name) { if (name === 'agents') return agentsService; if (name === 'tools') return ctx.tools; return undefined; },
-    on(event, handler) { handlers[event] = handler; return () => {} },
+    // 与 cordis 一致：注销时监听器真的从表里消失（否则「卸载后不该再收到事件」这类断言是假的）。
+    on(event, handler) { handlers[event] = handler; return () => { if (handlers[event] === handler) delete handlers[event] } },
     effect: makeEffect([effects]),
     logger: {
-      warn: (message) => warns.push(message), error: () => {}, info: () => {},
+      warn: (message) => warns.push(message), error: (message) => errors.push(message), info: () => {},
       // mcp-client 不暴露连接事件，面板靠 ctx.logger.exporter 订阅它的日志判定连接失败。
       buffer: [],
       exporter: (exp) => { logExporters.push(exp); return () => { const at = logExporters.indexOf(exp); if (at >= 0) logExporters.splice(at, 1) } },
@@ -165,7 +187,7 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {} } = {
   }
   const sessionDisposers = []
   const fixture = {
-    wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, warns, scopedTools, agentOwnTools, createdScopes,
+    wsRoot, agentCtx, agentsService, ctx, restrictCalls, mounts, effects, handlers, warns, errors, scopedTools, agentOwnTools, createdScopes,
     globalSchemas,
     sessionDisposers,
     get connectionCount() { return connectionCount },
@@ -274,17 +296,15 @@ test('agent runtime skips disabled servers and handles missing config', async ()
     // disabled 服务器不挂载。
     assert.equal(fixture.mounts.length, 0)
 
-    // 无 .dsh/mcp.json 的目录：setup 正常返回，无 restrict、无挂载。
+    // 无 .dsh/mcp.json 的目录：挂载顺利跑完，无 restrict、无挂载。
+    // （挂载点现在是 agent/created，所以这里直接派发事件，而不是造一个 agents 服务替身。）
     const plainCtx = { ...fixture.ctx, tools: { schemas: () => [] } }
-    const agents = {
-      create(options) { return { setup: options.setup }; },
-      resume(options) { return { setup: options.setup }; },
+    install(plainCtx)
+    const plainAgent = {
+      ctx: { effect: () => () => {}, tools: { restrict: () => { throw new Error('must not restrict') } } },
+      session: { header: { cwd: empty } },
     }
-    const plainCtx2 = { ...plainCtx, get(name) { if (name === 'agents') return agents; return undefined; } }
-    install(plainCtx2)
-    const plainAgent = { agent: { session: { header: { cwd: empty } } }, plugin: () => { throw new Error('must not mount') }, tools: { restrict: () => { throw new Error('must not restrict') } } }
-    const created2 = await agents.create({ setup: undefined })
-    await created2.setup(plainAgent, plainAgent.sessionAgent)
+    await fixture.handlers['agent/created']({ agent: plainAgent })
     assert.equal(fixture.mounts.length, 0)
   } finally {
     await fixture.cleanup()
@@ -398,55 +418,128 @@ test('workspace MCPs resolve through the host loader rather than the plugin own 
   }
 })
 
-test('agent runtime cleanup restores original methods', async () => {
-  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
-  const fixture = await createRuntimeFixture()
+// 挂载点是官方的 agent/created 串行监听器：安装只订阅事件，宿主服务一个字节都不动；
+// cleanup 注销订阅。（旧实现包装 agents.create/resume，那条路已删除。）
+// 就绪预算是给"首轮"的，不是给"每次写盘"的：挂载要在预算内等就绪，而配置对齐
+// （reconcile，会话已经活着、没有首轮要保护）**不得**为每个会话各等一次预算 ——
+// 否则 3 个会话 + 一个不可达服务器会让一次面板保存阻塞十几秒。
+test('readiness budget protects the first turn but never blocks a config write', async () => {
+  const { installAgentRuntime: install, reconcileWorkspaceConnections } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture({ pendingFiber: true, readyTimeoutMs: 400 })
   try {
-    const originalCreate = fixture.agentsService.create
-    const cleanup = install(fixture.ctx)
-    assert.notEqual(fixture.agentsService.create, originalCreate)
-    cleanup()
-    assert.equal(fixture.agentsService.create, originalCreate)
-    // 二次清理幂等。
-    cleanup()
-    assert.equal(fixture.agentsService.create, originalCreate)
+    install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    const B = makeSession(fixture, 'B')
+    const mountStart = Date.now()
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    const mountMs = Date.now() - mountStart
+    assert.ok(mountMs >= 350, `首轮挂载必须在预算内等就绪（实测 ${mountMs}ms）`)
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B, B.sessionAgent)
+
+    const writeStart = Date.now()
+    const result = await reconcileWorkspaceConnections(fixture.ctx, fixture.wsRoot)
+    const writeMs = Date.now() - writeStart
+    assert.equal(result.remounted, 2, '两个存活会话都要重新对齐')
+    assert.ok(writeMs < 250, `配置对齐不得逐个会话等就绪（实测 ${writeMs}ms，预算 400ms×2）`)
   } finally {
     await fixture.cleanup()
   }
 })
-// 复刻 cordis 的 traceable 语义：ctx.get() 每次返回新的 Proxy（createTraceable 无缓存），
-// 且函数属性读出来还会再包一层 shadow method，因此不能靠 ctx.get() 的返回值身份判重。
-function traceableProxy(target) {
-  return new Proxy(target, {
-    get(t, prop, receiver) {
-      if (prop === Symbol.for('cordis.original')) return t
-      const value = Reflect.get(t, prop, receiver)
-      if (typeof value === 'function') return new Proxy(value, { apply: (fn, _thisArg, args) => Reflect.apply(fn, t, args) })
-      return value
-    },
-    set(t, prop, value) { return Reflect.set(t, prop, value) },
-  })
-}
 
-test('repeated install does not stack decorators when ctx.get returns a fresh proxy', async () => {
+// 空闲计时器与「重新被引用」的竞态：计时器到点时若连接已被重新持有，绝不能拆。
+// （这是空闲回收唯一的危险窗口：refs 归零起计时器，之后又有人 acquire。）
+test('shared project connection: a re-acquired connection is not disposed by a stale idle timer', async () => {
+  const { installAgentRuntime: install, projectConnectionsView } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 30, deferTools: false })
+  try {
+    install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    await A.dispose() // refs 归零 → 起空闲计时器
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(B, B.sessionAgent) // 复用同一条
+    assert.equal(fixture.createdScopes.length, 1, '必须复用同一条连接')
+    assert.equal((await projectConnectionsView(fixture.ctx))[0].idle, false, '重新被引用后不再是空闲态')
+    assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'], '复用的连接必须照旧可投射工具')
+    // 等过空闲阈值的 3 倍：被持有的连接不得被那个已经失效的计时器拆掉。
+    await new Promise((resolve) => setTimeout(resolve, 90))
+    assert.equal(fixture.connectionCount, 1, '被持有的连接不得被过期的空闲计时器拆掉')
+    assert.equal(fixture.createdScopes[0].disposed, false)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// 「监听器绝不否决会话创建」这条边界本身要被测：宿主把监听器的抛错当作否决创建，
+// 所以即使载荷本身爆炸（例如 agent.session 在读取时抛），也只能吞成日志。
+// （另一条端到端用例证明宿主的否决语义真实存在，这条证明我们没有踩上去。）
+test('agent runtime: a throwing agent payload is swallowed by the listener, never vetoing creation', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
-    const ctx = { ...fixture.ctx, get(name) { return name === 'agents' ? traceableProxy(fixture.agentsService) : undefined } }
-    // 面板每 5s 轮询两个 RPC，每个 RPC 都会 ensureAgentRuntime；包装链必须恒为 1 层，
-    // 否则 agents.create 的调用深度会随运行时长无限增长直至爆栈。
-    for (let i = 0; i < 20; i += 1) install(ctx)
-    const created = await fixture.agentsService.create({ setup: undefined })
-    await created.setup(fixture.agentCtx, fixture.agentCtx.sessionAgent)
-    assert.equal(fixture.mounts.length, 1, '重复安装不得叠加装饰器')
+    install(fixture.ctx)
+    const hostile = {
+      get session() { throw new Error('payload blew up') },
+      ctx: { effect: () => () => {}, tools: { register: () => () => {} } },
+    }
+    await assert.doesNotReject(
+      () => fixture.handlers['agent/created']({ agent: hostile }),
+      '监听器抛错会否决会话创建，所以必须自吞',
+    )
+    assert.ok(
+      fixture.errors.some((line) => line.includes('已吞掉，不阻断会话创建')),
+      '自吞必须留下可诊断的日志：' + JSON.stringify(fixture.errors),
+    )
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('agent runtime install subscribes to agent/created, mounts through it, and cleanup unsubscribes', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    const pristineCreate = fixture.agentsService.create
+    const cleanup = install(fixture.ctx)
+    assert.equal(fixture.agentsService.create, pristineCreate, '不得改写宿主服务')
+    const listener = fixture.handlers['agent/created']
+    assert.equal(typeof listener, 'function', '必须订阅 agent/created')
+
+    // 挂载确实由这个监听器驱动：派发一次事件就该建出共享连接。
+    const session = makeSession(fixture, 'A')
+    await listener({ agent: session.sessionAgent })
+    assert.equal(fixture.connectionCount, 1, '监听器必须真的把项目 MCP 挂上')
+
+    cleanup()
+    assert.equal(fixture.handlers['agent/created'], undefined, 'cleanup 必须注销订阅')
+    cleanup() // 二次清理幂等。
+    assert.equal(fixture.handlers['agent/created'], undefined)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+// 同一会话被挂载两次（重复派发 / 双监听器）必须幂等：连接按 (wsPath, serverName) 去重，
+// 工具按名字去重。旧实现的风险是「重复安装叠装饰器 → 调用深度无限增长」，那条路随
+// monkey-patch 一起消失了；这里守住的是它留下的等价风险。
+test('mounting the same session twice reuses the one shared connection and one tool set', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
+  // deferTools: false = 连接在挂载时就已经注册好了工具，好断言自己的工具集大小。
+  const fixture = await createRuntimeFixture({ deferTools: false })
+  try {
+    install(fixture.ctx)
+    const session = makeSession(fixture, 'A')
+    await fixture.handlers['agent/created']({ agent: session.sessionAgent })
+    await fixture.handlers['agent/created']({ agent: session.sessionAgent })
+    assert.equal(fixture.connectionCount, 1, '同一 (wsPath, serverName) 只应有一条共享连接')
+    assert.equal(fixture.ownToolNames(session).length, 2, '重复挂载不得让工具重复注册')
   } finally {
     await fixture.cleanup()
   }
 })
 
 // exclude 变更后重算 deny 并写入会话作用域，不依赖 tools/change（改屏蔽不动全局工具集，
-// 那个事件不会触发）。断言的是「重算并调用 restrict」——会话的工具清单在首轮请求时定型，
-// 已开始的对话不受影响。
+// 那个事件不会触发）。断言的是「重算并调用 restrict」——`restrict()` 是作用域层上的登记，
+// 写盘后必须有人主动算一次；算完之后运行中的会话在下一轮请求就不再见得到被屏蔽的工具。
 test('exclude change recomputes deny and calls restrict without a tools/change event', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const { McpManagerGateway } = await import('../lib/index.js')
@@ -493,20 +586,21 @@ test('failed restrict is retried instead of being recorded as applied', async ()
   }
 })
 
-test('agent runtime install waits for the agents service via ctx.inject', async () => {
-  const { installAgentRuntimeWhenReady } = await import('../lib/workspace-runtime.js')
+// 安装不再依赖 agents 服务：挂载点换成 agent/created 之后，连 ctx.get('agents') 都不需要。
+// （旧实现必须等 ctx.inject(['agents']) 就绪，才能改写出一个可装饰的 create/resume。）
+test('agent runtime install needs no agents service', async () => {
+  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
-    const injected = []
-    // agents 尚未就绪的 ctx：安装必须被推迟给 ctx.inject，而不是当场失败或反复重试。
-    const pending = { ...fixture.ctx, get: () => undefined, inject: (deps, cb) => { injected.push([deps, cb]) } }
-    installAgentRuntimeWhenReady(pending)
-    assert.equal(injected.length, 1)
-    assert.deepEqual(injected[0][0], ['agents'])
-
-    const originalCreate = fixture.agentsService.create
-    injected[0][1](fixture.ctx)
-    assert.notEqual(fixture.agentsService.create, originalCreate, 'agents 就绪后才装饰')
+    const withoutAgents = { ...fixture.ctx, get: () => undefined, agents: undefined }
+    const cleanup = install(withoutAgents)
+    const listener = fixture.handlers['agent/created']
+    assert.equal(typeof listener, 'function', 'agents 未就绪也必须装上挂载点')
+    const session = makeSession(fixture, 'A')
+    await listener({ agent: session.sessionAgent })
+    assert.equal(fixture.connectionCount, 1, '没有 agents 服务也能正常挂载')
+    cleanup()
+    assert.equal(fixture.handlers['agent/created'], undefined)
   } finally {
     await fixture.cleanup()
   }
@@ -516,9 +610,8 @@ test('workspace RPCs do not install the agent runtime', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
   const fixture = await createRuntimeFixture()
   try {
-    const originalCreate = fixture.agentsService.create
     await McpManagerGateway.prototype.listWorkspaces.call({ ctx: fixture.ctx })
-    assert.equal(fixture.agentsService.create, originalCreate, 'RPC 不应承担装配职责')
+    assert.equal(fixture.handlers['agent/created'], undefined, 'RPC 不应承担装配职责')
   } finally {
     await fixture.cleanup()
   }
@@ -592,9 +685,32 @@ test('shared project connection: two sessions of one project reuse ONE mcp-clien
 })
 
 // ── 引用计数：先关的会话只撤自己的投射，末个会话关掉才释放连接 ──
-test('shared project connection: releasing one session keeps the other working, last one disposes', async () => {
-  const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
-  const fixture = await createRuntimeFixture()
+// idleTimeoutMs: 0 表示「永不自动回收」：显式选择常驻的项目，不该被空闲计时器悄悄拆掉。
+test('shared project connection: idleTimeoutMs 0 keeps the connection resident after the last session ends', async () => {
+  const { installAgentRuntime: install, projectConnectionsView } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 0 })
+  try {
+    install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    await A.dispose()
+    assert.equal(fixture.connectionCount, 1)
+    const row = (await projectConnectionsView(fixture.ctx))[0]
+    assert.equal(row.idleTimeoutMs, 0)
+    assert.equal(row.idle, false, '0 = 不回收，所以不存在“空闲等待”这个状态')
+    // 等一小会儿仍然是常驻的（没有任何计时器在跑）。
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(fixture.connectionCount, 1, 'idleTimeoutMs: 0 的连接不得被空闲回收')
+    assert.equal(fixture.createdScopes[0].disposed, false)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+test('shared project connection: releasing the last session keeps the connection idle, and the idle timeout retires it', async () => {
+  const { installAgentRuntime: install, projectConnectionsView } = await import('../lib/workspace-runtime.js')
+  // 50ms 空闲回收，好在用例里等到它。
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 50 })
   try {
     install(fixture.ctx)
     const A = makeSession(fixture, 'A')
@@ -612,10 +728,15 @@ test('shared project connection: releasing one session keeps the other working, 
     assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'])
     assert.deepEqual(fixture.ownToolNames(A), [], 'A 的投射已撤回')
 
-    // 末个会话关掉后，引用计数归零，连接被释放（serverName 归还）。
+    // 末个会话关掉：连接**不拆**，只进入空闲等待 —— 这就是「下一次要用时已经就绪」的前提。
     await B.dispose()
-    assert.equal(fixture.createdScopes[0].disposed, true, '末个会话关掉后必须释放连接')
-    assert.equal(fixture.connectionCount, 0)
+    assert.equal(fixture.connectionCount, 1, '末个会话关掉后连接必须保留（空闲）')
+    const idleRow = (await projectConnectionsView(fixture.ctx))[0]
+    assert.equal(idleRow.refs, 0)
+    assert.equal(idleRow.idle, true, '空闲等待必须能从诊断视图看出来')
+
+    // 空闲超时到点才真的回收（替身的作用域 dispose 还会异步把连接计数减掉，所以等计数）。
+    assert.ok(await waitFor(() => fixture.connectionCount === 0), '空闲超时后必须回收连接')
   } finally {
     await fixture.cleanup()
   }
@@ -693,23 +814,28 @@ test('shared project connection: concurrent setup of two sessions builds ONE con
 })
 
 // ── 释放→重建竞态：teardown 是异步的，立即重开必须等旧连接归还 serverName ──
-test('shared project connection: immediate re-acquire after last release waits for teardown (no async serverName window)', async () => {
-  const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
+test('shared project connection: session churn reuses the live connection instead of rebuilding it', async () => {
+  const { installAgentRuntime: install, workspaceMountErrorsView, projectConnectionsView } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     install(fixture.ctx)
     const A = makeSession(fixture, 'A')
     await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
     assert.equal(fixture.connectionCount, 1)
-    // 末会话关闭：mock 的 teardown 延迟 5ms（模拟 quiesceFiber），此刻连接尚未销毁。
-    const teardown = A.dispose()
-    assert.equal(fixture.connectionCount, 1, 'teardown 完成前连接仍在释放中')
-    // 立刻重开会话：必须等待旧连接 teardown 完成再新建，不能撞 serverName。
+
+    // 会话关闭不再引发 teardown：连接留在空闲池里，所以「释放窗口」这种竞态窗口根本不存在了
+    // ——旧实现要在这里等旧连接销毁完才允许新建，否则会撞 serverName。
+    await A.dispose()
+    assert.equal(fixture.createdScopes[0].disposed, false, '会话关闭不得拆连接')
+
     const B = makeSession(fixture, 'B')
     await (await fixture.agentsService.resume({ setup: undefined })).setup(B, B.sessionAgent)
-    await teardown
-    assert.equal(fixture.connectionCount, 1, '释放窗口内重建不得产生第二条连接')
-    assert.equal(fixture.createdScopes.length, 2, '旧连接销毁后才允许新建第二个作用域')
+    assert.equal(fixture.connectionCount, 1, '重开会话必须复用同一条连接')
+    assert.equal(fixture.createdScopes.length, 1, '不得再建第二个作用域')
+    const rows = await projectConnectionsView(fixture.ctx)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].refs, 1, '引用是从 0 加回同一条连接，而不是重建')
+    assert.equal(rows[0].idle, false, '重新被引用的连接不再是空闲态')
     assert.deepEqual(workspaceMountErrorsView(fixture.wsRoot), [])
     await fixture.connectAll()
     assert.deepEqual(fixture.ownToolNames(B), ['mcp__db__x', 'mcp__db__y'])
@@ -766,9 +892,10 @@ test('shared project connection: separate app roots never interfere', async () =
     assert.equal(f2.connectionCount, 1)
     assert.equal(f1.ownToolNames(A).length, 2)
     assert.equal(f2.ownToolNames(B).length, 2)
-    // 关掉 app1 的会话：app2 的连接与投射完全不受影响。
+    // 关掉 app1 的会话：连接进入空闲（不拆），app2 的连接与投射完全不受影响。
     await A.dispose()
-    assert.equal(f1.connectionCount, 0)
+    assert.equal(f1.connectionCount, 1, '会话关闭不等于连接关闭（空闲保留）')
+    assert.deepEqual(f1.ownToolNames(A), [], 'app1 的投射必须撤回')
     assert.equal(f2.connectionCount, 1, '另一个 app root 的连接不得被牵连')
     assert.equal(f2.ownToolNames(B).length, 2)
   } finally {
@@ -779,9 +906,10 @@ test('shared project connection: separate app roots never interfere', async () =
 
 // ── 会话在建连期间被销毁：dsh-agent-loop 的 setupAndPublish 用 raceAbort 抛弃 setup 但不取消它。
 //    所有权凭 cordis 的 assertActive 判定：作用域已销毁时 agentCtx.effect() 直接抛，引用当场归还。 ──
-test('shared project connection: a session disposed mid-connect returns its reference (no leaked connection)', async () => {
+test('shared project connection: a session disposed mid-connect returns its reference (no leaked reference)', async () => {
   const { installAgentRuntime: install, readWorkspaceConfigCached, workspaceConnectionStatus } = await import('../lib/workspace-runtime.js')
-  const fixture = await createRuntimeFixture()
+  // 空闲超时留得比下面那句「等 setup 续跑」的 30ms 长，否则断言时连接已经被空闲回收了。
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 200 })
   try {
     install(fixture.ctx)
     await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
@@ -800,10 +928,13 @@ test('shared project connection: a session disposed mid-connect returns its refe
     releaseImport()
     await pending
     await new Promise((resolve) => setTimeout(resolve, 30))
-    assert.equal(fixture.connectionCount, 0, '会话已销毁，setup 续跑时建出的连接必须当场归还')
-    assert.deepEqual(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' }), { mounted: false, schemas: [], refs: 0, configStale: false, fiberState: undefined, duplicateOwners: [], scopeError: '' })
+    // 引用必须归零（这是这条用例真正守的性质）；连接本身按新语义进入空闲等待，由空闲超时回收。
+    const idle = workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' })
+    assert.equal(idle.refs, 0, '被抛弃的 setup 不得留下悬挂的引用计数')
+    assert.equal(idle.mounted, true, '空闲连接仍然存在（这正是「下次要用时已经就绪」）')
     assert.equal(fixture.ownToolNames(A).length, 0, '已销毁的会话不应留下工具投射')
     assert.ok(fixture.warns.some((line) => line.includes('已归还共享连接引用')), JSON.stringify(fixture.warns))
+    assert.ok(await waitFor(() => fixture.createdScopes[0].disposed), '空闲超时后必须回收这条连接')
   } finally {
     await fixture.cleanup()
   }
@@ -862,8 +993,10 @@ test('shared project connection: tools registered after connect reach every live
   }
 })
 
-// ── 会话销毁 / 插件卸载都必须能被宿主 await 到连接真正关闭，否则关停会早于 MCP 子进程退出 ──
-test('shared project connection: teardown is awaitable by the host (session dispose and plugin unload)', async () => {
+// ── 插件卸载必须能被宿主 await 到连接真正关闭，否则关停会早于 MCP 子进程退出。
+//    会话销毁**不再**等于连接关闭（它只把连接留在空闲池里），所以 teardown promise 只在卸
+//    载/重建这类「不再有效」的路径上产生。 ──
+test('shared project connection: plugin unload teardown stays awaitable by the host', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const bySession = await createRuntimeFixture()
   try {
@@ -872,7 +1005,7 @@ test('shared project connection: teardown is awaitable by the host (session disp
     await (await bySession.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
     assert.equal(bySession.connectionCount, 1)
     await A.dispose()
-    assert.equal(bySession.connectionCount, 0, '会话作用域的 disposer 必须返回 teardown promise')
+    assert.equal(bySession.connectionCount, 1, '会话销毁后连接必须保留（空闲），不再产生 teardown')
   } finally {
     await bySession.cleanup()
   }
@@ -888,29 +1021,43 @@ test('shared project connection: teardown is awaitable by the host (session disp
   }
 })
 
-// ── 配置粘性：运行中连接沿用首会话配置，如实告知（configStale），全部会话结束后才换新配置 ──
-test('shared project connection: config changes are reported as stale, then applied once all sessions end', async () => {
+// ── 配置变更：**就地重载**共享连接，而不是「继续复用旧的 + 等所有会话结束」。
+//    依据是宿主自己的配置条目语义（mcp-client README: "Editing the configuration entry reloads
+//    the server connection in place, and unchanged names stay unchanged"），而工具名是
+//    (serverName, rawName) 的纯函数，所以重载不会让会话历史/权限规则失效。 ──
+test('shared project connection: a config change reloads the shared connection in place', async () => {
   const { installAgentRuntime: install, workspaceConnectionStatus, readWorkspaceConfigCached } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
     install(fixture.ctx)
-    await (await fixture.agentsService.create({ setup: undefined })).setup(...spawn(makeSession(fixture, 'A')))
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(...spawn(A))
     assert.equal(fixture.mounts.at(-1)[1].command, 'psql')
-    // 用户改了 .dsh/mcp.json（长度不同，必然绕过 mtime+size 短路）。
+    assert.equal(fixture.createdScopes.length, 1)
+    await fixture.connectAll()
+    assert.deepEqual(fixture.ownToolNames(A), ['mcp__db__x', 'mcp__db__y'])
+
+    // 用户改了 .dsh/mcp.json（长度不同，必然绕过 mtime+size 短路），随后开新会话：
+    // 挂载路径发现指纹变了 → 就地重载（旧连接 retire、新连接按新配置建）。
     await writeFile(join(fixture.wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
       mcpServers: { db: { command: 'psql-next-generation', env: { KEY: '${KEY}' } } },
       exclude: ['github'],
     }, null, 2))
-    const changed = await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
-    const stale = workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, changed.servers[0])
-    assert.equal(stale.configStale, true, '面板必须能看到「配置已变化但仍在复用旧连接」')
-    assert.equal(stale.refs, 1)
-    // 旧会话还在时新开会话：复用旧连接 + 明确告知，不静默、也不在运行中替换连接。
-    await (await fixture.agentsService.resume({ setup: undefined })).setup(...spawn(makeSession(fixture, 'B')))
-    assert.equal(fixture.connectionCount, 1, '旧会话在跑时不得另建连接')
-    assert.equal(fixture.mounts.length, 1)
-    assert.ok(fixture.warns.some((line) => line.includes('配置已变化')), '复用旧配置必须留下日志，' + JSON.stringify(fixture.warns))
-    assert.equal(workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, changed.servers[0]).refs, 2)
+    const B = makeSession(fixture, 'B')
+    await (await fixture.agentsService.resume({ setup: undefined })).setup(...spawn(B))
+    assert.equal(fixture.createdScopes.length, 2, '配置变了必须重载：新的作用域 + 新的连接实例')
+    assert.equal(fixture.createdScopes[0].disposed, true, '旧连接必须被销毁，不能留下双连接')
+    assert.equal(fixture.connectionCount, 1, '同一时刻只应有一条')
+    assert.equal(fixture.mounts.at(-1)[1].command, 'psql-next-generation')
+    assert.ok(fixture.warns.some((line) => line.includes('就地重载')), '重载必须留下日志，' + JSON.stringify(fixture.warns))
+
+    // 工具名不变（纯函数），所以旧会话不需要重开：它的槽位被重新指向新连接。
+    await fixture.connectAll()
+    assert.deepEqual(fixture.ownToolNames(A), ['mcp__db__x', 'mcp__db__y'], '旧会话的工具名集合必须不变')
+    const after = await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)
+    const status = workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, after.servers[0])
+    assert.equal(status.configStale, false, '重载之后不再存在「配置待生效」这个长期状态')
+    assert.equal(status.refs, 2)
   } finally {
     await fixture.cleanup()
   }
@@ -1048,22 +1195,28 @@ test('shared project connection: the key convention entry rejects a non-context 
   assert.throws(() => workspaceToolSchemas('not-a-ctx', 'db'), /cordis context/)
 })
 
-// ── 装配失败必须回滚：ctx.effect 缺失/抛出时不能留下一个被死插件永久改写的 agents 服务。 ──
-test('agent runtime install rolls back instead of leaving the host service patched', async () => {
+// ── 订阅失败必须回滚：ctx.on 抛出时不能留下半个挂载器（旧实现对应「不能留下被改写的方法」）。 ──
+test('agent runtime install rolls back its subscriptions when subscribing fails', async () => {
   const { installAgentRuntime: install } = await import('../lib/workspace-runtime.js')
   const fixture = await createRuntimeFixture()
   try {
-    const pristineCreate = fixture.agentsService.create
-    const pristineResume = fixture.agentsService.resume
-    const noEffect = { ...fixture.ctx, effect: undefined }
-    assert.throws(() => install(noEffect), /effect\(\)/, '没有生命周期归属就不该装')
-    assert.equal(fixture.agentsService.create, pristineCreate, '装配失败不得留下改写过的方法')
-    assert.equal(fixture.agentsService.resume, pristineResume)
-    // 事后仍可正常安装（判重表没有被失败的那次污染）。
+    assert.throws(() => install({ ...fixture.ctx, effect: undefined }), /effect\(\)/, '没有生命周期归属就不该装')
+    const failure = new Error('subscribe refused')
+    // agent/created 订阅成功、tools/change 订阅抛错：前者必须被收回去。
+    const broken = {
+      ...fixture.ctx,
+      on(event, handler) {
+        if (event === 'tools/change') throw failure
+        return fixture.ctx.on(event, handler)
+      },
+    }
+    assert.throws(() => install(broken), /subscribe refused/)
+    assert.equal(fixture.handlers['agent/created'], undefined, '失败的安装不得留下订阅')
+    // 事后仍可正常安装。
     const cleanup = install(fixture.ctx)
-    assert.notEqual(fixture.agentsService.create, pristineCreate)
+    assert.equal(typeof fixture.handlers['agent/created'], 'function')
     await cleanup()
-    assert.equal(fixture.agentsService.create, pristineCreate, 'cleanup 必须还原')
+    assert.equal(fixture.handlers['agent/created'], undefined)
   } finally {
     await fixture.cleanup()
   }
@@ -1092,6 +1245,9 @@ test('shared project connection: the read-only diagnostics view reports refs and
       duplicateOwners: [],
       state: 'ready',
       refs: 2,
+      // 空闲回收策略与当前是否处于空闲等待：面板据此区分「暂时没人用」与「连接没了」。
+      idleTimeoutMs: 300000,
+      idle: false,
       toolCount: 2,
       // fiber 的状态代号原样带出（2 = ACTIVE），面板/排障可以直接喂给 deriveMcpPhase。
       fiberState: 2,
@@ -1109,8 +1265,13 @@ test('shared project connection: the read-only diagnostics view reports refs and
     assert.equal(afterOne[0].sessions, 1, 'refs 与 sessions 必须同步下降（不相等即为漏引用）')
 
     await B.dispose()
-    assert.deepEqual(await projectConnectionsView(fixture.ctx), [], '最后一个会话结束后不留占位')
-    assert.equal(fixture.connectionCount, 0)
+    // 最后一个会话结束后：引用归零，但连接按新语义留在空闲池里 —— 视图如实带出 idle。
+    const afterAll = await projectConnectionsView(fixture.ctx)
+    assert.equal(afterAll.length, 1, '连接保留（空闲），不产生 disposing 占位')
+    assert.equal(afterAll[0].refs, 0)
+    assert.equal(afterAll[0].sessions, 0)
+    assert.equal(afterAll[0].idle, true)
+    assert.equal(fixture.connectionCount, 1)
   } finally {
     await fixture.cleanup()
   }
@@ -1152,7 +1313,7 @@ test('shared project connection: a connection still being established is visible
 test('scope failures are recorded and surfaced instead of reading as “connected”', async () => {
   const rt = await import('../lib/workspace-runtime.js')
   const { summarizeWorkspaceRow } = await import('../lib/index.js')
-  const fixture = await createRuntimeFixture()
+  const fixture = await createRuntimeFixture({ idleTimeoutMs: 20 })
   try {
     rt.installAgentRuntime(fixture.ctx)
     const session = makeSession(fixture, 'scope-1')
@@ -1188,9 +1349,11 @@ test('scope failures are recorded and surfaced instead of reading as “connecte
     assert.equal(fixture.warns.filter((line) => line.includes('作用域工具视图不可用')).length, 1)
     assert.equal(rt.workspaceScopeErrorsView(fixture.wsRoot).length, 1)
 
-    // 故障消失（依赖树修复）后新连接必须重新判定：记账要能清掉，不能变永久假警报。
+    // 故障消失（依赖树修复）后**新连接**必须重新判定：记账要能清掉，不能变永久假警报。
+    // 新连接 = 旧连接被回收之后重建，所以这里用短空闲超时等到回收，再开新会话。
     fixture.globalSchemas.pop()
     await session.dispose()
+    assert.ok(await waitFor(() => fixture.createdScopes[0].disposed), '空闲超时后旧连接必须回收，才有“新连接”可判')
     const healedSession = makeSession(fixture, 'scope-1-healed')
     const healedCreated = await fixture.agentsService.create({ setup: undefined })
     await healedCreated.setup(healedSession.ctx, healedSession.sessionAgent)

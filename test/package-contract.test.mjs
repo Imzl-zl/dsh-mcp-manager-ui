@@ -179,18 +179,21 @@ test('reveal resolves !!js config nodes with the loader evaluator, never returns
   assert.match(hostIndex, /containsRedactedValue/)
 })
 
-test('agent setup takes the agent from the official second parameter, never from ctx', async () => {
+test('agent mount takes the agent from the official agent/created payload, never from ctx', async () => {
   const runtime = await readFile(new URL('../lib/workspace-runtime.js', import.meta.url), 'utf8')
-  // dsh-agent-loop 0.1.5：`setup?.(prepared.agent.ctx, prepared.agent)`。
-  // ctx 是 agent 的 scope context，上面**没有** agent 属性；读它会被 cordis 的服务守卫拒绝：
-  // `cannot get property "agent" without inject`——而 setup 抛错会让会话的创建与恢复直接失败。
-  // （早年测试替身把 agent 挂在 ctx 上，所以这个缺陷 40+ 个用例全假通过。）
-  assert.match(runtime, /async \(agentCtx, agent\) =>/)
-  assert.match(runtime, /if \(!agent\)/)
-  // 中间层必须把官方契约原样透传给下一层：少传 agent 就是
-  // `Cannot read properties of undefined (reading 'session')`（宿主的 setup 会读 agent.session）。
-  assert.match(runtime, /callerSetup\?\.\(agentCtx, agent\)/)
-  assert.doesNotMatch(runtime, /callerSetup\?\.\(agentCtx\)/)
+  // 官方途径：宿主在创建事务里派发 `agent/created` 并 await 串行监听器（dsh-agent 的 announce()），
+  // 载荷里的 agent 公开 ctx 与 session。方向永远是 agent → ctx：反过来从 ctx 上读 agent 会被
+  // cordis 的服务守卫拒绝（`cannot get property "agent" without inject`）。
+  assert.match(runtime, /ctx\.on\("agent\/created", async \(\{ agent \}\) =>/)
+  assert.match(runtime, /mountProjectMcpForAgent\(ctx, agent, generation\)/)
+  assert.match(runtime, /const agentCtx = agent\?\.ctx;/)
+  assert.match(runtime, /if \(!agentCtx\)/)
+  assert.doesNotMatch(runtime, /agentCtx\.agent/)
+  // 不再包装宿主服务：挂载点只有事件订阅，没有 setup 中间层、也不改写 agents.create/resume。
+  assert.doesNotMatch(runtime, /composeAgentSetup/)
+  assert.doesNotMatch(runtime, /agentsService\[method\] = wrapper/)
+  // 边界必须显式：宿主把监听器的抛错当作否决创建，所以挂载失败只能吞成日志。
+  assert.match(runtime, /已吞掉，不阻断会话创建/)
 })
 
 test('bundle does not install the creation-mode Cordis tool', () => {
@@ -450,9 +453,10 @@ test('workspace MCPs stay toggleable and share the global status vocabulary', ()
   // 项目 MCP 没有 loader 条目的 phase 语义，沿用全局的 stopped 判定会让禁用后再也开不回来。
   assert.match(client, /const toggleLocked = \(s\) => busy \|\| !s\.managed \|\| \(s\.scope !== 'workspace' && !s\.enabled && s\.phase !== 'stopped'\)/)
   // 项目行的 status 与全局同一个取值域（deriveMcpPhase），只是文案不同；不再有自创的
-  // connecting/idle/active 那套平行词汇，也不再恒显“随会话挂载”。
+  // connecting/idle/active 那套平行词汇，也不再有把"连接在不在"和"几个会话在用"压成一句的写法。
   assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'stopped'/)
-  assert.match(client, /status === 'connected' \? '已连接（本项目会话共享）'/)
+  assert.match(client, /status === 'connected' \? '已连接' : status === 'failed' \? '连接失败'/)
+  assert.match(client, /尚未建立连接（新会话自动挂载）/)
   assert.doesNotMatch(client, /s\.status === 'connecting'/)
   assert.doesNotMatch(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
   assert.match(client, /cls: isWorkspace \? 'scope-ws' : ''/)
@@ -492,12 +496,21 @@ test('global list collapses to a one-line summary so the project list stays the 
 
 test('project MCP: what the README promises the panel shows, the panel actually shows', async () => {
   const host = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8')
-  // README 承诺「面板会在该项目行标出 `配置待生效`，详情页给出说明」——必须真的存在，
-  // 而不是只写进一条用户看不到的 logger.warn。
-  assert.match(readme, /面板会在该项目行标出 `配置待生效`/)
-  assert.match(host, /row\.configStale = conn\.configStale/)
-  assert.match(client, /s\.configStale \? h\(Badge, null, '配置待生效'\) : null/)
-  assert.match(client, /isWorkspace && server\.configStale \? h\('div', \{ className: 'dsh-mcp-log warn' \}/)
+  // README 现在承诺三件事，都必须真的在面板上看得见：
+  //   1. 写盘即生效（不需要重开会话）；2. 连接跟配置走、不跟会话走；3. 项目行把「连接在不在」与
+  //   「几个会话在用」分开说，不再有「待会话挂载」这种把两者压成一句的合成状态。
+  assert.match(readme, /写盘即生效/)
+  assert.match(readme, /连接跟配置走，不跟会话走/)
+  assert.doesNotMatch(readme, /配置待生效/)
+  assert.match(client, /已连接 · 当前无会话使用（连接保留，下次直接用）/)
+  assert.match(client, /'已连接 · ' \+ refs \+ ' 个会话在用' \+ tools/)
+  assert.match(client, /尚未建立连接（新会话自动挂载）/)
+  // 不再有渲染出来的「待会话挂载」字样（注释里作为历史提及不算）。
+  assert.doesNotMatch(client, /'待会话挂载'/)
+  assert.doesNotMatch(client, /配置待生效/)
+  // README 承诺的「重连出口」必须有对应 RPC（而不是只有一句文案）。
+  assert.match(host, /async reconnectWorkspaceServer\(payload\)/)
+  assert.match(client, /'reconnectWorkspaceServer'/)
   // 详情页空态不能承诺“刷新即可看到工具”：那要求 tools RPC 真能枚举共享作用域层，
   // 而 toolInventory 只认 loader 条目 + 全局视图。要么能枚举，要么别承诺。
   assert.doesNotMatch(client, /刷新即可看到工具/)
@@ -514,12 +527,12 @@ test('project MCP: the shared-connection reference is owned by cordis, not by ou
   // HMR 撤回必须走同一个官方 disposer（幂等由 cordis 的 runner\.epoch 保证），
   // 而不是另开一条释放路径——后者会让会话后续销毁时变成重复释放。
   assert.match(runtime, /typeof slot\.release === "function" \? slot\.release\(\) : disposeProjectSlot\(slot\)/)
-  // 「本代装饰器还在管事吗」是插件代次的属性，不能和会话存活性共用同一张表。
+  // 「本代挂载器还在管事吗」是插件代次的属性，不能和会话存活性共用同一张表。
   assert.match(runtime, /if \(!generation\.active\)/)
   assert.doesNotMatch(runtime, /if \(!agentWorkspaceStates\.has\(agent\)\)/)
-  // 生命周期归属先建立、再改宿主状态；缺少 effect() 直接抛，不静默降级。
+  // 生命周期归属先建立、再订阅事件；缺少 effect() 直接抛，不静默降级。
   assert.doesNotMatch(runtime, /ctx\.effect\?\.\(/)
-  assert.match(runtime, /无法为 agent 装饰器建立生命周期归属/)
+  assert.match(runtime, /无法为项目 MCP 挂载器建立生命周期归属/)
   // 并发等待者不能拿到一份正在 teardown 的连接（refs 从 0 再加回去）。
   assert.match(runtime, /entry\.released = true/)
   assert.match(runtime, /if \(entry\.released\) continue/)

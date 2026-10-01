@@ -174,7 +174,7 @@ dsh plugin --profile web add C:\sudy\github\dsh-mcp-manager-ui
 
 两者不是同一类故障，面板顶部的横幅和行上的标记会告诉你是哪一类：
 
-- **挂载失败**：本插件在会话 setup 阶段就没挂上（`${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。点开那一行的详情看具体原因。
+- **挂载失败**：本插件在**会话挂载阶段**（`agent/created` 串行监听器）就没挂上（`${VAR}` 求值为空、`failOnStartupError: true` 下启动失败、工具注册被拒等）。点开那一行的详情看具体原因。
 - **作用域故障**：连接本身是好的，但工具不在共享作用域层（落到了全局层）。原因是 `@deepseek-ai/dsh-scope` 在宿主与插件之间解析成了两份模块实例（作用域标签是模块内的 Symbol）。先核对两点：
   1. profile 的 `pnpm-workspace.yaml` 是否仍是官方写入的形状——它必须带 **`autoInstallPeers: false`**，否则 pnpm 会把 9 个 `@deepseek-ai/dsh-*` peer 装进 profile 自己的 `node_modules`，插件就会解析到第二份宿主包（这正是官方注释写明要避免的事）。
   2. 安装的依赖树里是否只有一份 `@deepseek-ai/dsh-scope`。
