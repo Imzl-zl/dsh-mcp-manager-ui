@@ -1,18 +1,24 @@
-// 把 `.tasks/mcp-servers-verified.yaml`（43 条，逐条一手核实）生成 `lib/mcp-catalog.js`。
+// 把 `.tasks/mcp-servers-verified.yaml`（逐条一手核实）生成 `lib/mcp-catalog.js`。
 //
-// 为什么用生成器而不是手抄：43 条 × 13 字段，手抄必然出错；而且这份 YAML 是**有据可查**的
+// 为什么用生成器而不是手抄：每条 13 个字段，手抄必然出错；而且这份 YAML 是**有据可查**的
 // 核实产物（每条带来源），让生成器承担搬运、让人只审阅差异，才是可持续的做法。
 //
-// 生成器负责三件事，都是「人容易漏、机器不会漏」的：
+// 生成器负责四件事，都是「人容易漏、机器不会漏」的：
 //   1. 原样搬运 YAML 字段，字段顺序固定（diff 可读）。
-//   2. 派生 `packages`（身份识别用）：stdio 从 args 推，HTTP 用显式映射补。
-//   3. 把含 `<占位符>` 的参数标出来（`needsArgs`）——这类条目直接安装会拿占位符当路径启动，
+//   2. 按 CATEGORY_ORDER 重排条目，让「目录顺序」本身就是市场要的展示顺序。
+//   3. 派生 `packages`（身份识别用）：stdio 从 args 推，HTTP 用显式映射补。
+//   4. 把含 `<占位符>` 的参数标出来（`needsArgs`）——这类条目直接安装会拿占位符当路径启动，
 //      市场里必须提示用户先改，不能装完就说成功。
 import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 
-const SOURCE = '.tasks/mcp-servers-verified.yaml'
-const TARGET = 'lib/mcp-catalog.js'
+// 相对**脚本自己**定位，不靠 cwd：从别的目录调用时（`node scripts/build-catalog.mjs`
+// 之外的形式）写错文件是最难发现的一类事故——生成器会安静地改写另一个仓库的同名文件）。
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const SOURCE = join(ROOT, '.tasks/mcp-servers-verified.yaml')
+const TARGET = join(ROOT, 'lib/mcp-catalog.js')
 
 /**
  * 各服务的真实包名。**显式维护，不从 args 推导**。
@@ -50,6 +56,7 @@ const PACKAGES = {
   dbx: ['@dbx-app/mcp-server'],
   'deepwiki-fetch': ['mcp-deepwiki'],
   'ida-pro': ['ida-pro-mcp'],
+  'frida-mcp': ['frida-mcp'],
   'fast-context': ['fast-context-mcp'],
   // serena 特殊：PyPI 包名是 `serena-agent`，但用户配置里出现的字符串是**命令名** `serena`
   // （`serena start-mcp-server …`），而身份识别是拿包名去比对配置里的 token。写 `serena-agent`
@@ -59,15 +66,43 @@ const PACKAGES = {
   // 它的身份靠 command 里的 `docker` 与子命令认，凭包名反而认不出来。
 }
 
-/** 分类顺序：按 YAML 里的出现序（那个文件已按分类分组），保证 chips 顺序稳定。 */
 const raw = readFileSync(SOURCE, 'utf8')
 const block = /```yaml\n([\s\S]*?)```/.exec(raw)
 if (!block) throw new Error('在 ' + SOURCE + ' 里找不到 ```yaml 代码块')
 const entries = parse(block[1])
 if (!Array.isArray(entries) || !entries.length) throw new Error('YAML 解析结果不是非空数组')
 
-const categoryOrder = []
-for (const entry of entries) if (!categoryOrder.includes(entry.category)) categoryOrder.push(entry.category)
+/**
+ * 分类的展示顺序。**唯一真相源就在这里**，标签见下面的 CATEGORY_LABELS。
+ *
+ * 它靠「重排生成的 MCP_CATALOG 数组」生效，不是靠客户端另读一份顺序表：
+ * 面板的 chips 取自目录里的**首次出现序**（`lib/client.js` 的 `categoryCounts`），
+ * 所以只要产物按这个顺序分段排列，目录顺序本身就是展示顺序，客户端一行都不用改。
+ *
+ * 为什么不在 YAML 里靠段落物理顺序表达：那样「插入一个新分类」会连带改变整个 chips
+ * 顺序（加 security 段时它就跑到 ai 后面去了），而且 YAML 的段序还要同时承担**分组阅读**
+ * 的职责（dbx 那种跨段条目会破坏它）。顺序是产品决策，改它应该是显式的一次编辑，
+ * 而不是改数据文件的副作用。
+ */
+const CATEGORY_ORDER = [
+  'search', 'dev', 'security', 'data', 'ai', 'browser',
+  'cloud', 'productivity', 'files', 'comms',
+]
+
+const usedCategories = [...new Set(entries.map((entry) => entry.category))]
+const unknownCategories = usedCategories.filter((category) => !CATEGORY_ORDER.includes(category))
+if (unknownCategories.length) {
+  throw new Error(`目录里出现未登记的分类：${unknownCategories.join(', ')}——请加进 CATEGORY_ORDER`)
+}
+
+// 反向：登记了却一条都没有，会让市场多出一个空 chips 分组。宁可报错也不要发出去。
+const emptyCategories = CATEGORY_ORDER.filter((category) => !usedCategories.includes(category))
+if (emptyCategories.length) {
+  throw new Error(`CATEGORY_ORDER 里的这些分类没有任何条目：${emptyCategories.join(', ')}——删掉该分类或补条目`)
+}
+
+// 按分类重排（组内保持 YAML 原序）：这一步就是「顺序由 CATEGORY_ORDER 决定」的实现。
+const orderedEntries = CATEGORY_ORDER.flatMap((category) => entries.filter((entry) => entry.category === category))
 
 // 文案里的半角 `#` 会被 YAML 当行内注释吃掉后半句（真踩过：gitlab 的 access 在
 // 「issue #586184」处被截断，市场卡片上显示一句断掉的话）。这里显式拦住——生成器宁可
@@ -224,8 +259,12 @@ const header = `// MCP 服务目录 —— 「MCP 市场」的数据源。
 //    远端服务在这个宿主里**用不了**，本目录不收录。\`access\` 字段如实标注每条要什么凭据。
 
 /**
- * 分类的展示顺序与中文标签。顺序 = 生成时 YAML 里的出现序。
- * @type {ReadonlyArray<[string, string]>}
+ * 分类的展示顺序（唯一真相源）。
+ *
+ * 它靠重排下面的 \`MCP_CATALOG\` 生效：面板的 chips 取自目录里的**首次出现序**，
+ * 所以这个数组的顺序就是用户看到的顺序。改顺序 = 改这里，不要手工重排 MCP_CATALOG。
+ * 中文标签见 CATEGORY_LABELS，两者由生成器校验为同一集合。
+ * @type {ReadonlyArray<string>}
  */
 `
 
@@ -233,6 +272,7 @@ const header = `// MCP 服务目录 —— 「MCP 市场」的数据源。
 const CATEGORY_LABELS = {
   search: '搜索',
   dev: '开发工具',
+  security: '安全与逆向',
   data: '数据库与数据',
   browser: '浏览器自动化',
   cloud: '云与基础设施',
@@ -242,13 +282,23 @@ const CATEGORY_LABELS = {
   comms: '通讯',
 }
 
+// 上面那段注释承诺的「两处同集合」在这里兑现：只登记了顺序却忘了写标签，
+// 面板就会显示英文 key（`test/mcp-catalog.test.mjs` 正是为此存在的）。宁可报错。
+const missingLabels = CATEGORY_ORDER.filter((category) => !CATEGORY_LABELS[category])
+if (missingLabels.length) {
+  throw new Error(`CATEGORY_ORDER 里的这些分类没有中文标签：${missingLabels.join(', ')}——请补进 CATEGORY_LABELS`)
+}
+
 const body = `
 /**
  * 目录条目。字段含义见文件头。
+ *
+ * **数组顺序 = 市场的分类展示顺序**（按 CATEGORY_ORDER 分段排布）。面板的 chips
+ * 靠这个顺序渲染，所以不要为了顺手而手工重排——要改顺序请改生成器的 CATEGORY_ORDER。
  * @type {ReadonlyArray<object>}
  */
 export const MCP_CATALOG = [
-${entries.map(renderEntry).join('\n')}
+${orderedEntries.map(renderEntry).join('\n')}
 ]
 
 /**
@@ -261,12 +311,14 @@ export function catalogById(catalog = MCP_CATALOG) {
 }
 `
 
-const labelsBlock = `export const CATEGORY_ORDER = [\n${categoryOrder.map((c) => `  ${str(c)},`).join('\n')}\n]\n\n`
-  + `/** 分类中文标签。 */\n`
-  + `export const CATEGORY_LABELS = {\n${categoryOrder.map((c) => `  ${str(c)}: ${str(CATEGORY_LABELS[c] || c)},`).join('\n')}\n}\n`
+// 标签只按 CATEGORY_ORDER 渲染，且不做 `|| c` 兜底：缺标签上面已经拦下，
+// 静默兜底成英文 key 正是那条校验要防的事。
+const labelsBlock = `export const CATEGORY_ORDER = [\n${CATEGORY_ORDER.map((c) => `  ${str(c)},`).join('\n')}\n]\n\n`
+  + `/** 分类中文标签。与 CATEGORY_ORDER 同集合（生成时校验）。 */\n`
+  + `export const CATEGORY_LABELS = {\n${CATEGORY_ORDER.map((c) => `  ${str(c)}: ${str(CATEGORY_LABELS[c])},`).join('\n')}\n}\n`
 
 writeFileSync(TARGET, header + labelsBlock + body)
-console.log(`已生成 ${TARGET}：${entries.length} 条 · ${categoryOrder.length} 分类`)
-console.log('分类顺序:', categoryOrder.join(' → '))
-const withPlaceholders = entries.filter((e) => placeholdersIn(e).length)
+console.log(`已生成 ${TARGET}：${orderedEntries.length} 条 · ${CATEGORY_ORDER.length} 分类`)
+console.log('分类顺序:', CATEGORY_ORDER.join(' → '))
+const withPlaceholders = orderedEntries.filter((e) => placeholdersIn(e).length)
 console.log('含占位符（装后需用户改）:', withPlaceholders.length, withPlaceholders.map((e) => e.id).join(', ') || '(无)')

@@ -4,9 +4,30 @@
 // 「面板看着正常、装上去失败」——jsdom 渲染得出来、测试也全绿，只有真机点安装才炸。
 // 所以这里校验的是「一条目录项是否自洽」，而不是任何 UI 行为。
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
 import test from 'node:test'
-import { MCP_CATALOG, catalogById } from '../lib/mcp-catalog.js'
+import { fileURLToPath } from 'node:url'
+import { MCP_CATALOG, CATEGORY_ORDER, catalogById } from '../lib/mcp-catalog.js'
 import { MCP_CATEGORIES, MCP_CATEGORY_LABELS, BUILTIN_MCP_SERVERS, builtinMcpCatalog } from '../lib/mcp-config.js'
+
+test('the committed catalog matches what the generator produces from the YAML', () => {
+  // 「改了 YAML 忘了重跑生成器」是这份目录最可能的坏法，而且**没有任何其它用例会红**：
+  // 漏掉的那条改动留在 YAML 里，产物却还是旧的，面板照常渲染、装上去却少一条。
+  // 所以这里直接重跑生成器，比对产物字节——漂移必红。
+  //
+  // 生成器按**脚本自身**定位路径（不靠 cwd），所以从测试里调用是安全的。
+  const generator = fileURLToPath(new URL('../scripts/build-catalog.mjs', import.meta.url))
+  const target = fileURLToPath(new URL('../lib/mcp-catalog.js', import.meta.url))
+  const before = readFileSync(target, 'utf8')
+  const output = execFileSync(process.execPath, [generator], { encoding: 'utf8', timeout: 60_000 })
+  const after = readFileSync(target, 'utf8')
+  // 生成器会就地改写产物：不一致时先还原成提交里的内容，别让「跑一次测试」把工作区改脏
+  // （失败信息已经说清怎么修，用户自己决定要不要重跑生成器）。
+  if (after !== before) writeFileSync(target, before)
+  assert.equal(after, before,
+    `lib/mcp-catalog.js 与 YAML 不同步：跑 \`node scripts/build-catalog.mjs\` 重新生成后提交。\n生成器输出：${output.trim().split('\n')[0]}`)
+})
 
 test('every catalog entry is structurally complete for its transport', () => {
   for (const entry of MCP_CATALOG) {
@@ -48,6 +69,51 @@ test('catalog ids are unique and never change meaning', () => {
   assert.equal(catalogById().size, MCP_CATALOG.length);
 })
 
+test('reverse-engineering and security tooling lives in the security category', () => {
+  // 这条来自一次真实的归类错误：`ida-pro`（逆向）与 `jshook`（JS 分析与安全研究）当时被塞进
+  // 「开发工具」，于是想找逆向工具的人在「开发工具」里翻，而安全分类是空的。
+  //
+  // 判据用**显式 id 名单**，不用关键词：
+  //   - 裸子串会误报：`vali*da*te`、`web*hook*`、`*idaa*s` 都命中 "IDA"/"Hook"，于是无关条目
+  //     会被强制要求归进 security；
+  //   - 同时会漏报：`nmap`/`burp`/`wireshark`/`semgrep` 一个都不命中，放进 security 反而被
+  //     下面的反向断言判红——正好和注释承诺的相反。
+  // 名单是**知识**（哪些工具属于安全域推不出来），所以显式写出来、加新条目时有人来加一行。
+  const SECURITY_TOOLS = new Set(['jshook', 'ida-pro', 'frida-mcp'])
+  const misfiled = MCP_CATALOG
+    .filter((entry) => SECURITY_TOOLS.has(entry.id))
+    .filter((entry) => entry.category !== 'security')
+    .map((entry) => `${entry.id}(${entry.category})`)
+  assert.deepEqual(misfiled, [], `这些安全/逆向工具不在 security 分类：${misfiled.join(', ')}`)
+  // 反向：security 分类里不该混进名单外的东西（防止有人把不认识的都往里塞）。
+  const unrelated = MCP_CATALOG
+    .filter((entry) => entry.category === 'security')
+    .filter((entry) => !SECURITY_TOOLS.has(entry.id))
+    .map((entry) => entry.id)
+  assert.deepEqual(unrelated, [], `security 分类里这些不在名单里：${unrelated.join(', ')}（是安全工具就加进 SECURITY_TOOLS）`)
+  // 下限：security 真有条目，且名单没有过期残留（删了条目却忘了删名单）。
+  assert.ok(MCP_CATALOG.some((entry) => entry.category === 'security'), 'security 分类不能是空的')
+  const stale = [...SECURITY_TOOLS].filter((id) => !MCP_CATALOG.some((entry) => entry.id === id))
+  assert.deepEqual(stale, [], `名单里这些 id 已不在目录里：${stale.join(', ')}——请同步移除`)
+})
+
+test('category display order is the catalog order the panel renders', () => {
+  // 面板的 chips 直接取**目录里的首次出现序**（lib/client.js 的 categoryCounts），客户端不再
+  // 维护自己的顺序表。所以「CATEGORY_ORDER 是唯一真相源」这件事，只有在生成器按它重排了
+  // MCP_CATALOG 之后才成立——这条就是钉住那个不变量的。
+  //
+  // 曾经这里是一份死代码：CATEGORY_ORDER 只是被转出，没有任何排序消费者，chips 顺序实际由
+  // YAML 的段落顺序决定，于是新增的 security 渲染在 ai 之后（正是那份注释说要避免的结果）。
+  const seen = []
+  for (const entry of MCP_CATALOG) if (!seen.includes(entry.category)) seen.push(entry.category)
+  assert.deepEqual(seen, [...CATEGORY_ORDER],
+    '目录的分类首次出现序必须等于 CATEGORY_ORDER（生成器按它重排；别手工重排 MCP_CATALOG）')
+  // 每个分类的条目必须连续成段，否则「首次出现序」不足以描述展示顺序（中间会被别的分类插队）。
+  const runs = MCP_CATALOG.map((entry) => entry.category).filter((c, i, all) => c !== all[i - 1])
+  assert.deepEqual([...new Set(runs)], runs,
+    `同一分类被拆成多段，chips 顺序会失真：${runs.join(' -> ')}`)
+})
+
 test('every category has a label and at least one entry', () => {
   // 分类标签是 Host 通过 RPC 带给面板的（bundle 读不到这些常量），少一个就显示成英文 key。
   const used = new Set(MCP_CATALOG.map((entry) => entry.category))
@@ -55,7 +121,8 @@ test('every category has a label and at least one entry', () => {
     assert.ok(MCP_CATEGORIES.includes(category), `未知分类：${category}`);
     assert.ok(MCP_CATEGORY_LABELS[category], `分类 ${category} 缺中文标签`);
   }
-  // 声明了分类却一条都没有，会让市场的 chips 出现空分组。
+  // 声明了分类却一条都没有，会让市场的 chips 出现空分组。生成器已经会为此报错，
+  // 这里再钉一次：测试是独立于生成器的第二道闸门（生成器被绕过时仍然拦得住）。
   for (const category of MCP_CATEGORIES) {
     assert.ok(used.has(category), `分类 ${category} 声明了但目录里没有条目`);
   }
@@ -112,7 +179,8 @@ test('every entry stays recognisable after the user renames it', () => {
   // 用户自己装过之后，市场仍显示「可安装」，再点一次就插进重复条目。
   //
   // 判据：把每条目录项「以别的 serverName 装好」，`builtinMcpCatalog` 必须认出它已配置。
-  // 这条覆盖全部 46 条，比逐条人工核对可靠，也是「加新条目」时最容易漏掉的一环。
+  // 这条覆盖全部条目（数量会随收录增长，别在这里写死），比逐条人工核对可靠，也是「加新条目」
+  // 时最容易漏掉的一环。
   const alt = (builtin) => {
     const spec = { name: 'my-' + builtin.id }
     for (const field of ['transport', 'url', 'headers', 'command', 'args']) {

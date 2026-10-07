@@ -1,6 +1,9 @@
 # MCP 服务器清单与核实报告
 
-面向 DSH 插件「MCP 市场」。交付物：`mcp-servers-verified.yaml`（43 条，可解析、字段自洽）。
+面向 DSH 插件「MCP 市场」。交付物：`mcp-servers-verified.yaml`（47 条，可解析、字段自洽）。
+
+> 条数与分类构成会随收录变动，**以目录文件为准**；下表是核实当时的快照。
+> 分类的展示顺序由 `scripts/build-catalog.mjs` 的 CATEGORY_ORDER 定义（下表按它排列）。
 
 ## 核实方法（三层证据）
 
@@ -17,15 +20,16 @@
 | 分类 | 条数 | 免密可直接用 |
 |---|---|---|
 | search | 7 | exa, tavily, firecrawl, google-maps |
-| dev | 6 | git, serena, everything |
-| data | 7 | postgres, sqlite, redis, clickhouse, mongodb |
+| dev | 7 | git, serena, everything |
+| security | 3 | — |
+| data | 8 | postgres, sqlite, redis, clickhouse, mongodb |
+| ai | 7 | memory, sequential-thinking, context7, deepwiki, huggingface, arxiv |
 | browser | 2 | chrome-devtools, playwright |
-| cloud | 7 | cloudflare-docs, aws, kubernetes, docker |
+| cloud | 6 | cloudflare-docs, aws, kubernetes, docker |
 | productivity | 5 | microsoft-learn |
-| ai | 6 | memory, sequential-thinking, context7, deepwiki, huggingface, arxiv |
-| files | 2 | filesystem, time |
+| files | 1 | filesystem |
 | comms | 1 | — |
-| **合计** | **43** | |
+| **合计** | **47** | |
 
 ## 核实表
 
@@ -74,6 +78,7 @@
 | filesystem | https://registry.npmjs.org/@modelcontextprotocol/server-filesystem + servers README | v2026.8.31；`npx -y @modelcontextprotocol/server-filesystem <dir>`，目录为显式授权范围 |
 | time | https://pypi.org/pypi/mcp-server-time/json + servers README | `uvx mcp-server-time`；PyPI v2026.8.18 |
 | slack | https://docs.slack.dev/ai/slack-mcp-server | 端点 `https://mcp.slack.com/mcp`，JSON-RPC over Streamable HTTP；**不支持 SSE 与动态客户端注册**，须用自有 Slack App 的 client_id/secret 且应用需已发布或为内部应用 |
+| frida-mcp | https://github.com/dnakov/frida-mcp | PyPI `frida-mcp` v0.1.1（2025-03），MIT，仓库 435★；`uvx --with mcp<2 --with frida-mcp frida-mcp`；实测完成 `initialize`/`tools/list` 握手，`enumerate_processes` 返回本机进程。**注意与 npm 上的同名包不是同一个东西**（见排除第 11 条） |
 
 ## 因无法核实而排除
 
@@ -89,6 +94,7 @@
 8. **归档参考服务器**（均排除，改用官方或活跃替代）：`@modelcontextprotocol/server-github`（2025-04 停更 → 改用 GitHub 远端）、`server-postgres`（2024-12 → 改用 postgres-mcp）、`server-redis`（→ 改用 Redis 官方 `redis-mcp-server`）、`server-slack`（→ 改用 Slack 官方远端）、`server-brave-search`（→ 改用 `@brave/brave-search-mcp-server`）。
 9. **同类竞品中的非官方实现**（避免冒充官方）：`mcp-server-kubernetes`（PyPI 第三方，→ 改用 containers/kubernetes-mcp-server）、`@executeautomation/playwright-mcp-server`（第三方，→ 改用 Microsoft `@playwright/mcp`）、`mcp-server-docker`（PyPI 第三方，→ 改用 Docker 官方 gateway）、`docker-mcp`（npm v1.0.0，非 Docker 官方）、`mcp-atlassian`（PyPI 第三方，→ 改用 Atlassian 官方远端）。
 10. **Tavily 的 stdio 形式** — 官方文档徽章写的是 npm `@tavily/mcp`，但该包在 npm 上 **404 不存在**；实际发布的是 `tavily-mcp`（v0.2.22）。为免把用户引向错误包名，Tavily 只收远端 HTTP 形式。
+11. **npm 上的 `frida-mcp`** — 与 PyPI 的 `frida-mcp`（dnakov，已收录）**同名但不是同一个项目**：npm 包 v1.0.0（2026-05，维护者 `europa6`）在 registry 里**没有 `repository` 字段**，README 只把它指向配套的 skills 仓库 `yfe404/frida-mcp-skills`（4★），追不到一手来源；且它是纯 Node 包，与 Python 系的 mcp 2.x 无关。按「拿不到一手来源的宁可不收」排除，改收 PyPI 版本。
 
 ## 两个写进配置前必须知道的坑
 

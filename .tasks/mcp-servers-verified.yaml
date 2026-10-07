@@ -2,7 +2,8 @@
 
 > 核实时间：2026-10（基于各厂商当时线上文档 / npm / PyPI / 官方 registry）
 > 每条均为可写入配置即可连接的条目。HTTP 型 endpoint 除标注「免密」外均需 OAuth 授权。
-> 分类固定取值：search / dev / data / browser / cloud / productivity / ai / files / comms
+> 分类的取值域与展示顺序由 `scripts/build-catalog.mjs` 的 CATEGORY_ORDER 定义（此处不再复述，
+> 避免第三份清单漂移）；下面各段的物理顺序只为了便于阅读，**不决定市场的 chips 顺序**。
 
 ```yaml
 # ============================== search 搜索 ==============================
@@ -73,10 +74,10 @@
 
 - id: google-maps
   label: Google Maps
-  summary: 地图平台官方文档检索
+  summary: Google Maps 平台开发文档检索
   category: search
   vendor: Google
-  access: 实验阶段免费、无需认证即可 tools/list
+  access: 实验阶段免费、无需认证（实测 tools/list 返回 2 个文档检索工具）
   transport: streamable-http
   url: https://mapscodeassist.googleapis.com/mcp
   homepage: https://developers.google.com/maps/ai/code-assist
@@ -161,17 +162,6 @@
   args: ['-y', '@modelcontextprotocol/server-everything']
   homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/everything
 
-- id: jshook
-  label: JS Hook
-  summary: JS 分析与安全研究：Hook、CDP 调试、反混淆
-  category: dev
-  vendor: jshookmcp
-  access: 开源免费（AGPL-3.0），本地运行；需 Node 22.12+。工具档位由环境变量 MCP_TOOL_PROFILE 控制（search ≈3K tokens / workflow / full ≈40K+），默认档已够用
-  transport: stdio
-  command: npx
-  args: ['-y', '@jshookmcp/jshook@latest']
-  homepage: https://vmoranv.github.io/jshookmcp/
-
 - id: dbx
   label: DBX
   summary: 多数据库查询（Postgres / MySQL / SQLite 等）
@@ -194,17 +184,6 @@
   args: ['-y', 'mcp-deepwiki@latest']
   homepage: https://github.com/regenrek/deepwiki-mcp
 
-- id: ida-pro
-  label: IDA Pro
-  summary: 驱动 IDA Pro 做逆向分析
-  category: dev
-  vendor: mrexodia
-  access: 需本机已装 IDA Pro；服务本身按需拉取，无需预先 pip install
-  transport: stdio
-  command: uvx
-  args: ['--with', 'mcp<2', '--with', 'ida-pro-mcp', 'ida-pro-mcp']
-  homepage: https://github.com/mrexodia/ida-pro-mcp
-
 - id: fast-context
   label: Fast Context
   summary: Windsurf 驱动的语义代码检索
@@ -216,6 +195,49 @@
   args: ['-y', 'fast-context-mcp']
   envKeys: [WINDSURF_API_KEY]
   homepage: https://www.npmjs.com/package/fast-context-mcp
+
+# ============================== security 安全与逆向 ==============================
+# 逆向工程、动态插桩、漏洞与恶意软件分析。收录要求同其它分类：包真实存在且能启动。
+# Python 系要确认没撞 mcp 2.x 的 FastMCP 改名 —— 实测 frida-mcp 与 ida-pro-mcp 都撞，
+# 所以 args 里带 --with mcp<2。
+
+- id: jshook
+  label: JS Hook
+  summary: JS 分析与安全研究：Hook、CDP 调试、反混淆
+  category: security
+  vendor: jshookmcp
+  access: 开源免费（AGPL-3.0），本地运行；需 Node 22.12+。工具档位由环境变量 MCP_TOOL_PROFILE 控制（search ≈3K tokens / workflow / full ≈40K+），默认档已够用
+  transport: stdio
+  command: npx
+  args: ['-y', '@jshookmcp/jshook@latest']
+  homepage: https://vmoranv.github.io/jshookmcp/
+
+- id: ida-pro
+  label: IDA Pro
+  summary: 驱动 IDA Pro 做逆向分析
+  category: security
+  vendor: mrexodia
+  access: 需本机已装 IDA Pro；服务本身按需拉取，无需预先 pip install
+  transport: stdio
+  command: uvx
+  args: ['--with', 'mcp<2', '--with', 'ida-pro-mcp', 'ida-pro-mcp']
+  homepage: https://github.com/mrexodia/ida-pro-mcp
+
+# ⚠️ `frida-mcp` 这个名字在 npm 与 PyPI 上**是两个不相干的包**，别弄混：
+#    PyPI `frida-mcp`（0.1.1，2025-03）= dnakov/frida-mcp（435★、MIT、有真实仓库）——收的是这个。
+#    npm  `frida-mcp`（1.0.0，2026-05）= 维护者 europa6，registry 里**没有 repository 字段**，
+#          追不到一手来源（README 只把它指向配套的 skills 仓库 yfe404/frida-mcp-skills），
+#          且它是纯 Node 包、与 mcp 2.x 无关 —— 按「拿不到一手来源的宁可不收」排除。
+- id: frida-mcp
+  label: Frida
+  summary: Frida 动态插桩：Hook 函数、跟踪调用
+  category: security
+  vendor: dnakov
+  access: 开源免费（MIT），本地运行；需本机装 Frida 与被测目标。实测 uvx 启动并完成 initialize/tools/list 握手，enumerate_processes 可正常返回本机进程
+  transport: stdio
+  command: uvx
+  args: ['--with', 'mcp<2', '--with', 'frida-mcp', 'frida-mcp']
+  homepage: https://github.com/dnakov/frida-mcp
 
 # ============================== data 数据库与数据 ==============================
 - id: postgres
@@ -528,7 +550,7 @@
 - id: time
   label: Time
   summary: 时间查询与时区换算
-  category: files
+  category: productivity
   vendor: Anthropic
   access: 开源免费，纯本地计算
   transport: stdio
