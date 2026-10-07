@@ -103,6 +103,11 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     assert.ok(paths.includes('package/docs/installation.md'), 'docs/installation.md 应在包里')
     assert.ok(paths.includes('package/docs/json-import.md'), 'docs/json-import.md 应在包里')
     assert.ok(paths.includes('package/README.md') && paths.includes('package/README.en.md'), '两份 README 都应在包里')
+    // scripts/ 与 test/ 是开发期的契约闸门（主题判据 + 令牌清单 + 全部用例），不随包发布：
+    // 使用者装到的是预构建的 lib/，跑不到也用不上这些。反过来，plugin 的发布体积一旦混进
+    // 它们，说明 files 字段被人放宽了，顺带会把开发期才需要的依赖关系带进用户环境。
+    assert.equal(paths.some((path) => path.startsWith('package/scripts/')), false, 'scripts/ 不得随包发布')
+    assert.equal(paths.some((path) => path.startsWith('package/test/')), false, 'test/ 不得随包发布')
 
     const profileModules = join(root, 'profiles', 'web', 'node_modules')
     const hostModules = join(root, 'profiles', 'node_modules')

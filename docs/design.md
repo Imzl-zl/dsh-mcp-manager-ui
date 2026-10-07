@@ -206,6 +206,79 @@ peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` �
 
 `dsh-mcp-manager-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
 
+## 面板样式：为什么没有任何自选配色
+
+DSH 的 `ui-theme` 拥有全部颜色、几何与字体，插件只消费语义令牌。这不是风格偏好而是硬契约，规范正文在 `docs/web-styling.md`：
+
+> Use `--dsw-alias-*` semantic tokens in feature components. **Do not copy static palette values or write literal colors there.**
+> Keep theme selectors out of feature component CSS. **Light/dark overrides belong to the theme owner.**
+
+所以面板里没有 `@media (prefers-color-scheme: dark)`，也没有一处 hex。
+
+> 引用边界：`packages/extensions/cordis-client-runner` 的 `CLIENT_NOTES` 里有同一句话，但那个包服务的是**动态包**（用户在面板里即时求值的代码，走 `styles.insert`），不是预构建插件。预构建插件的契约是 `docs/web-styling.md` 加 `docs/ui-radius.md`，别把动态包沙箱的说明当成通用规范引用。
+
+落地方式是在 `MCP_CSS` 顶部一层别名：把要用的令牌一次性收成 `--mcp-*`，之后一千多行规则只引用别名。换主题、调刻度都只改这一处。
+
+### CSS 怎么进页面：跟官方构建器保持一致
+
+预构建插件的样式由官方构建器 `packages/client/tsdown.client.ts` 的 `styleInjectionModule()` 生成注入代码，形如：
+
+```js
+const tag = document.createElement('style')
+tag.dataset.plugin = id          // 模块加载器认领/清理的凭据
+tag.dataset.pluginCss = tagId    // 插件自己的去重键
+tag.textContent = css
+document.head.appendChild(tag)
+```
+
+本插件是手写 bundle（没有走 tsdown 预设），所以 `__injectCss` 自己实现同一件事，**两个属性都要盖**：
+
+- `data-plugin` 是加载器认领样式的依据。`entry-lifecycle.ts` 的 `removeOwnedStyles()` **只删 `data-plugin === 插件 id` 的标签**；`system.ts` 的 `claimStyles()` 只有一条兜底——认领「materialize 期间新出现的未打标 style」。
+- 因此只盖 `data-plugin-css` 时，正常路径靠兜底也能被清掉（所以它长期没暴露），但**在认领窗口之外插入的标签会变成孤儿**，HMR 反复替换时累积泄漏。
+
+`test/client-lifecycle.test.mjs` 钉住了这两个属性，且经变异验证（去掉 `data-plugin` 该测试立刻变红）。
+
+### 别名层为什么挂在 `body`
+
+两个约束同时成立才安全，而且**两个方向都踩过一次**：
+
+1. **必须是三个 slot 子树的公共祖先。** 插件同时往 `shell.overlay`（悬浮按钮）、`sidebar.footer.action`（侧栏入口）和面板自己渲染，它们没有公共祖先。最初别名挂在 `.dsh-mcp-wrap` 上——把圆角改走 `--mcp-r-*` 之后，悬浮按钮的圆角与阴影当场解析失败。
+2. **必须与主题令牌同层。** `ui-theme` 把 `--dsw-alias-*` 定义在 **`body`** 上（`design-platform.css` 的 `body{}` 与 `body[data-ds-dark-theme]{}`；`ui-layout` 也是 `body.setAttribute('data-ds-dark-theme','')`）。自定义属性在声明处就完成替换、不参与"向上查找"，所以挂在 `:root`（`body` 的祖先）会取到空值——整片颜色别名失效，卡片与面板背景全部变透明。
+
+`test/theme-contract.test.mjs` 钉住了这条：`aliasHost()` 要求别名宿主是 `body`（真实样式表上断言 `=== 'body'`，违规样本上断言 `:root` 会被照实报出来），`subtreesMissingLabelColor()` 另外要求三个 slot 子树各自都能取到 `--dsw-alias-label-primary`。
+
+### 四条对齐官方 spec 的规则
+
+判据直接对齐 DSH 自己的 spec（`packages/client/ui-theme/tests/`），语义逐条对应，上游收紧时可直接比对：
+
+| 规则 | 判据 | 违反后果 |
+|---|---|---|
+| 全圆角配对 | `50%`/`100%`/`≥99px` 必须同规则配 `corner-shape: round` | `corner-shape.css` 在 `@supports` 里用通用选择器 `*` 给整个文档套 `superellipse(1.5)`，没配对的圆点被压方、药丸被削平两端 |
+| 圆角走刻度 | 不得写字面值，只引用 `--dsw-radius-*` | 官方 spec 把「>4px 且 <99px 的字面圆角」判为违规（≤4px 算绘图细节）；刻度是 `xs:4 / sm:8 / md:12 / lg:16 / xl:20 / panel:28` |
+| 抬升表面用阴影不用边框 | `border: 0` + `--dsw-elevation-prominent` | 中性边框与 elevation 阴影并用会画两遍轮廓，且边框宽度撑动布局 |
+| 等宽走 `--ds-font-family-code` | 带 fallback，不写字面栈 | 这个是 `ui-theme` 真正定义过的（`base.css` 的 `:root`，官方 51 处用它）。名字很像的 `--dsw-font-mono` 全仓无定义（`dsh-market` 误用了它的 alias 形态 `--dsw-alias-font-mono`），引用它等于永远命中 fallback，等宽字形跟宿主代码块对不上 |
+
+`corner-shape` 那条只在支持该特性的引擎上显形（Chromium 实测 `CSS.supports('corner-shape','superellipse(1.5)') === true`），jsdom 渲染不出来，所以只能扫样式表文本——这也是上游 ui-theme 的做法。
+
+`scripts/theme-spec.mjs` 是这套判据的唯一实现，`test/theme-contract.test.mjs` 用它断言。测试刻意分两侧写，缺一不可：
+
+- **「抓得到错」**——每个扫描器都有一组必须命中的违规样本。否则扫描器退化成"永远通过"时，另一侧全是空的。
+- **「不误报」**——在真实样式表上必须全零。否则一个满屏误报的扫描器会被当成噪声关掉。
+
+写这套判据时用变异测试核过一遍：人为在真实 CSS 上制造八类错误（去掉一处 `corner-shape`、圆角换成 `14px`、抬升表面加中性边框、别名层写死颜色、硬编码等宽栈、别名指向不存在的令牌、宿主改回 `:root`、删掉某子树的 label 色），最初只抓到 6/8——漏掉的两条都是**本仓库最常见形态**：规则里写的是别名 `var(--mcp-line)` 而非 `--dsw-alias-border-*`，以及别名层被整体排除后写死颜色无人管。两条都补进了判据。
+
+### 令牌存在性：为什么需要一份快照
+
+「别名指向的令牌真的存在吗」是这套判据里最容易做成空的一条——第一版就是：只对 `--dsw-radius-*` 查清单，其余 `--dsw-*` **只查前缀**。于是 `--mcp-accent:var(--dsw-alias-brand-typo)` 这种名字被静默放行，而上面的八类变异里恰好有一类是"别名指向不存在的令牌"，它在当时其实**没有**被真正抓到（那轮变异把它误记为已捕获）。前缀合法的错名字正是最危险的形态：`--dsw-alias-font-mono` 看着完全像真的，`var()` 却取到空值，面板当场丢色，而 jsdom 渲染不出来。
+
+存在性必须查清单，所以仓库里带一份生成物：
+
+- `scripts/sync-theme-tokens.mjs` 从**宿主源码树**的 ui-theme 样式表抽出全部 `--dsw-*` / `--ds-*` 定义，写出 `scripts/dsh-theme-tokens.mjs`（408 个令牌）。宿主更新时手工重放一次，diff 里能直接看出上游增删了哪些令牌。
+- 快照口径是所有**定义**处，不论在哪个选择器下——真机全局扫描只能看到 407 个，少的那个是 `--dsw-focus-ring-color`（定义在 `:focus-visible` 上，只在聚焦元素可见）。存在性检查关心"这个名字有没有人定义"，宽一点才对；收窄会开始误报。
+- 不覆盖 `--dsh-*`：那是各包自己的运行时变量，全仓分散、没有单一所有者，不属于主题契约。将来真要用，先扩生成器的采集范围，**不要退回去放行前缀**。
+
+`test/theme-contract.test.mjs` 两头都钉：违规样本必须被抓到，且快照本身要有规模与关键成员（否则清单退化成空表时，存在性检查会反过来变成"任何令牌都不存在"而让另一侧的断言失去意义）。
+
 ## 包结构
 
 - `package.json`：声明 `dsh.bundle` 和 Web `dsh.client`
@@ -221,5 +294,10 @@ peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` �
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
 - `lib/typert.js`：Remote 契约描述
+- `scripts/theme-spec.mjs`：面板样式对 DSH 主题契约的判据（全圆角配对、圆角刻度、抬升表面、字面色值、等宽字体、别名宿主、别名令牌存在性），由 `test/theme-contract.test.mjs` 断言
+- `scripts/dsh-theme-tokens.mjs`：DSH 主题令牌清单（生成物），存在性判据的数据源
+- `scripts/sync-theme-tokens.mjs`：从宿主源码树重放上面那份清单
+
+`scripts/` 与 `test/` 都不进发布包（`package.json` 的 `files` 只收 `lib`、`docs/*.md` 与几个根文件），它们是开发期的契约闸门。
 
 `lib/` 是预构建产物，GitHub、tarball 和 npm 安装均不需要执行构建脚本。

@@ -3,3 +3,8 @@ node_modules/
 .playwright-mcp/
 *.tgz
 .DS_Store
+.worktrees/
+# 本仓库只是插件的开发现场：这里的 .dsh/mcp.json 是本机跑插件时写出来的副产物
+# （面板把项目级 MCP 写进 <工作区>/.dsh/mcp.json）。用户自己的项目里这个文件是
+# 正经的项目配置，要不要提交由他们决定——所以只在本仓库忽略，不要在文档里劝人忽略。
+.dsh/

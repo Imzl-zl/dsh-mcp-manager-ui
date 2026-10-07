@@ -189,6 +189,13 @@ test('client disposer releases Remote registration and stylesheet', async () => 
     const dispose = await client.apply(ctx)
     assert.deepEqual(slots, ['shell.overlay', 'sidebar.footer.action'])
     assert.equal(document.styles.length, 1)
+    // 注入的样式必须同时盖两个属性（与官方构建器 styleInjectionModule 一致）：
+    //   data-plugin     模块加载器认领/清理的凭据 —— removeOwnedStyles 只删
+    //                   data-plugin === 插件 id 的标签；缺它就只能靠"materialize
+    //                   期间新出现的未打标 style"兜底认领，窗口外插入的标签会变孤儿。
+    //   data-plugin-css 本插件自己的去重键。
+    assert.equal(document.styles[0].dataset.plugin, 'dsh-mcp-manager-ui')
+    assert.equal(document.styles[0].dataset.pluginCss, 'dsh-mcp-manager-ui/mcp.css')
 
     let timeoutFired = false
     timer.timeout(() => {

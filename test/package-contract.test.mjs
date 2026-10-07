@@ -213,10 +213,25 @@ test('client keeps transport badges readable in both DSH color schemes', () => {
 })
 
 test('client keeps both enabled and disabled toggle states visible', () => {
-  assert.match(client, /\.dsh-mcp-toggle\{[^}]*background:var\(--dsw-alias-button-ghost-active-fill\)/)
-  assert.match(client, /\.dsh-mcp-toggle::after\{[^}]*background:var\(--dsw-alias-brand-primary-invert\)/)
-  assert.match(client, /\.dsh-mcp-toggle\.on::after\{[^}]*background:var\(--dsw-alias-label-primary-inverted\)/)
+  // 令牌对齐官方 ui-primitives/Switch.module.css：轨道关闭态 border-l3、开启态品牌色，
+  // 滑块用 switch-thumb / label-primary-foreground（官方注释：这一档在两种配色下都保持浅色）。
+  assert.match(client, /\.dsh-mcp-toggle\{[^}]*background:var\(--dsw-alias-border-l3\)/)
+  assert.match(client, /\.dsh-mcp-toggle\[aria-checked='true'\]\{[^}]*background:var\(--mcp-accent\)/)
+  assert.match(client, /\.dsh-mcp-toggle::after\{[^}]*background:var\(--dsw-alias-switch-thumb\)/)
+  assert.match(client, /\.dsh-mcp-toggle\[aria-checked='true'\]::after\{[^}]*background:var\(--dsw-alias-label-primary-foreground\)/)
   assert.doesNotMatch(client, /--dsw-alias-fill-l2/)
+  assert.doesNotMatch(client, /--dsw-alias-brand-primary-invert/)
+  // 状态只走 aria-checked，没有并行的 .on class —— 与官方 Switch 同一形状，
+  // 视觉状态不会与辅助技术读到的状态不一致。断言落在 Toggle 自身的定义上，
+  // 不用"两个关键词相距 N 字符"这种写法：注释一变长它就假红。
+  const toggle = /const Toggle = \([\s\S]*?\n\n/.exec(client)?.[0] ?? ''
+  assert.ok(toggle.length > 0, '找不到 Toggle 组件定义')
+  assert.match(toggle, /role: 'switch'/, '开关必须向辅助技术声明自己是 switch')
+  assert.match(toggle, /'aria-checked': on/, '开关状态必须走 aria-checked')
+  assert.match(toggle, /'aria-label': label/, '开关必须有无障碍名称（官方 Switch 的 label 是必填）')
+  // 反向：不允许再加回一份平行记账（class 驱动的外观会与 aria 状态脱钩）。
+  assert.doesNotMatch(client, /dsh-mcp-toggle' \+ \(on \?/)
+  assert.doesNotMatch(client, /\.dsh-mcp-toggle\.on/)
 })
 
 test('client keeps connection status badges readable in both DSH color schemes', () => {
@@ -345,13 +360,20 @@ test('client places an explicit selectable builtin installer before manual add',
   assert.match(client, /call\('installBuiltins'/)
   assert.match(client, /type: 'checkbox'/)
   assert.match(client, /安装选中/)
-  assert.match(client, /\.dsh-mcp-builtin-modal\{[^}]*display:flex[^}]*flex-direction:column/)
-  assert.match(client, /\.dsh-mcp-builtin-list\{[^}]*overflow-y:auto/)
-  assert.match(client, /checked: allSelected/)
+  // 市场形态：搜索是主操作、分类 chips、卡片网格、逐条安装、以及「已配置」时可移除。
+  // 这几条一起把「市场」与旧的「勾选列表」区分开——少任何一条都会退回列表框。
+  assert.match(client, /className: 'dsh-mcp-modal dsh-mcp-market'/)
+  assert.match(client, /\.dsh-mcp-market-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
+  assert.match(client, /\.dsh-mcp-market-chips\{[^}]*overflow-x:auto/)
+  assert.match(client, /className: 'dsh-mcp-chip'/)
+  assert.match(client, /placeholder: '搜索服务、用途或提供方…'/)
+  assert.match(client, /install\(\[item\.id\]\)/)
+  assert.match(client, /call\('removeServer'|call\('removeWorkspaceServer'/)
+  assert.match(client, /call\('removeWorkspaceServer', \{ wsPath: scope, name \}\)/)
   const importPosition = client.indexOf("children: '导入 MCP")
-  const builtinPosition = client.indexOf("children: '内置 MCP")
+  const marketPosition = client.indexOf("children: '市场'")
   const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
-  assert.ok(importPosition >= 0 && importPosition < builtinPosition && builtinPosition < addPosition)
+  assert.ok(importPosition >= 0 && importPosition < marketPosition && marketPosition < addPosition)
 })
 
 test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {
@@ -370,8 +392,9 @@ test('workspace tab renders project MCPs as their own card instead of a nested c
   // ServerList 内嵌进项目分区时必须丢掉自身卡片外框，否则出现卡中卡。
   assert.match(client, /\.dsh-mcp-side\.embedded\{[^}]*flex:1 1 auto[^}]*border:0[^}]*padding:0/)
   assert.match(client, /className: 'dsh-mcp-side' \+ \(embedded \? ' embedded' : ''\)/)
-  // 两个分区各自成卡片，不再靠 border-top 分隔。
-  assert.match(client, /\.dsh-mcp-section\{[^}]*border:1px solid var\(--mcp-line\)[^}]*border-radius:12px/)
+  // 两个分区各自成卡片，不再靠 border-top 分隔。圆角走共享刻度令牌
+  // （docs/ui-radius.md：独立内容卡用 --dsw-radius-xl 一档；此处取 --mcp-r-lg）。
+  assert.match(client, /\.dsh-mcp-section\{[^}]*border:1px solid var\(--mcp-line\)[^}]*border-radius:var\(--mcp-r-lg\)/)
   assert.doesNotMatch(client, /\.dsh-mcp-section\+\.dsh-mcp-section\{border-top/)
   assert.match(client, /\.dsh-mcp-section\.local\{[^}]*border-color:var\(--mcp-accent\)/)
   assert.match(client, /className: 'dsh-mcp-section local'/)

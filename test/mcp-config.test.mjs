@@ -301,25 +301,33 @@ test('removes selected managed MCP entries without touching other managed entrie
   assert.match(next, /serverName: two/)
 })
 
-test('builtin MCP catalog uses official keyless endpoints and unattended browser commands', () => {
-  assert.deepEqual(mcpConfig.BUILTIN_MCP_SERVERS.map(({ label, summary, access, ...spec }) => spec), [
-    { id: 'exa', name: 'exa', transport: 'streamable-http', url: 'https://mcp.exa.ai/mcp' },
-    {
-      id: 'tavily',
-      name: 'tavily',
-      transport: 'streamable-http',
-      url: 'https://mcp.tavily.com/mcp/',
-      headers: { 'X-Tavily-Access-Mode': 'keyless' },
-    },
-    { id: 'firecrawl', name: 'firecrawl', transport: 'streamable-http', url: 'https://mcp.firecrawl.dev/v2/mcp' },
-    { id: 'chrome-devtools', name: 'chrome-devtools', transport: 'stdio', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] },
-    { id: 'playwright', name: 'playwright', transport: 'stdio', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
-  ])
+test('builtin catalog stays installable: keyless endpoints and unattended commands', () => {
+  // 这里不穷举目录内容（那是 lib/mcp-catalog.js 的事，由 test/mcp-catalog.test.mjs 逐条校验）。
+  // 这条测试只钉住**投影**不丢配置字段：目录条目 → 写进 profile 的 spec，字段必须一致。
+  // 以前它把 5 条清单整个写死，目录扩到 43 条后就成了维护负担，而它真正想守的东西
+  // （装上去能连、命令能无人值守跑起来）在数据里反而看不出来。
+  const byId = new Map(mcpConfig.BUILTIN_MCP_SERVERS.map((server) => [server.id, server]))
   for (const builtin of mcpConfig.BUILTIN_MCP_SERVERS) {
-    assert.ok(builtin.label)
-    assert.ok(builtin.summary)
-    assert.ok(builtin.access)
+    assert.ok(builtin.label, `${builtin.id}: 缺 label`);
+    assert.ok(builtin.summary, `${builtin.id}: 缺 summary`);
+    assert.ok(builtin.access, `${builtin.id}: 缺 access（用户靠它判断要不要 Key）`);
+    assert.equal(builtin.name, builtin.id, `${builtin.id}: name 必须等于 id`);
+    if (builtin.transport === 'streamable-http') {
+      assert.match(builtin.url, /^https:\/\//, `${builtin.id}: HTTP 型必须走 https`);
+      assert.equal(builtin.command, undefined, `${builtin.id}: HTTP 型不该带 command`);
+    } else {
+      assert.equal(builtin.transport, 'stdio', `${builtin.id}: 未知传输`);
+      assert.ok(builtin.command, `${builtin.id}: stdio 型必须有 command`);
+      // 目录里的 npm 调用一律带 -y：不带的话 npx 会停下来等确认，而 MCP 子进程没有 TTY，
+      // 表现是「连接超时」而不是报错。这是本目录最容易踩的静默失败。
+      if (builtin.command === 'npx') {
+        assert.ok(builtin.args.includes('-y'), `${builtin.id}: npx 必须带 -y，否则等确认卡死`);
+      }
+    }
   }
+  // 抽查两条最有代表性的：免密 HTTP 与无人值守浏览器命令。
+  assert.match(byId.get('exa').url, /^https:\/\/mcp\.exa\.ai\/mcp$/);
+  assert.deepEqual(byId.get('chrome-devtools').args, ['-y', 'chrome-devtools-mcp@latest']);
 })
 
 test('selected builtin installation appends only missing identities and never rewrites existing entries', () => {
