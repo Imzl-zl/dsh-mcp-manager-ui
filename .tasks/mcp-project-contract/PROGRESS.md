@@ -1,13 +1,39 @@
 # Progress
 
 - Shape: durable
-- FinalizationStatus: pending-validation（实现 + 审查处置 + 自测均完成；row 8 的浏览器验收环境受阻）
-- Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 IN_PROGRESS/环境受阻）
-- Workspace: C:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract（分支 `feature/project-mcp-contract`）
-- Commits: a4b3407（主体）、a03be47（审查轮自查修补）、447e5ea（收整）、a2e946c（代次令牌）、7277b01（字段速查）、**078401f（审查处置）**
-- SetupChange: 主树的 .gitignore 追加 `.worktrees/`（未提交）
-- Latest validation: worktree 内 `node --test` = **250 tests / 250 pass / 0 fail**；真宿主用例连跑 3 遍 6/6（7.5s，耗时稳定）
-- Next: ① row 8 的 web 实例验收需用户先停桌面端（命令见下）；② 落地方式（合并/PR）由用户定；③ 发版时补 `lib/whats-new.js` 的更新卡片与 Release notes（发版闸门的一步）
+- FinalizationStatus: **delivered**（v1.5.0 已发布：npm + GitHub Release）
+- Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由本轮真机复核替代完成，见下）
+- Workspace: 已并入 `main`（`fbcf22d`）；worktree 保留在 D:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract
+- Commits: 主体链见 `git log`；本轮为 **737ad85（折进未发布的 v1.5.0：更新卡片 + Release notes）** 与 **fbcf22d（第二轮审查 5 条处置）**
+- Latest validation: `main` 上 `node --test` = **283 tests / 283 pass / 0 fail**；CI（ci run 37722369463）success；release run 37722426672 success
+- Next: 无。后续如需改动请从 `main` 开新分支
+
+## 发布与真机复核（2026-10-08）
+
+- **v1.5.0 是一次「补发」**：本地 main 原有 4 个未推送提交（MCP 市场 + 一键升级）本就是完整的 1.5.0 发布态，但 `origin/main` 停在 v1.4.2、无 v1.5.0 tag、npm 最新也是 1.4.2 —— 即 1.5.0 从未发出去。因此项目级 MCP 直接**折进这个尚未发布的 1.5.0**，用户只更新一次，未另开版本号。
+- 落地方式：`feature/project-mcp-contract` 先 rebase 到 main（保持本仓库的线性历史：55 个提交、0 个 merge commit），再 `--ff-only` 并入；合并前后 tree hash 一致（`ae8175e8`）证明 rebase 未改内容。
+- **row 8 的环境受阻已查明并解决**，不是代码问题：
+  1. `~/.dsh/profiles/mcpdev` 的 link 指向仓库搬家前的 `C:\sudy\...`（该路径已不存在）；
+  2. 该 profile 的 `dsh.profile.bundles` 缺 `@deepseek-ai/dsh-web-app`，没有 web 服务器可绑端口；
+  3. 启动命令应为 `dsh --profile mcpdev --port 19399`（`--profile` 选的是 profile 本身，`dsh --profile mcpdev web` 会把 `web` 当成 app 参数而报 `too many expected 0 arguments`）。
+- 真机复核（独立 web 实例 19399，真 stdio 子进程）逐项通过：面板渲染正常（无白屏）、项目行文案为新的两事实写法（`已连接 · 当前无会话使用（连接保留，下次直接用） · 1 工具` / `尚未建立连接（新会话自动挂载）`）、编辑表单能原样带回 `args`、点「重连」确实拆旧建新（子进程 PID 变化）、空闲保留期间子进程存活。
+- **复核同时抓出一条真机缺陷（fbcf22d 的 F1）**：空闲保留态点「重连」会拆掉连接却什么都不建（reconcile 只遍历存活会话），RPC 却回「已重连」。已修 + 回归用例（验证过退回旧行为即失败）+ 真机复验。
+
+## 第二轮独立审查（只读）结论与处置
+
+审查范围 `191df7c..078401f`，结论 **fixes-required**（无 Critical，2 Important），全部处置完毕（提交 fbcf22d）：
+
+| 发现 | 判定 | 处置 |
+|---|---|---|
+| **F1** 重要/真实缺陷：空闲保留态点「重连」拆完连接什么都不建，RPC 却报成功 | **接受**（真机复核独立复现） | 空闲态自建连接并当场归还引用；跳过 disabled 条目；两条回归用例（都验证过退回旧行为即失败） |
+| **F2** 重要/架构：HMR 重叠时旧代 cleanup 撕掉存活代的投射与会话记录（三件销毁动作只有令牌那件有归属判定） | **接受** | 三件共用一条归属判定：令牌已易主且新代活着 ⇒ 旧代只收订阅；回归用例验证过退回即失败 |
+| **F3** 次要：注释仍在描述已删的「配置粘性」行为 | **接受** | 改写为就地重载的现状 |
+| **F4** 次要：`alignWorkspaceConnections` 声称「下次挂载会重试」，但删除的 server 不在任何后续挂载里 | **接受** | 注释与日志如实说清后果（删除时留到空闲超时或卸载） |
+| **F5** 次要/测试：空闲保留态的卸载无覆盖 | **接受** | 新增真机用例（真 mcp-client + 真 stdio 子进程） |
+
+**本轮另外自查出一条同类缺陷**（真机用例逼出来的，不在审查清单里）：`disposeAllProjectSlots` 只经 slot 回收连接，而空闲保留态没有 slot ⇒ 卸载后 bucket 留着一条 fiber 已随插件 fiber 销毁、`released` 仍为 false 的 entry；HMR 重装后 acquire 会命中 `if (cell.entry)` 把这条**已死**连接发给新会话，且它永不再被回收。已按 bucket 兜底。
+
+**审查另有一处结论被我用实验推翻（如实记录）**：refs 计数专项审查提了一条 low「卸载后 refs 冻结导致面板报假泄漏」。我写探针实测：HMR 清理后诊断视图是空集（`[]`），不是 `refs=2, sessions=0` —— 该 entry 已 `released=true` 且 `cell.entry` 被清空，视图读不到它，用户不可见，故未按该建议改动（避免为不可观测的内部记账引入改动）。
 
 ## 独立代码审查（只读、未跑测试）结论与处置
 
