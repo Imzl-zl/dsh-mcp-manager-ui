@@ -42,7 +42,7 @@ DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏�
 - **MCP 市场**：47 个逐条一手核实过的服务，分 10 类（搜索、开发工具、安全与逆向、数据库与数据、AI 与知识、浏览器自动化、云与基础设施、效率协作、文件与本地、通讯）。搜索为主操作，配分类与「只要免密钥」筛选、排序、卡片直接安装；每条如实标注免费额度与需要准备什么（密钥 / 连接信息 / 装完还得改的参数）。已配置的只识别并跳过，不覆盖
 - 导入本机其他客户端的 MCP 配置：自动检测 Claude Code、Codex（`config.toml`）、OpenCode（含 `.jsonc`）、pi、Claude Desktop、Cursor、Windsurf、VS Code、Gemini CLI、Roo Code 与跨工具的共享配置，逐个列出，点一条即导入；也能粘贴 Claude/Cursor/Cline/Roo 的 `mcpServers` 或 VS Code 的 `servers` JSON。写入前预览，支持「合并（同名更新）」与「替换」
 - 跟随 DSH 深色/浅色主题，适配窄屏与移动宽度
-- 非强制更新提示：有新版时在面板顶部显示可关闭的提示条，每天最多查一次、绝不自动更新，可用 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭
+- 更新提示与**一键升级**：有新版时在面板顶部显示可关闭的提示条（每天最多查一次，可用 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭）。点了「升级」才动，**不会自动升级**；升级由 DSH 官方的 pluginManager 执行，装完提示重启宿主生效。用 `link:` / `file:` / `github:` 装的本地开发副本不给按钮（那会把链接换成 npm 包）
 - **升级后主动说一次变了什么**：版本变了后第一次打开面板弹一张小卡片，列出本次更新内容，并指路新功能在哪（例如「入口」开关在面板右上角）；确认一次后不再提示，不联网、不发任何数据
 
 ## 安装
@@ -139,7 +139,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 分别是：该项目还没有会话持有这份共享连接 / 配置改过但仍在复用旧连接（见上一节）/ 当前有几个会话在共用它。
 
 **怎么升级？为什么面板没提示？**
-从 npm 装的直接 `dsh plugin --profile web update dsh-mcp-manager-ui` 就会升小版本，不需要等提示。面板的提示条只查 GitHub Releases、每天最多一次、可关闭、绝不自动更新；固定 tag 安装的用户不会自动跨版本，需要用新 tag 重新 `add`（见 [安装与升级](docs/installation.md)）。
+从 npm 装的直接 `dsh plugin --profile web update dsh-mcp-manager-ui` 就会升小版本，也可以直接点面板提示条上的「升级」（同一件事，免去敲命令）。面板的提示条只查 GitHub Releases、每天最多一次、可关闭、不会自己动；固定 tag 安装的用户不会自动跨版本，需要用新 tag 重新 `add`（见 [安装与升级](docs/installation.md)）。
 
 **改动会不会碰到我的其他配置？**
 不会。全局改动只动 profile 补丁里由 `@deepseek-ai/dsh-mcp-client` 声明、且由本插件管理的条目，保留其他插件条目、注释与 `!!js` 表达式；导入「替换」也只替换这一部分，不会删除其他 bundle 或 Agent preset 自带的 MCP。

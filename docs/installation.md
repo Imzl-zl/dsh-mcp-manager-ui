@@ -81,7 +81,7 @@ dsh plugin --profile web update dsh-mcp-manager-ui
 
 为什么 tag 不会自动跨版本：`dsh plugin` 是 `pnpm` 的薄转发器，`update` 就是「按 package.json 里的 spec 再解析一次」，而 git tag 是不可变规格、没有范围语义（`pnpm update --help`："Updates packages to their latest version **based on the specified range**"）。
 
-面板自带非强制的更新提示（查 GitHub Releases，每天最多一次、可关闭、绝不自动更新）；npm 安装的用户不需要它，直接 `update` 即可。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
+面板自带更新提示与一键升级（查 GitHub Releases，每天最多一次、可关闭、不会自己动；点「升级」才装）。npm 安装的用户也可以用命令行 `update` 升级，两者等价。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
 
 ## 发布流程（维护者）
 

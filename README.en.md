@@ -44,7 +44,7 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 - **MCP market**: 47 services across 10 categories (search, dev, security & reverse engineering, data, AI & knowledge, browser automation, cloud & infra, productivity, files, comms), each verified against first-party sources. Search-first, with category and "keyless only" filters, sorting, and one-click install from the card; every entry states its free tier honestly and what you must supply (key / connection details / arguments to edit after install). Already-configured entries are detected and skipped, never overwritten
 - Import MCP configuration from other clients installed on this machine: Claude Code, Codex (`config.toml`), OpenCode (including `.jsonc`), pi, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI, Roo Code, and the cross-tool shared config are detected and listed, and one click imports from any of them; you can also paste `mcpServers` JSON from Claude, Cursor, Cline, or Roo, or `servers` JSON from VS Code. Everything is previewed before writing, with "merge" and "replace" modes
 - Follows the DSH dark/light theme and adapts to narrow/mobile widths
-- Non-intrusive update notice: a dismissible banner when a newer release exists (at most one check per day, never auto-updates, disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`)
+- Update notice and **one-click upgrade**: a dismissible banner when a newer release exists (at most one check per day; disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`). Nothing happens until you press Upgrade — it **never auto-updates**. The upgrade runs through DSH's official pluginManager and tells you to restart the host when done. A local dev copy installed via `link:` / `file:` / `github:` gets no button (upgrading it would replace your link with an npm package)
 - **What changed, said once**: after the version changes, the first time you open the panel a small card lists what's new and where to find it (e.g. that the "Entry" control sits in the panel header); confirming it never shows it again, and it uses no network and sends nothing
 
 ## Install
@@ -141,7 +141,7 @@ Three different things, and the detail pane gives the specific reason: **mount f
 Respectively: no session of that project holds the shared connection yet / the configuration changed but the old connection is still being reused (see above) / how many sessions currently share it.
 
 **How do I upgrade? Why did the panel not notify me?**
-If you installed from npm, `dsh plugin --profile web update dsh-mcp-manager-ui` upgrades within `^1.x`; you do not need the notice. The banner only queries GitHub Releases, at most once a day, is dismissible, and never auto-updates. Tag-pinned installs never cross versions — re-add with the new tag.
+If you installed from npm, `dsh plugin --profile web update dsh-mcp-manager-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries GitHub Releases, at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag.
 
 **Will editing touch my other configuration?**
 No. Global edits only rewrite the entries declared by `@deepseek-ai/dsh-mcp-client` that this plugin manages, preserving other plugin rows, comments, and `!!js` expressions; "replace" imports only replace that part and never delete MCPs owned by another bundle or agent preset.
