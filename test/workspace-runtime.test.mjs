@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -816,6 +816,59 @@ test('shared project connection: releasing the last session keeps the connection
   }
 })
 
+// ── 面板「重连」在**空闲保留**这个状态下也必须真的重建连接。这是本功能特意制造出来的常态
+//    （最后一个会话结束 = 连接留着待用），而它不是「有存活会话」的场景：reconcile 只遍历
+//    agentWorkspaceStates，没人挂着的时候它拆完旧连接就没有任何人再建新的 —— 面板会显示
+//    「已重连」而连接其实没了，正好把「下次直接用」这条承诺打掉。 ──
+test('shared project connection: reconnecting an idle-retained connection rebuilds it instead of leaving nothing', async () => {
+  const { installAgentRuntime: install, projectConnectionsView, reconnectWorkspaceServer } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    await fixture.connectAll()
+    assert.equal(fixture.connectionCount, 1)
+    // 会话结束 → 连接进入空闲保留（refs 归零、连接还在）。
+    await A.dispose()
+    const idle = (await projectConnectionsView(fixture.ctx))[0]
+    assert.equal(idle.refs, 0)
+    assert.equal(idle.idle, true, '前置条件：这条连接必须处在空闲保留态')
+    assert.equal(fixture.connectionCount, 1)
+
+    const result = await reconnectWorkspaceServer(fixture.ctx, fixture.wsRoot, 'db')
+    assert.equal(result.hadLiveConnection, true, '点之前确实有一条活动连接')
+    // 重建后必须仍有一条连接，且同样处于空闲保留（引用当场还回去，等下次会话复用）。
+    assert.equal(fixture.connectionCount, 1, '空闲态重连必须建回一条新连接，而不是拆完什么都不剩')
+    const after = await projectConnectionsView(fixture.ctx)
+    assert.equal(after.length, 1, '重连后诊断视图里必须还有这条连接')
+    assert.equal(after[0].refs, 0, '空闲态重连不产生悬挂引用')
+    assert.equal(after[0].idle, true, '重建后的连接同样进入空闲保留')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
+// ── 禁用的条目不该被「重连」凭空建出连接来（挂载路径同样跳过 disabled）。 ──
+test('shared project connection: reconnecting a disabled entry does not build a connection', async () => {
+  const { installAgentRuntime: install, reconnectWorkspaceServer, readWorkspaceConfigCached } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    install(fixture.ctx)
+    // 写盘置为 disabled，再点重连。
+    const configPath = join(fixture.wsRoot, '.dsh', 'mcp.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.mcpServers.db.disabled = true
+    await writeFile(configPath, JSON.stringify(config, null, 2))
+    const server = (await readWorkspaceConfigCached(fixture.ctx, fixture.wsRoot)).servers.find((s) => s.name === 'db')
+    assert.equal(server.disabled, true, '前置条件：条目必须是 disabled')
+    await reconnectWorkspaceServer(fixture.ctx, fixture.wsRoot, 'db')
+    assert.equal(fixture.connectionCount, 0, '禁用条目不得因为点重连就建出连接')
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 // ── 同项目两会话「交叉并发实际调用」项目 MCP，验证一份连接 + 不串扰 ──
 test('shared project connection: two sessions call the project MCP concurrently without crosstalk', async () => {
   const { installAgentRuntime: install, workspaceMountErrorsView } = await import('../lib/workspace-runtime.js')
@@ -1044,6 +1097,11 @@ test('shared project connection: a plugin unloaded mid-connect returns the refer
   }
 })
 
+// ── 空闲保留态下的插件卸载：本改动新引入的生命周期状态（会话全没了、连接还留着）。
+//    这条**不在替身夹具里**断言：真实 teardown 靠 cordis 的 fiber 级联（createScope 用
+//    `ctx.plugin(scope)` 把作用域 fiber 挂在插件 fiber 下），而夹具的 createScope 是假的、
+//    看不到级联。真实行为由 test/real-host-integration.test.mjs 的真宿主用例覆盖。 ──
+
 // ── 生产主路径：真实 mcp-client 在 setup 当场还没注册任何工具（apply 在 cordis 的微任务里跑，
 //    工具要等 connect + tools/list），投射完全依赖后续的 tools/change。 ──
 test('shared project connection: tools registered after connect reach every live session via tools/change', async () => {
@@ -1267,6 +1325,42 @@ test('shared project connection: the key convention entry rejects a non-context 
   const { workspaceToolSchemas } = await import('../lib/workspace-runtime.js')
   assert.throws(() => workspaceToolSchemas(undefined, 'db'), /cordis context/)
   assert.throws(() => workspaceToolSchemas('not-a-ctx', 'db'), /cordis context/)
+})
+
+// ── HMR 新旧两代重叠：被取代的旧代只收回自己的订阅，不得撕掉存活代的投射与会话记录。
+//    这三件销毁动作（令牌/会话记录/投射）必须共用同一条归属判定 —— 只守住令牌那一件，
+//    就等于承认重叠存在、却让另外两件在重叠时破坏存活代。 ──
+test('shared project connection: a superseded generation leaves the surviving generation intact', async () => {
+  const { installAgentRuntime: install, projectConnectionsView, reconcileWorkspaceConnections } = await import('../lib/workspace-runtime.js')
+  const fixture = await createRuntimeFixture()
+  try {
+    // 重叠：新一代先装上，旧代随后才清理（HMR 的安装与卸载两半不同步）。
+    const oldCleanup = install(fixture.ctx)
+    const newCleanup = install(fixture.ctx)
+    const A = makeSession(fixture, 'A')
+    await (await fixture.agentsService.create({ setup: undefined })).setup(A, A.sessionAgent)
+    await fixture.connectAll()
+    assert.deepEqual(fixture.ownToolNames(A).sort(), ['mcp__db__x', 'mcp__db__y'])
+    assert.equal(fixture.connectionCount, 1)
+
+    await oldCleanup()
+    // 存活代的投射、连接、会话记录都必须还在。
+    assert.deepEqual(fixture.ownToolNames(A).sort(), ['mcp__db__x', 'mcp__db__y'], '旧代清理不得撕掉存活代的工具投射')
+    assert.equal(fixture.connectionCount, 1, '旧代清理不得销毁存活代的连接')
+    const rows = await projectConnectionsView(fixture.ctx)
+    assert.equal(rows.length, 1, '存活代的会话记录不得被旧代清理抹掉')
+    // 会话记录若被旧代抹掉，配置对齐就再也找不到这个会话（remounted 恒为 0）—— 这条钉住那个后果。
+    const remounted = await reconcileWorkspaceConnections(fixture.ctx, fixture.wsRoot)
+    assert.equal(remounted.remounted, 1, '存活代仍必须能对齐它自己的存活会话')
+    assert.deepEqual(fixture.ownToolNames(A).sort(), ['mcp__db__x', 'mcp__db__y'])
+
+    // 存活代自己卸载：这时才把共享状态收干净。
+    await newCleanup()
+    assert.equal(fixture.connectionCount, 0, '末代卸载必须销毁连接')
+    assert.deepEqual(fixture.ownToolNames(A), [], '末代卸载必须撤回投射')
+  } finally {
+    await fixture.cleanup()
+  }
 })
 
 // ── 订阅失败必须回滚：ctx.on 抛出时不能留下半个挂载器（旧实现对应「不能留下被改写的方法」）。 ──

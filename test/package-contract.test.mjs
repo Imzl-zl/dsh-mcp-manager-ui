@@ -71,10 +71,14 @@ test('package declares the DSH compatibility window and pins development to a ve
 test('every host contract this plugin actually depends on is declared as a peer', () => {
   // 不声明就等于隐式依赖：下面每一项都有硬依赖的契约，它们一变本插件就会静默失效。
   //   dsh-tools      → tools.schemas(scope)/get(name, scope) 的作用域视图，整个投射模型的地基
-  //   dsh-agent      → agents.create/resume(options) 的单参签名与 traceable set 语义
-  //   dsh-agent-loop → setup(agentCtx, agent) 的两参契约与 raceAbort 语义
+  //   dsh-agent      → `agent/created` 是**被 await 的串行事件**（announce() 里 await ctx.serial），
+  //                    载荷带 agent.ctx/session；监听器抛错会否决会话创建
+  //   dsh-agent-loop → 创建事务在 publish 之前 await 调用方的 setup，并用 raceAbort 抛弃它；
+  //                    会话作用域可能在本插件建连期间就被销毁（引用归还依赖这一条）
   //   dsh-scope      → createScope/quiesceFiber（共享连接的隔离作用域与可 await 的 teardown）
   //   dsh-mcp-client → serverName 注册表、工具名前缀、日志 label
+  // 注意 dsh-agent-loop 现在**不是**挂载点（挂载走 agent/created 事件），但会话生命周期仍按它的
+  // 语义写：作用域销毁早于建连完成这件事只有它保证，所以它仍是必须声明的契约。
   for (const name of dshHostPackages) {
     assert.equal(packageJson.peerDependencies?.[name], COMPAT_WINDOW, name + ' 必须声明为 peer')
   }

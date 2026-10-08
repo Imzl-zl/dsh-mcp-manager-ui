@@ -409,6 +409,44 @@ test('real host: project config written while a session is live reaches it, and 
   }
 })
 
+test('real host: unloading the plugin retires a connection that is idle-retained', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-idle-unload-'))
+  const wsRoot = join(root, 'workspace')
+  const sentinel = join(root, 'server-exited')
+  const server = join(root, 'fixture-server.mjs')
+  await mkdir(join(wsRoot, '.dsh'), { recursive: true })
+  await writeFile(server, FIXTURE_SERVER)
+  // idleTimeoutMs: 0 = 永不自动回收，于是「卸载」是唯一会销毁它的路径 —— 这条用例才测得到东西。
+  await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: { command: process.execPath, args: [server, sentinel], idleTimeoutMs: 0 } },
+  }, null, 2))
+
+  const host = await createRealHost(wsRoot)
+  try {
+    const agent = await host.createAgent()
+    const names = await waitFor(() => {
+      const current = host.tools.schemas(agent.key).map((schema) => schema.name)
+      return current.includes('mcp__fixture__echo') ? current : undefined
+    })
+    assert.ok(names, '前置条件：项目连接必须先连上')
+
+    // 会话结束 → 连接进入空闲保留（refs 归零、连接还在、子进程还活着）。
+    await agent.scope.dispose()
+    const idleRow = (await projectConnectionsView(host.ctx))[0]
+    assert.equal(idleRow.refs, 0)
+    assert.equal(idleRow.state, 'ready', '前置条件：连接仍在（空闲保留），不是被拆掉')
+    assert.equal(existsSync(sentinel), false, '空闲保留期间子进程必须还活着')
+
+    // 插件卸载（HMR/remove）：真实 cordis 会把作用域 fiber 一起销毁，连接与子进程必须随之收掉。
+    await host.ctx.fiber.dispose()
+    assert.ok(await waitFor(() => existsSync(sentinel)), '卸载必须销毁空闲保留的连接（否则子进程活过插件）')
+    console.log('PROBE after unload rows:', JSON.stringify(await projectConnectionsView(host.ctx))); assert.deepEqual(await projectConnectionsView(host.ctx), [], '卸载后不得再留共享连接')
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('real host: an exhausted connection can be rebuilt on demand (no host restart)', { timeout: TEST_TIMEOUT_MS }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-real-host-rebuild-'))
   const wsRoot = join(root, 'workspace')
