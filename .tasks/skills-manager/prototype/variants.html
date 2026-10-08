@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Skills 面板 — 三处布局备选对比</title>
+<!--
+  原型备选对比（Prototype-Assisted）。目的：让「哪种布局好」变成看一眼就能指的事，
+  而不是让人凭空回答抽象问题。每个备选都标注了代价，选完即定稿方向。
+-->
+<style>
+:root{
+  --bg:#fff; --bg2:#f7f8fa; --bg3:#eef0f4; --fg:#0f1115; --mut:#61666b; --dim:#81858c;
+  --line:#0000001a; --line3:#00000029; --acc:#0f1115; --ok:#22c55e; --err:#ec1313; --warn:#f59e0b;
+  --r-xs:4px; --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:20px; --r-panel:28px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --elev:0 8px 32px #00000024,0 0 0 .5px #00000014;
+  --elev2:0 2px 10px #00000014;
+}
+body{margin:0;background:#eceef2;color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:20px 22px 40px}
+h1{font-size:19px;margin:0 0 4px}
+.lede{color:var(--mut);font-size:13px;margin:0 0 22px;max-width:900px}
+.sec{margin-bottom:34px}
+.sec>h2{font-size:14px;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+.q{font-size:12px;color:var(--dim);margin:0 0 12px}
+.row{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.opt{flex:1 1 300px;min-width:290px;max-width:420px}
+.opt.wide{flex:1 1 420px;max-width:560px}
+.lab{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.tag{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 6px;
+  border-radius:999px;corner-shape:round;background:var(--acc);color:#fff;font-size:11px;font-weight:700}
+.tag.rec{background:var(--ok)}
+.lab b{font-size:13px}
+.cost{font-size:11px;color:var(--dim);display:block;margin-top:3px;line-height:1.5}
+.cost b{color:var(--warn);font-weight:600}
+/* 缩小版面板外观 */
+.pane{border-radius:var(--r-lg);border:.5px solid var(--line);background:var(--bg);overflow:hidden;box-shadow:var(--elev2)}
+.pane-bar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:.5px solid var(--line);font-size:11px;color:var(--mut)}
+.pill{padding:3px 8px;border-radius:var(--r-sm);border:.5px solid var(--line);font-size:10.5px;color:var(--mut);white-space:nowrap}
+.pill.sel{border-color:var(--acc);color:var(--fg);font-weight:600}
+.pill.tab{border:0;border-bottom:2px solid transparent;border-radius:0}
+.pill.tab.sel{border-bottom-color:var(--acc)}
+.pad{padding:9px 10px}
+.srch{height:26px;border-radius:var(--r-sm);border:.5px solid var(--line);background:var(--bg2);display:flex;align-items:center;padding:0 8px;color:var(--dim);font-size:11px;margin-bottom:8px}
+/* A：左列表右详情 */
+.two{display:flex;min-height:172px}
+.two .l{width:150px;flex:none;border-right:.5px solid var(--line);padding:6px}
+.two .r{flex:1;padding:8px 9px;min-width:0}
+.li{padding:6px 7px;border-radius:var(--r-sm);margin-bottom:2px}
+.li.sel{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+.li .n{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li .d{font-size:10px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b{display:inline-flex;align-items:center;font-size:9px;line-height:15px;padding:0 6px;border-radius:999px;corner-shape:round;background:var(--bg3);color:var(--mut);margin-right:3px}
+.b.gr{background:#22c55e2e;color:#15803d} .b.rd{background:#ec13132e;color:#b91c1c} .b.yl{background:#f59e0b2e;color:#b45309}
+.dot{width:6px;height:6px;border-radius:50%;corner-shape:round;display:inline-block;background:var(--dim)}
+.dot.g{background:var(--ok)} .dot.y{background:var(--warn)} .dot.r{background:var(--err)}
+.mini{font-size:10px;color:var(--dim);line-height:1.6;margin-top:6px}
+.mono{font-family:var(--mono);font-size:10px}
+/* B：卡片网格 */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:8px}
+.cd{border:.5px solid var(--line);border-radius:var(--r-md);background:var(--bg2);padding:8px 9px}
+.cd .n{font-size:11px;font-weight:600} .cd .d{font-size:10px;color:var(--mut);margin:3px 0 6px}
+.cd .f{display:flex;align-items:center;gap:5px}
+.sw{width:26px;height:15px;border-radius:999px;corner-shape:round;background:var(--ok);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:50%;corner-shape:round;background:#fff}
+.sw.off{background:var(--line3)} .sw.off::after{left:2px;right:auto}
+/* C：单栏 + 行内展开 */
+.rows{padding:7px}
+.rw{border:.5px solid var(--line);border-radius:var(--r-md);margin-bottom:6px;overflow:hidden;background:var(--bg)}
+.rw-h{display:flex;align-items:center;gap:6px;padding:7px 9px}
+.rw-h .n{font-size:11px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rw-x{padding:0 9px 8px;font-size:10px;color:var(--mut);border-top:.5px solid var(--line);padding-top:7px}
+/* 市场表格 */
+table{width:100%;border-collapse:collapse;font-size:10.5px}
+th{text-align:left;font-weight:600;color:var(--dim);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;padding:6px 7px;border-bottom:.5px solid var(--line)}
+td{padding:7px;border-bottom:.5px solid var(--line);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+.tbn{padding:3px 9px;border-radius:var(--r-sm);border:.5px solid var(--line);background:var(--bg);font-size:10px;white-space:nowrap}
+.tbn.pri{background:var(--acc);color:#fff;border-color:transparent}
+.tbn.dis{opacity:.45}
+/* 侧栏两个入口 */
+.side{width:190px;background:var(--bg);border:.5px solid var(--line);border-radius:var(--r-lg);padding:8px;box-shadow:var(--elev2)}
+.srow{display:flex;align-items:center;gap:8px;min-height:30px;padding:5px 8px;border-radius:var(--r-sm);color:var(--mut);font-size:11.5px}
+.srow.sel{background:var(--bg3);color:var(--fg)}
+.note{margin-top:10px;padding:8px 10px;border-radius:var(--r-md);border:.5px dashed var(--line3);font-size:11px;color:var(--dim);line-height:1.6;max-width:560px}
+</style>
+</head>
+<body>
+
+<h1>三处布局，你指哪个顺眼</h1>
+<p class="lede">
+  每个备选都是按真实令牌尺寸缩小的示意，标了代价。你只要说「管理页要 B」「能力层要 A」这种就行——
+  不需要描述细节，我会按选中的去做。灰色小字是代价与取舍，不是推荐。
+</p>
+
+<!-- ═══════════ 1. 管理页布局 ═══════════ -->
+<section class="sec">
+  <h2>① 管理页长什么样</h2>
+  <p class="q">同一个技能列表，三种呈现。关注点：一眼能看到几个技能、看详情要不要跳转。</p>
+  <div class="row">
+
+    <div class="opt">
+      <div class="lab"><span class="tag">A</span><b>左列表 + 右详情</b></div>
+      <div class="pane">
+        <div class="pane-bar"><span class="pill sel">管理 11</span><span class="pill">市场</span></div>
+        <div class="two">
+          <div class="l">
+            <div class="li sel"><div class="n">zhanggui</div><div class="d">端到端拥有开发请求…</div></div>
+            <div class="li"><div class="n">decision-notes</div><div class="d">记录选择背后的推理…</div></div>
+            <div class="li"><div class="n">office-docx</div><div class="d">Word 文档读写…</div></div>
+            <div class="li"><div class="n">broken-skill</div><div class="d">缺少 description…</div></div>
+          </div>
+          <div class="r">
+            <div style="font-size:12px;font-weight:600">zhanggui</div>
+            <div style="margin:5px 0"><span class="b">全局</span><span class="b gr">模型可见</span></div>
+            <div class="mini">来源 user-agents（rank 500）<br>提供方 filesystem<br>调用策略 模型·用户可调用</div>
+            <div style="margin-top:8px"><span class="tbn">停用</span> <span class="tbn">打开</span></div>
+          </div>
+        </div>
+      </div>
+      <span class="cost">看详情零跳转；<b>列表列窄，一次只看得到 4 条左右</b>，长名字会截断。与现有 MCP 面板一致。</span>
+    </div>
+
+    <div class="opt">
+      <div class="lab"><span class="tag">B</span><b>卡片网格</b></div>
+      <div class="pane">
+        <div class="pane-bar"><span class="pill sel">管理 11</span><span class="pill">市场</span></div>
+        <div class="cards">
+          <div class="cd"><div class="n">zhanggui</div><div class="d">端到端拥有开发请求</div>
+            <div class="f"><span class="sw"></span><span class="b">全局</span><span class="dot g"></span></div></div>
+          <div class="cd"><div class="n">decision-notes</div><div class="d">记录选择背后的推理</div>
+            <div class="f"><span class="sw"></span><span class="b">全局</span><span class="dot g"></span></div></div>
+          <div class="cd"><div class="n">office-docx</div><div class="d">Word 文档读写</div>
+            <div class="f"><span class="sw"></span><span class="b">全局</span><span class="dot y"></span></div></div>
+          <div class="cd"><div class="n">broken-skill</div><div class="d">缺少 description</div>
+            <div class="f"><span class="sw off"></span><span class="b rd">非法</span><span class="dot r"></span></div></div>
+        </div>
+      </div>
+      <span class="cost">一屏看到更多、启停开关直接在卡上；<b>描述只能放一行，看正文要再点一层</b>。</span>
+    </div>
+
+    <div class="opt">
+      <div class="lab"><span class="tag">C</span><b>单栏列表，点开行内展开</b></div>
+      <div class="pane">
+        <div class="pane-bar"><span class="pill sel">管理 11</span><span class="pill">市场</span></div>
+        <div class="rows">
+          <div class="rw">
+            <div class="rw-h"><span class="dot g"></span><span class="n">zhanggui</span><span class="b">全局</span><span class="sw"></span></div>
+            <div class="rw-x">端到端拥有开发请求：解决开放设计决策、规划路径、带测试实现并交付到验证完成。<br>
+              <span class="mono">~/.agents/skills/zhanggui/SKILL.md</span></div>
+          </div>
+          <div class="rw">
+            <div class="rw-h"><span class="dot g"></span><span class="n">decision-notes</span><span class="b">全局</span><span class="sw"></span></div>
+          </div>
+          <div class="rw">
+            <div class="rw-h"><span class="dot r"></span><span class="n">broken-skill</span><span class="b rd">非法条目</span><span class="sw off"></span></div>
+          </div>
+        </div>
+      </div>
+      <span class="cost">整行宽度给描述、移动端最友好；<b>展开后要滚动才能看正文</b>，长列表里同时只展开一条。</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ 2. 能力层位置 ═══════════ -->
+<section class="sec">
+  <h2>② MCP 和技能怎么分</h2>
+  <p class="q">现在插件只管 MCP，加技能后两者关系有三种摆法。</p>
+  <div class="row">
+
+    <div class="opt">
+      <div class="lab"><span class="tag rec">A</span><b>侧栏一行「MCP / 技能」，面板内切</b></div>
+      <div class="row" style="gap:12px;flex-wrap:nowrap">
+        <div class="side">
+          <div class="srow sel">▣ MCP / 技能</div>
+          <div class="srow">＋ 新建会话</div>
+          <div class="srow">⚙ 设置</div>
+        </div>
+        <div class="pane" style="flex:1;min-width:0">
+          <div class="pane-bar"><span class="pill sel">MCP 服务器</span><span class="pill">技能</span></div>
+          <div class="pad"><div class="pill sel">管理</div> <div class="pill">市场</div>
+            <div class="mini" style="margin-top:8px">技能列表…</div></div>
+        </div>
+      </div>
+      <span class="cost">侧栏只占一格，把空间还给会话；<b>多一层切换</b>。dsh-skill-mcp-panel 已改成这样。</span>
+    </div>
+
+    <div class="opt">
+      <div class="lab"><span class="tag">B</span><b>侧栏两个独立入口</b></div>
+      <div class="row" style="gap:12px;flex-wrap:nowrap">
+        <div class="side">
+          <div class="srow sel">▣ MCP 服务器</div>
+          <div class="srow">▤ 技能</div>
+          <div class="srow">＋ 新建会话</div>
+        </div>
+        <div class="pane" style="flex:1;min-width:0">
+          <div class="pane-bar"><span class="pill sel">管理 11</span><span class="pill">市场</span></div>
+          <div class="pad"><div class="mini">直接就是技能页，少一次点击</div></div>
+        </div>
+      </div>
+      <span class="cost">各自直达、互不干扰；<b>侧栏多占一格</b>（现在只有一格），且两个面板要各写一套壳。</span>
+    </div>
+
+    <div class="opt">
+      <div class="lab"><span class="tag">C</span><b>保留悬浮按钮，面板内切</b></div>
+      <div class="pane">
+        <div class="pane-bar"><span class="pill sel">MCP</span><span class="pill">技能</span><span style="margin-left:auto" class="pill">✕</span></div>
+        <div class="pad"><div class="pill sel">管理 11</div> <div class="pill">市场</div>
+          <div class="mini" style="margin-top:8px">浮动在页面右下角，不占侧栏</div></div>
+      </div>
+      <span class="cost">完全不动现有入口、改动最小；<b>浮层里塞双能力会挤</b>，市场页尤其需要宽度。</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ 3. 市场页 ═══════════ -->
+<section class="sec">
+  <h2>③ 市场页怎么列</h2>
+  <p class="q">内置精选目录大概几十条。列表形式决定一屏能比较几个。</p>
+  <div class="row">
+
+    <div class="opt wide">
+      <div class="lab"><span class="tag">A</span><b>卡片网格（现在原型的样子）</b></div>
+      <div class="pane">
+        <div class="cards" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="cd"><div class="n">test-driven-development</div><div class="d" style="font-size:9.5px">obra/superpowers · MIT</div>
+            <div class="f"><span class="dot g"></span><span style="flex:1"></span><span class="tbn pri">安装</span></div></div>
+          <div class="cd"><div class="n">frontend-design</div><div class="d" style="font-size:9.5px">anthropics/skills · Apache-2.0</div>
+            <div class="f"><span class="dot y"></span><span style="flex:1"></span><span class="tbn">已装</span></div></div>
+          <div class="cd"><div class="n">docx</div><div class="d" style="font-size:9.5px"><span style="color:var(--err)">专有许可</span></div>
+            <div class="f"><span class="dot r"></span><span style="flex:1"></span><span class="tbn dis">不可装</span></div></div>
+        </div>
+      </div>
+      <span class="cost">视觉上能放描述与风险点，适合「逛」；<b>一屏只比得了 3–6 条</b>，排序比较不方便。</span>
+    </div>
+
+    <div class="opt wide">
+      <div class="lab"><span class="tag">B</span><b>紧凑表格</b></div>
+      <div class="pane">
+        <table>
+          <thead><tr><th>技能</th><th>来源</th><th>安装量</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><span class="dot g"></span> test-driven-development</td><td class="mono">obra/superpowers</td><td>243,329</td><td><span class="tbn pri">安装</span></td></tr>
+            <tr><td><span class="dot y"></span> frontend-design</td><td class="mono">anthropics/skills</td><td>960,401</td><td><span class="tbn">已装</span></td></tr>
+            <tr><td><span class="dot r"></span> docx</td><td class="mono" style="color:var(--err)">专有许可</td><td>197,563</td><td><span class="tbn dis">不可装</span></td></tr>
+            <tr><td><span class="dot g"></span> office-xlsx</td><td class="mono">本地</td><td>—</td><td><span class="tbn">已装</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <span class="cost">一屏比十几条、排序筛选直观；<b>描述放不下</b>，得靠悬停或点开看。</span>
+    </div>
+
+  </div>
+  <div class="note">
+    <b>另一条与布局无关、但必须现在定的：</b>「已安装」要不要单独一个标签？
+    现在设计是「市场卡片上直接显示已安装」——好处是不用来回切，坏处是已装很多时市场页会变杂。
+    dshmarket 的做法是两者都有（发现页显示已装 + 单独的「已安装」标签）。
+  </div>
+</section>
+
+</body>
+</html>

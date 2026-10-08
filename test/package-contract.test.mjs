@@ -20,6 +20,7 @@ const dshHostPackages = [
   '@deepseek-ai/dsh-atomic-write',
   '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-scope',
+  '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ]
@@ -38,7 +39,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.5.0')
+  assert.equal(packageJson.version, '1.6.0')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -57,7 +58,8 @@ test('package exposes one Web bundle entry', () => {
   )
   assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
-  assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)
+  // 挂载名必须等于包名（改名后一起变）——不写字面量，从 package.json 推导。
+  assert.equal((patch.match(new RegExp('name: ' + packageJson.name, 'g')) ?? []).length, 1)
 })
 
 test('package declares the DSH compatibility window and pins development to a verified RC', () => {
@@ -123,6 +125,29 @@ test('the TOML parser used for Codex import stays a runtime dependency', () => {
   assert.equal(packageJson.devDependencies?.['smol-toml'], undefined)
 })
 
+test('the skills capability is documented where users will look for it', async () => {
+  // 技能能力面是本轮新增的**主要**用户可见功能。文档不是可选项：发布闸门（whats-new）
+  // 只回答「变了什么」，回答不了「怎么用」。三条链路各自要能被找到：
+  //   · docs/skills-manager.md —— 专门的使用说明（随包发布，见 package-artifact）
+  //   · README —— 功能清单里要有它，否则读 README 的人不知道有这个能力面
+  //   · docs/design.md —— 包结构变了（双能力面），设计文档必须跟着说
+  const skillsDoc = await readFile(new URL('../docs/skills-manager.md', import.meta.url), 'utf8')
+  assert.ok(skillsDoc.length > 500, 'docs/skills-manager.md 内容过少，疑似占位')
+  // 说明必须覆盖三件用户一定会问的事。
+  for (const [label, pattern] of [
+    ['能力层入口（怎么打开技能面）', /技能/],
+    ['作用域（装到哪）', /作用域|全局|项目/],
+    ['许可门禁（为什么有的装不了）', /许可/],
+  ]) {
+    assert.match(skillsDoc, pattern, `docs/skills-manager.md 缺少「${label}」的说明`)
+  }
+  // README 的功能清单要提到技能能力面。
+  assert.match(readme, /技能/, 'README 必须提到技能能力面')
+  assert.match(readmeEn, /[Ss]kill/, 'README.en 必须提到技能能力面')
+  // 设计文档要说明现在是双能力面（包结构变了）。
+  assert.match(designDoc, /技能/, 'docs/design.md 必须说明技能能力面')
+})
+
 test('the current release has a hand-written GitHub Release note', async () => {
   // 发布闸门（与 whats-new 同一条理由，只是对象换成 Release 页面）：本仓库的发布全部直接提交
   // 到 main、没有 PR，所以 `gh release create --generate-notes` 几乎生成不出内容——v1.3.0 及
@@ -152,10 +177,15 @@ test('documentation targets the verified DSH and plugin releases', () => {
     // 版本从 package.json 推导，别硬编码：这两个断言原本写死 v1\.4\.0，于是 bump 版本时
     // 又多了两个真源（旁边 DEV_BASELINE 那条注释记的是同一类坑）。
     const escapedVersion = packageJson.version.replace(/\./g, '\\.')
-    assert.match(document, new RegExp(`dsh plugin --profile web add github:Imzl-zl\\/dsh-mcp-manager-ui#v${escapedVersion}`))
+    // ⚠️ 这里是**仓库** slug（GitHub 上的名字），不是 npm 包名——改名之后两者已经不同：
+    // 包名 dsh-toolbox-ui，仓库仍是 dsh-mcp-manager-ui（D13 双包同仓，仓库不跟着改）。
+    // 从 repository.url 推导，避免再把两者混为一谈（首版就是这么错的，改名后必红）。
+    const repoSlug = /github\.com\/([^/]+\/[^/.]+)/.exec(packageJson.repository.url)[1]
+    assert.match(document, new RegExp('dsh plugin --profile web add github:' + repoSlug + '#v' + escapedVersion))
     // npm 是主安装路径（它让 `dsh plugin update` 能在 ^1.x 内自动升级），必须写进两份文档。
-    assert.match(document, new RegExp(`dsh plugin --profile web add dsh-mcp-manager-ui@\\^${escapedVersion}`))
-    assert.match(document, /dsh plugin --profile web update dsh-mcp-manager-ui/)
+    assert.match(document, new RegExp('dsh plugin --profile web add ' + packageJson.name + '@\\^' + escapedVersion))
+    // 升级命令同样跟着包名走（从 package.json 推导，改名只发生在一个地方）。
+    assert.match(document, new RegExp('dsh plugin --profile web update ' + packageJson.name))
   }
 })
 

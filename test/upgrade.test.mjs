@@ -53,14 +53,14 @@ const service = { installBundle() {} }
 // updateAvailable 由宿主算成「latest > current」（lib/index.js 的 compareVersions），
 // 所以这里照它的口径造数据，不要单独造一个自相矛盾的组合。
 const hint = (latest, current = '1.4.2') => ({ current, latest, updateAvailable: !!latest && latest !== current })
-const npmBundle = { name: 'dsh-mcp-manager-ui', source: '^1.4.2', installed: true, version: '1.4.2' }
+const npmBundle = { name: 'dsh-toolbox-ui', source: '^1.4.2', installed: true, version: '1.4.2' }
 
 test('an upgrade is offered only when the host can do it and there is a newer version', () => {
   const { upgradePlan } = loadUpgradeRule()
   // 正常情形：宿主有 pluginManager + 是 npm 装的 + 有新版本。
   const ok = upgradePlan({ service, hint: hint('1.5.0'), bundle: npmBundle })
   assert.equal(ok.supported, true)
-  assert.equal(ok.spec, 'dsh-mcp-manager-ui@^1.5.0', '用 caret 请求，与 profile 里的前缀风格一致')
+  assert.equal(ok.spec, 'dsh-toolbox-ui@^1.5.0', '用 caret 请求，与 profile 里的前缀风格一致')
 
   // 宿主没提供这个 namespace（老宿主 / 非 web 形态）：不能给按钮，否则点了没反应。
   assert.equal(upgradePlan({ service: null, hint: hint('1.5.0'), bundle: npmBundle }).reason, 'no-service')

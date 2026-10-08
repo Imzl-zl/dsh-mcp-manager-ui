@@ -1,7 +1,7 @@
 {
-  "name": "dsh-mcp-manager-ui",
-  "version": "1.5.0",
-  "description": "Responsive MCP management UI for DeepSeek Harness Web — floating panel, JSON import, and profile-backed Host Remote management.",
+  "name": "dsh-toolbox-ui",
+  "version": "1.6.0",
+  "description": "Responsive MCP management UI and skills manager for DeepSeek Harness Web — floating panel, JSON import, profile-backed Host Remote management, and a skill market with a hard license gate.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git"
@@ -42,6 +42,7 @@
     "@deepseek-ai/dsh-atomic-write": ">=0.1.5-rc.1 <0.2.0",
     "@deepseek-ai/dsh-mcp-client": ">=0.1.5-rc.1 <0.2.0",
     "@deepseek-ai/dsh-scope": ">=0.1.5-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-skill": ">=0.1.5-rc.1 <0.2.0",
     "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1 <0.2.0",
     "@deepseek-ai/dsh-typert-protocol": ">=0.1.5-rc.1 <0.2.0"
   },
@@ -53,6 +54,7 @@
     "@deepseek-ai/dsh-atomic-write": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-scope": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-loader": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.0-rc.2"
@@ -73,7 +75,10 @@
     "dsh",
     "dsh-plugin",
     "cordis",
-    "mcp"
+    "mcp",
+    "skills",
+    "skill-manager",
+    "agent-skills"
   ],
   "license": "MIT"
 }

@@ -16,6 +16,7 @@ const dshHostPackages = [
   '@deepseek-ai/dsh-atomic-write',
   '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-scope',
+  '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ]
@@ -68,7 +69,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     const [{ filename }] = JSON.parse(stdout)
     const archive = gunzipSync(await readFile(join(packDir, filename)))
     const entries = tarEntries(archive)
-    const packageRoot = join(root, 'profiles', 'web', 'node_modules', 'dsh-mcp-manager-ui')
+    const packageRoot = join(root, 'profiles', 'web', 'node_modules', 'dsh-toolbox-ui')
 
     for (const entry of entries) {
       if (entry.type !== '0' && entry.type !== '\0') continue
@@ -81,7 +82,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     }
 
     const packedManifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
-    assert.equal(packedManifest.version, '1.5.0')
+    assert.equal(packedManifest.version, '1.6.0')
     for (const name of dshHostPackages) {
       assert.equal(packedManifest.dependencies?.[name], undefined)
       assert.equal(packedManifest.optionalDependencies?.[name], undefined)
@@ -102,6 +103,8 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     assert.ok(paths.includes('package/docs/design.md'), 'docs/design.md 应在包里')
     assert.ok(paths.includes('package/docs/installation.md'), 'docs/installation.md 应在包里')
     assert.ok(paths.includes('package/docs/json-import.md'), 'docs/json-import.md 应在包里')
+    // 技能能力面的使用说明：装了插件的用户要能从包里读到它，而不是只能上网找。
+    assert.ok(paths.includes('package/docs/skills-manager.md'), 'docs/skills-manager.md 应在包里')
     assert.ok(paths.includes('package/README.md') && paths.includes('package/README.en.md'), '两份 README 都应在包里')
     // scripts/ 与 test/ 是开发期的契约闸门（主题判据 + 令牌清单 + 全部用例），不随包发布：
     // 使用者装到的是预构建的 lib/，跑不到也用不上这些。反过来，plugin 的发布体积一旦混进

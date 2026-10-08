@@ -237,7 +237,7 @@ peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` �
 
 ## 设计约束
 
-`dsh-mcp-manager-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
+`dsh-toolbox-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
 
 ## 面板样式：为什么没有任何自选配色
 
@@ -312,6 +312,43 @@ document.head.appendChild(tag)
 
 `test/theme-contract.test.mjs` 两头都钉：违规样本必须被抓到，且快照本身要有规模与关键成员（否则清单退化成空表时，存在性检查会反过来变成"任何令牌都不存在"而让另一侧的断言失去意义）。
 
+## 技能能力面：为什么与 MCP 面并列而不是合并
+
+面板有**两个能力层**（MCP / 技能），由顶部枚举切换，共享同一个悬浮窗与侧栏入口。它们必须是两个独立的宿主服务：
+
+- **`skills` 不能进 MCP gateway 的 `static inject`**。Cordis 的 `inject` 是**依赖声明**——服务缺失时
+  fiber 只是保持不激活并等待，**不报错**。而宿主的内置插件 `dsh-skill` 是可被用户禁用的，
+  一旦把 `skills` 加进现有 gateway 的 inject，那些 profile 会连 **MCP 面板一起静默失效**。
+  所以 `SkillsManagerGateway` 是独立子插件、自带 `inject = ["skills"]`，未满足时只影响技能面。
+- **两个服务必须在同一个 patch 条目内挂载**：`cordis.patch.yml` 只有一条，且
+  `package-contract` 断言该 id 与 name 各出现恰好 1 次，所以子插件由现有插件的构造函数
+  `ctx.plugin()` 挂载。
+- **契约必须并进同一个 `MCP_CONTRIBUTION`**：`typert.remotes.register()` 按 `contribution.package`
+  去重，第二次 `$mount` 会抛 `Remote package "…" is already registered`，插件在 mount 阶段
+  激活失败、**面板整体消失**。descriptor 只按 endpoint（namespace/method）与 id 去重，
+  一个 contribution 天然支持多 namespace。同理 `SKILLS_CSS` 必须与 `MCP_CSS` **合并成一次**
+  `__injectCss` 调用（那个函数的 id 写死，二次调用会覆写同一 `<style>`）。
+
+### 技能的「根目录」从哪来
+
+`ctx.skills` **不暴露 `roots()`**（公开面只有 list/get/snapshot/collect/register），而启停与删除
+必须按 `(name, scope, root)` 精确定位。所以根目录从 summary 的 `resourceBase` 反推，判别式是
+**`path` 是否恰为 `<base>/SKILL.md`**（目录捆绑）还是 `dirname(path) === base`（扁平文件）。
+推不出来就**不填**——猜错会让启停/删除作用在错误的目录上，是本层最危险的失败模式。
+
+### 禁用为什么是改名
+
+DSH 的技能没有 `disabled` 字段（MCP 有、技能没有），所以停用只能把 `SKILL.md` 改名为
+`SKILL.md.disabled`。代价是技能从宿主目录里**消失**（宿主按固定路径读取，读不到就跳过），
+因此「已禁用」必须由本插件**自己扫描** `.disabled` 才能展示与恢复。
+
+### 许可门禁为什么逐技能判定
+
+同一个仓库里既有 Apache-2.0 的技能，也有禁止「在服务之外保留副本」的专有许可技能
+（`anthropics/skills` 的文档技能就是后者）。按仓库聚合两个方向都会错：要么把能装的毙掉，
+要么把不能装的放进来。所以目录里记录的是**事实**（许可是什么、证据在哪个文件），
+「能不能装」由 `classifyLicense()` 在生成目录时算出——门禁只有一处实现。
+
 ## 包结构
 
 - `package.json`：声明 `dsh.bundle` 和 Web `dsh.client`
@@ -325,6 +362,14 @@ document.head.appendChild(tag)
 - `lib/env-expression.js`：受限 `!!js` 表达式的唯一实现（生成 / 校验 / 抽取 / 反转 / 求值）
 - `lib/import-admission.js`：导入结果的写盘前准入（同作用域 `serverName` 唯一、环境变量引用归一为总值形式）
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
+- `lib/skills-registry.js`：宿主 `ctx.skills` 的投影（source/作用域/根目录推导）与目录指纹
+- `lib/skills-file-ops.js`：技能文件动作（启停 = 改名 `SKILL.md` ↔ `SKILL.md.disabled`、删除、导入、扫描已禁用），按 `(name, scope, root)` 精确定位、找不到即报错不回退
+- `lib/skills-archive.js`：压缩包安全解包（防 zip slip、拒符号链接、按**实际解出字节**卡限额）
+- `lib/skills-frontmatter.js`：frontmatter 校验与逐条诊断（判定逐字照抄宿主，宿主只 warn+skip，用户看不到）
+- `lib/skills-admission.js`：许可门禁（硬闸门，逐技能判定）与风险披露（纯函数，不联网）
+- `lib/skills-catalog.js`：技能市场目录（**生成物**，见 `scripts/build-skills-catalog.mjs`）
+- `lib/skills-remote.js`：skills.sh 远端搜索（来源白名单 + 超时/缓存/静默降级）
+- `scripts/build-skills-catalog.mjs`：从 `.tasks/skills-verified.yaml` 生成 `lib/skills-catalog.js`
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
 - `lib/typert.js`：Remote 契约描述
 - `scripts/theme-spec.mjs`：面板样式对 DSH 主题契约的判据（全圆角配对、圆角刻度、抬升表面、字面色值、等宽字体、别名宿主、别名令牌存在性），由 `test/theme-contract.test.mjs` 断言

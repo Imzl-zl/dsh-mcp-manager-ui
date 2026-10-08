@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skills 管理 + 市场 — 面板原型</title>
+<!--
+  DSH Skills 面板原型（Prototype-Assisted）。
+
+  这个文件是**一次性原型**，用来定方向，不进生产。真值在 .tasks/skills-manager/DESIGN.md。
+  生产实现必须落进 lib/client.js 的 SKILLS_CSS（受 test/theme-contract.test.mjs 全部闸门约束）。
+
+  两条纪律在这里就照做，避免原型给错方向：
+    ① 一个 hex 都不写进组件样式 —— 全部走 --dsw-* / --mcp-* 令牌（本文件顶部的 token 层是
+       把 DSH 真实令牌值抄下来，仅为让原型能脱离宿主独立打开；生产里这一层由 ui-theme 提供）。
+    ② 圆角一律走刻度，全圆角（≥99px / 50%）同规则补 corner-shape:round。
+-->
+<style>
+/* ── 令牌层：抄自 dsh-client-ui-theme 的真实值，仅为原型独立可看 ──────────────
+   light 为默认；data-theme="dark" 覆盖同一批令牌（对应宿主 --dsw-static-neutral-bluish-* 的暗色档）。 */
+:root{
+  --dsw-alias-bg-layer-1:#fff; --dsw-alias-bg-layer-2:#fff; --dsw-alias-bg-layer-3:#fff;
+  --dsw-alias-label-primary:#0f1115; --dsw-alias-label-secondary:#61666b; --dsw-alias-label-tertiary:#81858c;
+  --dsw-alias-border-l2:#0000001a; --dsw-alias-border-l3:#00000029;
+  --dsw-alias-brand-primary:#0f1115;
+  --dsw-alias-state-success-primary:#22c55e; --dsw-alias-state-error-primary:#ec1313; --dsw-alias-state-warn-primary:#f59e0b;
+  --dsw-alias-interactive-bg-hover:#0000000d;
+  --dsw-radius-xs:4px; --dsw-radius-sm:8px; --dsw-radius-md:12px; --dsw-radius-lg:16px; --dsw-radius-xl:20px; --dsw-radius-panel:28px;
+  --ds-font-family-code:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --dsw-elevation-prominent:0 8px 32px #00000024, 0 0 0 .5px #00000014;
+  --dsw-elevation-panel:0 4px 16px #0000001f;
+  --page-bg:#f5f6f8;
+}
+[data-theme="dark"]{
+  --dsw-alias-bg-layer-1:#1a1c20; --dsw-alias-bg-layer-2:#212429; --dsw-alias-bg-layer-3:#282b31;
+  --dsw-alias-label-primary:#f2f3f5; --dsw-alias-label-secondary:#a8adb5; --dsw-alias-label-tertiary:#81858c;
+  --dsw-alias-border-l2:#ffffff1f; --dsw-alias-border-l3:#ffffff33;
+  --dsw-alias-brand-primary:#f2f3f5;
+  --dsw-alias-interactive-bg-hover:#ffffff14;
+  --dsw-elevation-prominent:0 8px 32px #00000073, 0 0 0 .5px #ffffff1a;
+  --dsw-elevation-panel:0 4px 16px #00000059;
+  --page-bg:#0d0f12;
+}
+
+/* ── 别名层：与生产 MCP 面板同源，挂在 body 上（唯一宿主）───────────────── */
+body{
+  --mcp-accent:var(--dsw-alias-brand-primary);
+  --mcp-ok:var(--dsw-alias-state-success-primary);
+  --mcp-err:var(--dsw-alias-state-error-primary);
+  --mcp-warn:var(--dsw-alias-state-warn-primary);
+  --mcp-mut:var(--dsw-alias-label-secondary);
+  --mcp-bg-1:var(--dsw-alias-bg-layer-1);
+  --mcp-bg-2:var(--dsw-alias-bg-layer-2);
+  --mcp-bg-3:var(--dsw-alias-bg-layer-3);
+  --mcp-line:var(--dsw-alias-border-l2);
+  --mcp-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);
+  --mcp-r-xs:var(--dsw-radius-xs); --mcp-r-sm:var(--dsw-radius-sm); --mcp-r-md:var(--dsw-radius-md);
+  --mcp-r-lg:var(--dsw-radius-lg); --mcp-r-xl:var(--dsw-radius-xl); --mcp-r-panel:var(--dsw-radius-panel);
+  margin:0; background:var(--page-bg); color:var(--dsw-alias-label-primary);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+}
+
+/* ── 原型外壳（非产品 UI）：仅用于在页面里模拟 DSH 侧栏 + 主区 ───────────── */
+.shell{display:flex; min-height:100vh}
+.rail{width:220px; flex:none; background:var(--mcp-bg-1); border-right:.5px solid var(--mcp-line); padding:12px}
+.rail h4{margin:0 0 10px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--dsw-alias-label-tertiary)}
+.rail-row{display:flex; align-items:center; gap:8px; min-height:36px; padding:7px 8px; border-radius:var(--mcp-r-md); color:var(--mcp-mut); font-size:14px; cursor:default}
+.rail-row.sel{background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary)}
+.rail-hint{margin-top:14px; padding:8px; border-radius:var(--mcp-r-sm); border:.5px dashed var(--mcp-line); font-size:11px; color:var(--dsw-alias-label-tertiary)}
+.stage{flex:1; min-width:0; display:flex; justify-content:center; padding:22px}
+.toolbar{position:fixed; top:12px; right:12px; display:flex; gap:6px; z-index:99}
+
+/* ── 面板 ─────────────────────────────────────────────────────────────── */
+.panel{
+  width:1000px; max-width:100%; background:var(--mcp-bg-1); border:0;
+  border-radius:var(--mcp-r-panel); box-shadow:var(--dsw-elevation-prominent);
+  display:flex; flex-direction:column; overflow:hidden; align-self:flex-start; max-height:calc(100vh - 44px);
+}
+.p-head{display:flex; align-items:center; gap:10px; padding:14px 18px 0}
+.p-back{display:inline-flex; align-items:center; gap:6px; background:0 0; border:0; color:var(--mcp-mut); font:inherit; font-size:12px; cursor:pointer; padding:4px 6px; border-radius:var(--mcp-r-sm)}
+.p-back:hover{background:var(--dsw-alias-interactive-bg-hover); color:var(--dsw-alias-label-primary)}
+.p-title{font-size:15px; font-weight:600; margin-right:auto}
+
+/* L1 能力层：MCP / 技能 */
+.p-caps{display:flex; gap:6px; padding:10px 18px 0}
+.cap{padding:6px 12px; border-radius:var(--mcp-r-sm); border:.5px solid var(--mcp-line); background:var(--mcp-bg-1); color:var(--mcp-mut); font-size:12px; cursor:pointer; white-space:nowrap}
+.cap:hover{background:var(--dsw-alias-interactive-bg-hover); border-color:var(--dsw-alias-border-l3)}
+.cap.sel{color:var(--dsw-alias-label-primary); border-color:var(--mcp-accent); background:var(--dsw-alias-interactive-bg-hover); font-weight:600}
+
+/* L2 模式层：管理 / 市场 */
+.p-modes{display:flex; gap:0; padding:12px 18px 0; border-bottom:.5px solid var(--mcp-line)}
+.mode{position:relative; padding:8px 2px 10px; margin-right:22px; background:0 0; border:0; color:var(--mcp-mut); font:inherit; font-size:13px; cursor:pointer}
+.mode.sel{color:var(--dsw-alias-label-primary); font-weight:600}
+.mode.sel::after{content:""; position:absolute; left:0; right:0; bottom:-.5px; height:2px; background:var(--mcp-accent); border-radius:2px; corner-shape:round}
+.mode .cnt{font-size:10px; font-weight:500; padding:0 6px; margin-left:6px; border-radius:999px; background:var(--mcp-line); color:var(--mcp-mut); line-height:15px; corner-shape:round}
+
+/* 工具条 */
+.p-bar{display:flex; align-items:center; gap:8px; padding:12px 18px; flex-wrap:wrap}
+.search{position:relative; flex:1; min-width:180px}
+.search input{width:100%; box-sizing:border-box; height:34px; padding:0 10px 0 30px; border-radius:var(--mcp-r-md); border:.5px solid var(--mcp-line); background:var(--mcp-bg-2); color:var(--dsw-alias-label-primary); font:inherit; font-size:13px}
+.search input:focus{outline:2px solid var(--dsw-alias-brand-primary); outline-offset:-1px}
+.search svg{position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--dsw-alias-label-tertiary)}
+select.scope{height:34px; border-radius:var(--mcp-r-md); border:.5px solid var(--mcp-line); background:var(--mcp-bg-2); color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; padding:0 8px}
+.btn{display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 12px; border-radius:var(--mcp-r-md); border:.5px solid var(--mcp-line); background:var(--mcp-bg-1); color:var(--dsw-alias-label-primary); font:inherit; font-size:13px; cursor:pointer; white-space:nowrap}
+.btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.btn.primary{background:var(--mcp-accent); color:var(--mcp-bg-1); border-color:transparent}
+.btn.danger{color:var(--mcp-err)}
+
+.p-body{display:flex; gap:0; min-height:0; flex:1}
+.list{width:340px; flex:none; border-right:.5px solid var(--mcp-line); overflow-y:auto; padding:8px}
+.detail{flex:1; min-width:0; overflow-y:auto; padding:16px 18px}
+
+/* 列表行 */
+.row{display:block; width:100%; text-align:left; box-sizing:border-box; padding:10px 12px; border-radius:var(--mcp-r-md); border:0; background:0 0; color:inherit; font:inherit; cursor:pointer; margin-bottom:2px}
+.row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.row.sel{background:var(--dsw-alias-interactive-bg-hover); box-shadow:inset 2px 0 0 var(--mcp-accent)}
+.row-top{display:flex; align-items:center; gap:8px}
+.row-name{font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.row-desc{font-size:12px; color:var(--mcp-mut); margin-top:3px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+.row-meta{display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap}
+
+/* 徽标 */
+.badge{display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:500; line-height:16px; padding:0 7px; border-radius:999px; corner-shape:round; background:var(--mcp-line); color:var(--mcp-mut); white-space:nowrap}
+.badge.on{background:color-mix(in srgb,var(--mcp-ok) 18%,transparent); color:var(--mcp-ok)}
+.badge.off{background:var(--mcp-line); color:var(--mcp-mut)}
+.badge.scope{font-family:var(--mcp-mono); font-size:10px}
+.badge.winner{background:color-mix(in srgb,var(--mcp-accent) 14%,transparent); color:var(--dsw-alias-label-primary)}
+.dot{width:7px; height:7px; border-radius:50%; corner-shape:round; background:var(--mcp-line); flex:none}
+.dot.g{background:var(--mcp-ok)} .dot.y{background:var(--mcp-warn)} .dot.r{background:var(--mcp-err)}
+
+/* 详情 */
+.d-title{font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.d-sub{font-size:12px; color:var(--mcp-mut); margin-top:4px}
+.kv{display:grid; grid-template-columns:96px 1fr; gap:8px 12px; margin:14px 0; padding:12px; border-radius:var(--mcp-r-lg); background:var(--mcp-bg-2); border:.5px solid var(--mcp-line); font-size:12px}
+.kv dt{color:var(--dsw-alias-label-tertiary)} .kv dd{margin:0; word-break:break-word}
+.kv dd.mono{font-family:var(--mcp-mono); font-size:11px}
+.sec-t{font-size:12px; font-weight:600; color:var(--dsw-alias-label-tertiary); text-transform:uppercase; letter-spacing:.05em; margin:18px 0 8px}
+.body-box{margin:0; padding:12px; border-radius:var(--mcp-r-lg); background:var(--mcp-bg-2); border:.5px solid var(--mcp-line); font-family:var(--mcp-mono); font-size:11.5px; line-height:1.6; white-space:pre-wrap; max-height:300px; overflow:auto}
+
+/* 风险披露 */
+.risk{border-radius:var(--mcp-r-lg); border:.5px solid var(--mcp-line); background:var(--mcp-bg-2); padding:12px; margin:12px 0}
+.risk-h{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; margin-bottom:10px}
+.risk-row{display:flex; gap:10px; font-size:12px; padding:5px 0; align-items:flex-start}
+.risk-row .k{flex:none; width:118px; color:var(--dsw-alias-label-tertiary)}
+.risk-row .v{flex:1; min-width:0}
+.warn-t{color:var(--mcp-warn); font-weight:600}
+.err-t{color:var(--mcp-err); font-weight:600}
+
+/* 市场 */
+.grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(288px,1fr)); gap:12px; padding:4px 18px 18px; overflow-y:auto}
+.card{display:flex; flex-direction:column; border-radius:var(--mcp-r-xl); border:.5px solid var(--mcp-line); background:var(--mcp-bg-2); padding:14px; gap:8px}
+.card-h{display:flex; align-items:flex-start; gap:8px}
+.card-name{font-size:13px; font-weight:600; word-break:break-word}
+.card-by{font-size:11px; color:var(--dsw-alias-label-tertiary); margin-top:2px}
+.card-desc{font-size:12px; color:var(--mcp-mut); flex:1}
+.card-foot{display:flex; align-items:center; gap:8px; margin-top:2px}
+.card-stats{font-size:11px; color:var(--dsw-alias-label-tertiary); margin-right:auto; font-variant-numeric:tabular-nums}
+.tags{display:flex; gap:6px; flex-wrap:wrap; padding:2px 18px 12px}
+.tag{padding:5px 10px; border-radius:999px; corner-shape:round; border:.5px solid var(--mcp-line); background:var(--mcp-bg-1); color:var(--mcp-mut); font-size:11px; cursor:pointer; white-space:nowrap}
+.tag.sel{border-color:var(--mcp-accent); color:var(--dsw-alias-label-primary); background:var(--dsw-alias-interactive-bg-hover); font-weight:600}
+.note{margin:0 18px 16px; padding:10px 12px; border-radius:var(--mcp-r-md); border:.5px dashed var(--mcp-line); font-size:11.5px; color:var(--dsw-alias-label-tertiary); line-height:1.6}
+
+/* 安装确认弹窗 */
+.overlay{position:fixed; inset:0; background:#00000059; display:flex; align-items:center; justify-content:center; padding:20px; z-index:100}
+.modal{width:560px; max-width:100%; background:var(--mcp-bg-1); border:0; border-radius:var(--mcp-r-panel); box-shadow:var(--dsw-elevation-prominent); overflow:hidden}
+.modal-h{padding:16px 18px 0; font-size:15px; font-weight:600}
+.modal-b{padding:14px 18px; max-height:60vh; overflow:auto}
+.modal-f{display:flex; gap:8px; justify-content:flex-end; padding:0 18px 16px}
+.radio{display:flex; align-items:center; gap:8px; padding:9px 12px; border-radius:var(--mcp-r-md); border:.5px solid var(--mcp-line); margin-bottom:6px; cursor:pointer; font-size:12.5px}
+.radio.sel{border-color:var(--mcp-accent); background:var(--dsw-alias-interactive-bg-hover)}
+.radio input{margin:0}
+.hidden{display:none !important}
+.anno{position:fixed; left:12px; bottom:12px; max-width:320px; padding:10px 12px; border-radius:var(--mcp-r-md); background:var(--mcp-bg-1); border:.5px solid var(--mcp-line); box-shadow:var(--dsw-elevation-panel); font-size:11.5px; color:var(--mcp-mut); line-height:1.6; z-index:98}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="btn" onclick="toggleTheme()">切换明/暗</button>
+</div>
+
+<div class="shell">
+  <!-- 模拟 DSH 侧栏：能力层只占一行（照 dsh-skill-mcp-panel v2.1.5 的取舍） -->
+  <aside class="rail">
+    <h4>DSH 侧栏（模拟）</h4>
+    <div class="rail-row sel">▣ MCP / 技能</div>
+    <div class="rail-row">＋ 新建会话</div>
+    <div class="rail-row">⚙ 设置</div>
+    <div class="rail-hint">
+      <b>能力层只占一行。</b>点它把主区切成整页面板，两个能力在面板内用页签切换——
+      这样侧栏那格还给会话（照 dsh-skill-mcp-panel v2.1.5 合并后的取舍）。
+    </div>
+  </aside>
+
+  <main class="stage">
+    <section class="panel">
+      <div class="p-head">
+        <button class="p-back">← 返回会话</button>
+        <span class="p-title">管理</span>
+      </div>
+
+      <!-- L1：能力 -->
+      <div class="p-caps">
+        <button class="cap" onclick="setCap('mcp')" id="cap-mcp">MCP 服务器</button>
+        <button class="cap sel" onclick="setCap('skills')" id="cap-skills">技能</button>
+      </div>
+
+      <!-- L2：模式 -->
+      <div class="p-modes">
+        <button class="mode sel" onclick="setMode('manage')" id="mode-manage">管理<span class="cnt" id="cnt-manage">11</span></button>
+        <button class="mode" onclick="setMode('market')" id="mode-market">市场</button>
+      </div>
+
+      <!-- ══ 管理模式 ══ -->
+      <div id="view-manage">
+        <div class="p-bar">
+          <div class="search">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+            <input placeholder="搜索技能…">
+          </div>
+          <!-- 作用域只在管理模式出现：市场是远端目录，没有作用域 -->
+          <select class="scope">
+            <option>全局 · ~/.agents/skills</option>
+            <option>项目 · dsh-mcp-manager-ui</option>
+            <option>项目 · 其他工作区</option>
+          </select>
+          <button class="btn">＋ 导入</button>
+        </div>
+        <div class="p-body">
+          <div class="list">
+            <button class="row sel" onclick="pick(this)">
+              <div class="row-top"><span class="dot g"></span><span class="row-name">zhanggui</span></div>
+              <div class="row-desc">端到端拥有一个开发请求：解决开放设计决策、规划路径、带测试实现并交付到验证完成。</div>
+              <div class="row-meta">
+                <span class="badge scope">全局</span><span class="badge winner">模型可见</span><span class="badge on">已启用</span>
+              </div>
+            </button>
+            <button class="row" onclick="pick(this)">
+              <div class="row-top"><span class="dot g"></span><span class="row-name">decision-notes</span></div>
+              <div class="row-desc">记录一项选择背后的推理——被否决的替代方案、原因，以及这项选择的代价。</div>
+              <div class="row-meta">
+                <span class="badge scope">全局</span><span class="badge winner">模型可见</span><span class="badge on">已启用</span>
+              </div>
+            </button>
+            <button class="row" onclick="pick(this)">
+              <div class="row-top"><span class="dot y"></span><span class="row-name">office-docx</span></div>
+              <div class="row-desc">创建、读取、编辑与检查 Word 文档（.docx），含报告、信函与格式化表格。</div>
+              <div class="row-meta">
+                <span class="badge scope">全局</span><span class="badge off">仅用户可调用</span><span class="badge on">已启用</span>
+              </div>
+            </button>
+            <!-- 同名跨作用域：按（名称 + 作用域）精确操作，各行独立 -->
+            <button class="row" onclick="pick(this)">
+              <div class="row-top"><span class="dot r"></span><span class="row-name">zhanggui</span></div>
+              <div class="row-desc">（本项目的同名副本）被全局层遮蔽：模型实际收到的是全局那一份。</div>
+              <div class="row-meta">
+                <span class="badge scope">项目</span><span class="badge off">被遮蔽</span><span class="badge off">已停用</span>
+              </div>
+            </button>
+            <button class="row" onclick="pick(this)">
+              <div class="row-top"><span class="dot r"></span><span class="row-name">broken-skill</span></div>
+              <div class="row-desc">frontmatter 缺少 description —— DSH 会静默跳过它，模型目录里根本看不到。</div>
+              <div class="row-meta">
+                <span class="badge scope">全局</span><span class="badge off">非法条目</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="detail">
+            <div class="d-title">zhanggui <span class="badge scope">全局</span><span class="badge winner">模型可见</span></div>
+            <div class="d-sub">端到端拥有一个开发请求：解决开放设计决策、规划路径、带测试实现并交付到验证完成。</div>
+
+            <dl class="kv">
+              <dt>来源</dt><dd>user-agents（rank 500）</dd>
+              <dt>提供方</dt><dd>filesystem</dd>
+              <dt>调用策略</dt><dd>模型可调用 · 用户可调用</dd>
+              <dt>文件</dt><dd class="mono">C:\Users\…\.agents\skills\zhanggui\SKILL.md</dd>
+            </dl>
+
+            <!-- 这个提示是管理面板相对「模型目录」的独有价值：DSH 对非法条目只 warn+skip，模型侧收不到任何诊断 -->
+            <div class="risk">
+              <div class="risk-h"><span class="dot y"></span>同名遮蔽提示</div>
+              <div class="risk-row"><span class="k">实际生效</span><span class="v">本行（全局）。项目里还有一份同名副本被遮蔽，模型只会收到这一份。</span></div>
+            </div>
+
+            <div class="sec-t">正文（SKILL.md）</div>
+            <pre class="body-box">---
+name: zhanggui
+description: Owns one development request end-to-end …
+---
+
+# Zhanggui（掌柜）- 有状态编排器
+
+`zhanggui` 是选择性 Hybrid 根编排器…</pre>
+
+            <div class="sec-t">操作</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn">停用</button>
+              <button class="btn">在编辑器中打开</button>
+              <button class="btn danger">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 市场模式 ══ -->
+      <div id="view-market" class="hidden" style="display:flex;flex-direction:column;min-height:0;flex:1">
+        <div class="p-bar">
+          <div class="search">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+            <input placeholder="搜索技能，例如：pdf、test-driven、frontend…">
+          </div>
+          <select class="scope"><option>排序：安装量</option><option>排序：最近更新</option></select>
+        </div>
+        <div class="tags">
+          <span class="tag sel">全部</span><span class="tag">官方</span><span class="tag">文档处理</span>
+          <span class="tag">开发流程</span><span class="tag">前端</span><span class="tag">数据</span>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="card-h">
+              <div style="flex:1">
+                <div class="card-name">test-driven-development</div>
+                <div class="card-by">obra/superpowers · MIT</div>
+              </div>
+              <span class="dot g" title="无风险披露"></span>
+            </div>
+            <div class="card-desc">先写失败测试，再写最小实现让它通过。</div>
+            <div class="card-foot">
+              <span class="card-stats">243,329 次安装</span>
+              <button class="btn" onclick="openInstall()">安装</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <div style="flex:1">
+                <div class="card-name">frontend-design</div>
+                <div class="card-by">anthropics/skills · Apache-2.0</div>
+              </div>
+              <span class="dot y" title="有披露项"></span>
+            </div>
+            <div class="card-desc">前端界面设计指导与实现规范。</div>
+            <div class="card-foot">
+              <span class="card-stats">960,401 次安装</span>
+              <button class="btn">已安装</button>
+            </div>
+          </div>
+
+          <!-- 许可门禁：默认不可安装，只展示 + 给原文链接 -->
+          <div class="card">
+            <div class="card-h">
+              <div style="flex:1">
+                <div class="card-name">docx</div>
+                <div class="card-by">anthropics/skills · <span class="err-t">专有许可</span></div>
+              </div>
+              <span class="dot r" title="许可禁止本地保留副本"></span>
+            </div>
+            <div class="card-desc">Word 文档的创建与编辑。</div>
+            <div class="risk" style="margin:0;padding:9px 10px">
+              <div class="risk-row" style="padding:0">
+                <span class="k" style="width:auto;color:var(--mcp-err);font-weight:600">不可安装</span>
+                <span class="v">该技能 LICENSE.txt 禁止「在服务之外保留副本」，安装到本地属违约。</span>
+              </div>
+            </div>
+            <div class="card-foot">
+              <span class="card-stats">197,563 次安装</span>
+              <button class="btn" disabled style="opacity:.5;cursor:not-allowed">查看许可</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <div style="flex:1">
+                <div class="card-name">office-xlsx</div>
+                <div class="card-by">本地 · 已安装</div>
+              </div>
+              <span class="dot g"></span>
+            </div>
+            <div class="card-desc">读取、创建与修改 Excel 工作簿。</div>
+            <div class="card-foot">
+              <span class="card-stats">来自 ~/.agents/skills</span>
+              <button class="btn">已安装</button>
+            </div>
+          </div>
+        </div>
+        <div class="note">
+          <b>收录 ≠ 背书。</b>技能正文会作为指令进入模型上下文，且可能含可执行脚本。安装前请确认来源可信——
+          本目录只做来源白名单与许可校验，不做安全审查。
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 安装确认：把「会进入模型上下文」作为第一等披露项 -->
+<div class="overlay hidden" id="install">
+  <div class="modal">
+    <div class="modal-h">安装 test-driven-development</div>
+    <div class="modal-b">
+      <dl class="kv" style="margin-top:8px">
+        <dt>来源</dt><dd>github.com/obra/superpowers</dd>
+        <dt>许可</dt><dd>MIT</dd>
+      </dl>
+
+      <div class="risk">
+        <div class="risk-h">它会带来什么</div>
+        <div class="risk-row"><span class="k warn-t">⚠ 进入模型上下文</span><span class="v">技能正文（约 180 行）会作为指令注入会话</span></div>
+        <div class="risk-row"><span class="k">⚙ 含可执行片段</span><span class="v">无 scripts/ 目录</span></div>
+        <div class="risk-row"><span class="k">🔑 声明的工具权限</span><span class="v">无 allowed-tools</span></div>
+      </div>
+
+      <div class="sec-t" style="margin-top:14px">安装到</div>
+      <label class="radio sel"><input type="radio" name="sc" checked> <span>全局 · <code>~/.agents/skills</code>（所有项目可用）</span></label>
+      <label class="radio"><input type="radio" name="sc"> <span>当前项目 · <code>&lt;项目&gt;/.dsh/skills</code>（仅此项目）</span></label>
+    </div>
+    <div class="modal-f">
+      <button class="btn" onclick="closeInstall()">取消</button>
+      <button class="btn primary" onclick="closeInstall()">安装</button>
+    </div>
+  </div>
+</div>
+
+<div class="anno">
+  <b>这是原型，不是实现。</b>用来定方向：能力层（MCP/技能）+ 模式层（管理/市场）双层标签、
+  作用域只在管理模式、市场卡片带风险红绿灯与许可门禁。
+</div>
+
+<script>
+function toggleTheme(){
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+}
+function setMode(m){
+  document.getElementById('mode-manage').classList.toggle('sel', m==='manage');
+  document.getElementById('mode-market').classList.toggle('sel', m==='market');
+  document.getElementById('view-manage').classList.toggle('hidden', m!=='manage');
+  document.getElementById('view-market').classList.toggle('hidden', m!=='market');
+}
+function setCap(c){
+  document.getElementById('cap-mcp').classList.toggle('sel', c==='mcp');
+  document.getElementById('cap-skills').classList.toggle('sel', c==='skills');
+}
+function pick(el){
+  document.querySelectorAll('.row').forEach(r => r.classList.remove('sel'));
+  el.classList.add('sel');
+}
+function openInstall(){ document.getElementById('install').classList.remove('hidden'); }
+function closeInstall(){ document.getElementById('install').classList.add('hidden'); }
+document.querySelectorAll('.radio').forEach(r => r.addEventListener('click', () => {
+  document.querySelectorAll('.radio').forEach(x => x.classList.remove('sel'));
+  r.classList.add('sel');
+}));
+</script>
+</body>
+</html>

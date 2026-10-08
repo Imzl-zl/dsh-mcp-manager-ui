@@ -1,4 +1,4 @@
-# dsh-mcp-manager-ui
+# dsh-toolbox-ui
 
 中文 | [English](README.en.md)
 
@@ -8,13 +8,13 @@
 
 <p align="center">
   <a href="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
-  <a href="https://www.npmjs.com/package/dsh-mcp-manager-ui"><img src="https://img.shields.io/npm/v/dsh-mcp-manager-ui" alt="npm"></a>
-  <a href="https://www.npmjs.com/package/dsh-mcp-manager-ui"><img src="https://img.shields.io/npm/dm/dsh-mcp-manager-ui" alt="downloads"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-mcp-manager-ui" alt="license"></a>
+  <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/v/dsh-toolbox-ui" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/dm/dsh-toolbox-ui" alt="downloads"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-toolbox-ui" alt="license"></a>
   <img src="https://img.shields.io/badge/DSH-%3E%3D0.1.5--rc.1-blue" alt="DSH">
 </p>
 
-DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏「MCP」入口，点开就能看连接状态、加服务器、改配置——面板浮在会话之上，**不打断正在进行的对话**。
+DeepSeek Harness Web 的 **MCP 管理面板 + 技能管理面板**：右下角悬浮按钮或侧栏「MCP」入口，点开就能看连接状态、加服务器、改配置——面板浮在会话之上，**不打断正在进行的对话**。面板顶部可切换能力层（MCP / 技能）：技能面能看本机技能的真实作用域、启停与删除、诊断「为什么这个技能不生效」，并从市场安装新技能（许可门禁**逐技能**判定，不按仓库聚合）。详见 [技能管理](docs/skills-manager.md)。
 
 ## 界面预览
 
@@ -49,22 +49,22 @@ DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏�
 
 ```sh
 # 推荐：npm 安装 —— 之后 `dsh plugin update` 会在 ^1.x 内自动升到最新小版本
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.0
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.0
 
 # 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.0
 ```
 
 装完**重启 `dsh web`**。升级：
 
 ```sh
-dsh plugin --profile web update dsh-mcp-manager-ui
+dsh plugin --profile web update dsh-toolbox-ui
 ```
 
 卸载（不会删除 profile 里已有的 MCP 条目）：
 
 ```sh
-dsh plugin --profile web remove dsh-mcp-manager-ui
+dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
 细节、本地开发安装与故障排查见 [安装与升级](docs/installation.md)。
@@ -145,7 +145,7 @@ dsh plugin --profile web remove dsh-mcp-manager-ui
 它们把两件独立的事分开说：**连接在不在** —— `已连接 · 当前无会话使用（连接保留，下次直接用）`（最后一个会话结束了，连接按空闲策略留着）/ `已连接 · N 个会话在用 · M 工具` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`；**几个会话在用** —— 就是那句里的 `N 个会话在用`。旧版本的「待会话挂载」正是把这两件事压成一句，所以容易被读成"还没连上"。
 
 **怎么升级？为什么面板没提示？**
-从 npm 装的直接 `dsh plugin --profile web update dsh-mcp-manager-ui` 就会升小版本，也可以直接点面板提示条上的「升级」（同一件事，免去敲命令）。面板的提示条只查 GitHub Releases、每天最多一次、可关闭、不会自己动；固定 tag 安装的用户不会自动跨版本，需要用新 tag 重新 `add`（见 [安装与升级](docs/installation.md)）。
+从 npm 装的直接 `dsh plugin --profile web update dsh-toolbox-ui` 就会升小版本，也可以直接点面板提示条上的「升级」（同一件事，免去敲命令）。面板的提示条只查 GitHub Releases、每天最多一次、可关闭、不会自己动；固定 tag 安装的用户不会自动跨版本，需要用新 tag 重新 `add`（见 [安装与升级](docs/installation.md)）。
 
 **改动会不会碰到我的其他配置？**
 不会。全局改动只动 profile 补丁里由 `@deepseek-ai/dsh-mcp-client` 声明、且由本插件管理的条目，保留其他插件条目、注释与 `!!js` 表达式；导入「替换」也只替换这一部分，不会删除其他 bundle 或 Agent preset 自带的 MCP。

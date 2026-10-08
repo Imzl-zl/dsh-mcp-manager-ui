@@ -1,4 +1,4 @@
-# dsh-mcp-manager-ui
+# dsh-toolbox-ui
 
 [中文](README.md) | English
 
@@ -8,13 +8,13 @@
 
 <p align="center">
   <a href="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
-  <a href="https://www.npmjs.com/package/dsh-mcp-manager-ui"><img src="https://img.shields.io/npm/v/dsh-mcp-manager-ui" alt="npm"></a>
-  <a href="https://www.npmjs.com/package/dsh-mcp-manager-ui"><img src="https://img.shields.io/npm/dm/dsh-mcp-manager-ui" alt="downloads"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-mcp-manager-ui" alt="license"></a>
+  <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/v/dsh-toolbox-ui" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/dm/dsh-toolbox-ui" alt="downloads"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-toolbox-ui" alt="license"></a>
   <img src="https://img.shields.io/badge/DSH-%3E%3D0.1.5--rc.1-blue" alt="DSH">
 </p>
 
-An **MCP management panel** for DeepSeek Harness Web: click the floating button (bottom-right) or the sidebar **MCP** entry to inspect connection status, add servers, and edit configuration. The panel floats above the session — **it never interrupts an ongoing conversation**.
+An **MCP management panel and skills manager** for DeepSeek Harness Web: click the floating button (bottom-right) or the sidebar **MCP** entry to inspect connection status, add servers, and edit configuration. The panel floats above the session — **it never interrupts an ongoing conversation**. A capability switch at the top of the panel toggles between MCP and **skills**: see each installed skill's real scope, enable/disable or remove it, diagnose why a skill is not taking effect, and install new ones from the built-in market (a license gate is applied **per skill**, never aggregated per repository). See [skills manager](docs/skills-manager.md) (Chinese).
 
 > In-depth design notes (shared-connection model, connection-state semantics, known limits) are currently Chinese-only: [docs/design.md](docs/design.md).
 
@@ -51,22 +51,22 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 
 ```sh
 # Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.0
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.0
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.0
 ```
 
 Then **restart `dsh web`**. To upgrade:
 
 ```sh
-dsh plugin --profile web update dsh-mcp-manager-ui
+dsh plugin --profile web update dsh-toolbox-ui
 ```
 
 To uninstall (your configured MCP entries stay in place):
 
 ```sh
-dsh plugin --profile web remove dsh-mcp-manager-ui
+dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
 Details, local development installs, and troubleshooting: [docs/installation.md](docs/installation.md) (Chinese).
@@ -147,7 +147,7 @@ Three different things, and the detail pane gives the specific reason: **mount f
 Respectively: no session of that project holds the shared connection yet / the configuration changed but the old connection is still being reused (see above) / how many sessions currently share it.
 
 **How do I upgrade? Why did the panel not notify me?**
-If you installed from npm, `dsh plugin --profile web update dsh-mcp-manager-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries GitHub Releases, at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag.
+If you installed from npm, `dsh plugin --profile web update dsh-toolbox-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries GitHub Releases, at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag.
 
 **Will editing touch my other configuration?**
 No. Global edits only rewrite the entries declared by `@deepseek-ai/dsh-mcp-client` that this plugin manages, preserving other plugin rows, comments, and `!!js` expressions; "replace" imports only replace that part and never delete MCPs owned by another bundle or agent preset.
