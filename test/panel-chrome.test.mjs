@@ -694,3 +694,34 @@ test('市场卡片不再与详情卡片撞同一个类名', () => {
   assert.equal((clientSource.match(/className: 'dsh-mcp-card' \+ paneOff/g) ?? []).length, 4,
     '详情内容卡的数量变了——确认不是市场卡片借用了这个名字')
 })
+
+test('市场的搜索是「提交才打上游」：草稿与已提交关键字必须分开', () => {
+  // ⚠️ 这条抓的是一个**真实缺陷**（2026-10-10 真机 + 依赖链证实）：
+  //   症状：在搜索框里每敲一个字就发一次 skillHubSearch（宿主侧打到 skillhub.cn）。
+  //   根因：`searchHub` 是 useCallback，依赖里含 `query`（输入框直接绑的那份状态），
+  //         而挂载副作用是 `useEffect([call, searchHub])` —— 击键改 query ⇒ searchHub 换身份
+  //         ⇒ effect 重跑 ⇒ 发请求。与代码注释和文档都写着的「显式触发（回车 / 切分类）」相反。
+  //   修法：草稿（marketDraft）与已提交关键字（hubKeyword）分开；卸载依赖上只留后者；
+  //         顺带把管理面筛选词（query）与市场草稿也分开——它们本来就是两个搜索框。
+  //
+  // 为什么这里是**文本守卫**而不是行为断言：本仓库的两套假 React 都不模拟
+  // useCallback 的 memo 与 useEffect 的依赖比较（`useCallback: (cb) => cb`），
+  // 所以「击键不重发」在 CI 里表达不出来。行为证据是真机 wire：修前敲 3 个字 = 3 次请求，
+  // 修后敲 3 个字 = 0 次、回车 = 1 次（见提交说明）。这里的形状是那条行为在源码上的投影。
+  assert.match(clientSource, /const \[marketDraft, setMarketDraft\] = useState\(''\)/, '市场关键字要有草稿态')
+  assert.match(clientSource, /const \[hubKeyword, setHubKeyword\] = useState\(''\)/, '市场关键字要有已提交态')
+  // 正向：依赖里只准有已提交的关键字。
+  assert.match(clientSource, /\}, \[call, hubCategory, hubKeyword\]\);/, 'searchHub 必须依赖已提交的关键字')
+  // 反向（这条才是回归闸）：依赖里不得再出现草稿或管理面筛选词。
+  assert.doesNotMatch(clientSource, /\}, \[call, hubCategory, (?:query|marketDraft)\]\);/,
+    'searchHub 不得依赖草稿/筛选词——那会让每次击键都打一次上游')
+  // 输入框：改草稿、回车才提交；不得再直接绑 query 或直接调 searchHub。
+  assert.match(clientSource, /onChange: \(event\) => setMarketDraft\(event\.target\.value\)/)
+  assert.match(clientSource, /onKeyDown: \(event\) => \{ if \(event\.key === 'Enter'\) setHubKeyword\(marketDraft\); \}/)
+  assert.doesNotMatch(clientSource, /value: query,\n\s+placeholder: '搜索 skillhub\.cn/,
+    '市场搜索框不得再绑管理面的筛选词')
+  // 分类接口只该取一次：塞进搜索的 effect 里会每搜一次多打一次分类接口。
+  assert.equal((clientSource.match(/await call\('skillHubCategories'\)/g) ?? []).length, 1)
+  assert.equal((clientSource.match(/void searchHub\(\);/g) ?? []).length, 1,
+    'searchHub 的直接调用点只应有挂载/依赖变化那一处（重试按钮用 onClick 传函数）')
+})

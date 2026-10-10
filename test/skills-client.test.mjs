@@ -279,6 +279,24 @@ test('the panel only calls RPC methods the skills service actually has', async (
     + '它会静默返回 {ok:false}，表现为「项目级技能永远不出现」而没有任何报错')
 })
 
+test('源码里每一处 callSkills(…) 都指向真实存在的方法', () => {
+  // ⚠️ 上一条只覆盖 SkillsPanel 里**跑到**的那些调用；这条覆盖**整个客户端源码**的字面量。
+  //
+  // 为什么必须补：2026-10-10 删掉内置精选目录（`skillsManager/market` 端点随之删除）时，
+  // 外壳里那处「技能服务可用性探针」还在调 `callSkills('market')`——端点没了，它必然拿到
+  // {ok:false}，于是面板先把技能面标成「服务未连接」，并触发一串连锁重渲染。
+  // 真机 wire 证据：那一版在搜索框里敲 3 个字之后，`skillsManager/list` + `skillTargets` +
+  // `mcpManager/list` + `listWorkspaces` 开始以约每秒一轮的速度**无限重发**（4 秒 +3 轮）；
+  // 修掉探针后同样敲 3 个字，delta = 0。上一条用例看不见它：探针住在 McpTab，而那条只挂
+  // SkillsPanel。所以这里退一步做**源码扫描**——它正好能抓住"删了端点但漏了调用点"这类漏网。
+  const called = [...clientSource.matchAll(/callSkills\('([A-Za-z0-9_]+)'/g)].map((match) => match[1])
+  assert.ok(called.length > 0, '源码里应能扫到 callSkills 调用（否则这条用例是空转）')
+  const missing = [...new Set(called.filter((method) => !SKILLS_METHODS.has(method)))]
+  assert.deepEqual(missing, [],
+    `客户端源码调了 skillsManager 上不存在的方法：${missing.join(', ')}——`
+    + '端点被删但调用点留着时，它会静默返回 {ok:false} 并让面板误报「服务未连接」')
+})
+
 test('the manage list actually draws the skill data it was given', async () => {
   // 「数据拿到了但没画出来」是组件最常见的失败，而纯函数用例全绿也发现不了。
   // ⚠️ 不能靠「渲染 SkillsPanel 再看树」来测：假 useState 不会重渲染，
