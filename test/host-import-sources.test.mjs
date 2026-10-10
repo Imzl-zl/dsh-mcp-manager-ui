@@ -45,10 +45,19 @@ async function createProfileFixture(content) {
   await writeFile(rootConfig, '[]\n')
   await writeFile(patchPath, content)
   const entries = [{ options: { id: 'include', name: 'cordis:include', config: { path: pathToFileURL(rootConfig).href } } }]
+  // 项目级写路径要求目标是**已注册**的工作区（真实宿主里项目标签就是注册表的内容）。夹具显式
+  // 登记，而不是让测试假装没有这道门：忘记登记的用例会收到与真实宿主一样的报错。
+  const openWorkspaces = []
+  const registry = { list: () => openWorkspaces.map((path) => ({ path })) }
   return {
     root,
     patchPath,
-    ctx: { loader: { entries: () => entries }, tools: { schemas: () => [] }, get: () => undefined },
+    openWorkspace: (path) => openWorkspaces.push(path),
+    ctx: {
+      loader: { entries: () => entries },
+      tools: { schemas: () => [] },
+      get: (name) => (name === 'workspaceRegistry' ? registry : undefined),
+    },
     async cleanup() {
       await rm(root, { recursive: true, force: true })
     },
@@ -207,6 +216,7 @@ test('a workspace target imports from the same sources into the project file', a
     try {
       await mkdir(join(ws, '.codex'), { recursive: true })
       const wsPath = await realpath(ws)
+      fixture.openWorkspace(wsPath)
       await writeFile(join(ws, '.codex', 'config.toml'), `
 [mcp_servers.project-local]
 command = "npx"
@@ -415,6 +425,7 @@ test('a duplicate serverName is skipped and reported instead of failing the whol
       await mkdir(join(ws, '.dsh'), { recursive: true })
       await writeFile(join(ws, '.dsh', 'mcp.json'), '{"mcpServers":{}}\n')
       await writeFile(join(ws, '.mcp.json'), DUPLICATE_NAMES_JSON)
+      fixture.openWorkspace(wsPath)
       const projectPayload = { sourceId: 'claude-code', scope: 'project', wsPath }
       const projectPreview = await McpManagerGateway.prototype.previewImportSource.call({ ctx: fixture.ctx }, projectPayload)
       assert.ok(projectPreview.preview.warnings.some((warning) => warning.includes('已跳过：a')))
@@ -482,6 +493,7 @@ test('replace reports exactly what it deletes, in both layers', async () => {
       const ws = join(root, 'repo')
       try {
         const wsPath = await realpath(ws)
+        fixture.openWorkspace(wsPath)
         // 全局：替换会删掉未出现在来源里的 keep（old 不在来源里，也会没）。
         const globalPayload = { sourceId: 'codex', scope: 'global', mode: 'replace' }
         const globalPreview = await McpManagerGateway.prototype.previewImportSource.call({ ctx: fixture.ctx }, globalPayload)

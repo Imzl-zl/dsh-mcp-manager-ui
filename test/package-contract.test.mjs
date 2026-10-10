@@ -369,9 +369,81 @@ test('client preserves prototype-shaped header and env keys entered in the form'
 })
 
 test('client moves focus into dialogs so Escape handlers receive keyboard events', () => {
-  assert.match(client, /dialogRef\.current\?\.focus\(\)/)
   assert.match(client, /panelRef\.current\?\.focus\(\)/)
   assert.match(client, /e\.stopPropagation\(\)/)
+  // 面板里的每个 modal 对话框都通过 Dialog 构造器渲染，而焦点契约（ref + 打开即 focus + role +
+  // tabIndex + Escape）就在那个构造器里。所以这里不数"写了 dialogRef 的对话框有几个"——那种计数
+  // 只统计已经写对的那些，漏写 ref 的新对话框照样能过（实测过：把一段无 ref 的 modal 拼进源码，
+  // 四个相等断言全绿）。改成从**渲染站点**出发：手写 role="dialog" 的地方只允许三处已知的例外，
+  // 新增第四处必须显式改这条断言，而不是悄悄绕过焦点契约。
+  const dialogSites = [...client.matchAll(/role: 'dialog'/g)].length
+  assert.equal(dialogSites, 3, `手写的 role="dialog" 从三处变成了 ${dialogSites} 处：Dialog 构造器 / 面板本体 / 更新卡片之外不应再有`);
+  const dialogCtor = client.slice(client.indexOf('const Dialog = ('), client.indexOf('const CONTROLS_THRESHOLD'))
+  assert.match(dialogCtor, /const dialogRef = useRef\(null\)/)
+  assert.match(dialogCtor, /useEffect\(\(\) => \{ dialogRef\.current\?\.focus\(\); \}, \[\]\)/, 'Dialog 必须在挂载时把焦点吸进来（挂载即打开）')
+  assert.match(dialogCtor, /role: 'dialog'/)
+  assert.match(dialogCtor, /tabIndex: -1/)
+  // 五个 modal 全部走构造器；有任何一个回去手写内层 div，这里就会掉下来。
+  const uses = [...client.matchAll(/h\(Dialog, \{ label: /g)].length
+  assert.equal(uses, 5, `走 Dialog 的对话框数量变了（现在 ${uses} 个）`)
+  assert.equal((client.match(/className: 'dsh-mcp-modal' \+ \(cls/g) || []).length, 1, 'modal 的 class 组合只该在 Dialog 里做一次')
+  // 遮罩由调用点渲染一次（五个 modal + 更新卡片自己那层，共六处）。Dialog 内部再套一层就会
+  // 嵌套出两个 overlay——实测踩过，所以钉住。
+  assert.equal((client.match(/className: 'dsh-mcp-overlay'/g) || []).length, 6, '遮罩只在调用点渲染，Dialog 不重复套一层')
+})
+
+test('the three contract faces list the same methods in the same order', async () => {
+  const { TYPERT } = await import('../lib/typert.js')
+  // 三边契约（Host 实现 / lib/typert.js / lib/client.js）里，Host 与 typert.js 之间此前没有
+  // 任何自动比对：加了 Remote 却忘了写契约（客户端永远调不到）、或删了实现却留着契约
+  //（调用必失败），测试都还是绿的。这条把三边钉在一起，对每个未来方法都生效。
+  // **顺序也是契约**，所以比较不排序：三份清单是同一件事的三面，位置一致才可能一眼对照。
+  // 曾经这里排过序，于是 scanImportSources 一组在 index.js 里被追加到末尾而没人发现。
+  // 新增方法时，请在同样的位置插入三份清单。
+  // 本包有**两个** Remote 命名空间（mcpManager / skillsManager），所以三边清单都是
+  // 「MCP 段 + 技能段」的同序拼接：host 是两个 gateway 类各自的 @Remote，typert 是
+  // mv() / mvs() 两个工厂产出的 invocations，client 是字面 descriptor 加 sk() 调用。
+  // 拼接按**文件里的出现位置**排，不是按「先 MCP 再技能」硬写：这样两个面在文件里交错
+  // 也会被抓到（交错本身没有意义，但静默通过比报错更糟）。
+  const byPosition = (source, patterns) => patterns
+    .flatMap((pattern) => [...source.matchAll(pattern)].map((match) => ({ at: match.index, method: match[1] })))
+    .sort((left, right) => left.at - right.at)
+    .map((entry) => entry.method)
+  const declared = [...hostIndex.matchAll(/Remote\("([A-Za-z0-9_]+)"\)/g)].map((match) => match[1])
+  const contract = TYPERT.invocations.map((entry) => entry.method)
+  // 包名不写第二遍：从 package.json 推导。写死字面量时，改包名会让这条正则一条都匹配不到，
+  // 于是 descriptors 变成空数组——它照样会红，但理由是「顺序不对」，指向完全错误的地方。
+  const escapedName = packageJson.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const mcpPattern = new RegExp(`id: '${escapedName}#mcpManager/([A-Za-z0-9_]+)'`, 'g')
+  const skillPattern = /^\s+sk\('([A-Za-z0-9_]+)'/gm
+  const mcpDescriptors = byPosition(client, [mcpPattern])
+  const skillDescriptors = byPosition(client, [skillPattern])
+  const descriptors = byPosition(client, [mcpPattern, skillPattern])
+  assert.ok(declared.length >= 30, `从 index.js 读到的 Remote 数量异常（${declared.length}）`)
+  // 两个面分别先验「读到了」：只匹配到一个面时 deepEqual 会以「少一半」失败，
+  // 而那句话读起来像顺序问题，所以这里先把「哪一面空了」说清楚。
+  assert.ok(mcpDescriptors.length >= 30, `client 的 mcpManager descriptor 只读到 ${mcpDescriptors.length} 条`)
+  assert.ok(skillDescriptors.length >= 9, `client 的 skillsManager descriptor 只读到 ${skillDescriptors.length} 条`)
+  assert.deepEqual(contract, declared, 'lib/typert.js 的 invocation 必须与 Host 的 Remote 同序')
+  assert.deepEqual(descriptors, declared, 'lib/client.js 的 descriptor 必须与它们同序')
+})
+
+test('every workspace write goes through the one registered-target gate', async () => {
+  const runtime = await readFile(new URL('../lib/workspace-runtime.js', import.meta.url), 'utf8')
+  // 「本插件只写自己认识的工作区」这条不变量只表达一次：所有会落盘 <工作区>/.dsh/mcp.json 的
+  // Remote 都从 withRegisteredWorkspaceWrite 过。少一条在功能上完全看不出来（写照样成功），
+  // 所以钉成结构断言——新增写路径时它必须自己走进这道门。
+  assert.equal((hostIndex.match(/withWorkspaceWrite\(/g) || []).length, 0, 'index.js 不得绕过授权直接用裸的写锁')
+  const gated = (hostIndex.match(/withRegisteredWorkspaceWrite\(/g) || []).length
+  const writes = (hostIndex.match(/writeWorkspaceConfigFile\(/g) || []).length
+  assert.ok(writes >= 7, `写盘调用点数量变了（现在 ${writes} 个），先核对这组断言`)
+  assert.equal(gated, writes, '每个写盘调用点都必须经过已注册工作区校验')
+  // 注册表只在一处取用：再写一份 ctx.get('workspaceRegistry') 就等于又出现一份"哪些目录算工作区"。
+  // 注释里提到这个表达式是正常的（说明原理），所以只数非注释行。
+  const runtimeCode = runtime.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+  assert.equal((runtimeCode.match(/get\(["']workspaceRegistry["']\)/g) || []).length, 1)
+  // 裸写锁不再对外导出：绕过授权的那条路在模块边界上就不存在，而不只是"我们不这么写"。
+  assert.doesNotMatch(runtime.slice(runtime.lastIndexOf('export {')), /withWorkspaceWrite/, '唯一的写入口是 withRegisteredWorkspaceWrite')
 })
 
 test('client Remote contract includes JSON preview and import operations', () => {

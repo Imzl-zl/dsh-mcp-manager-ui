@@ -71,3 +71,16 @@ test('sanitizes quoted credentials with spaces before unquoted patterns run', ()
     assert.match(result, /__DSH_MCP_REDACTED__/)
   }
 })
+
+// 日志载荷的键来自被管理的 MCP 客户端输出，也就是用户可控。普通赋值下
+// `result["__proto__"] = {...}` 会换掉结果对象的原型、并让这条从 JSON.stringify 里消失——
+// 脱敏结果于是静默少一个字段（而它恰恰是用户想看的那个）。计算键写法才是 own property。
+test('a prototype-shaped log key survives redaction as an ordinary entry', () => {
+  const sanitized = sanitizeMcpLog(JSON.stringify({ ['__proto__']: { nested: 'keep-me' }, Authorization: `Bearer ${'secret-value'}` }))
+  const parsed = JSON.parse(sanitized)
+  assert.equal(Object.hasOwn(parsed, '__proto__'), true, '这条键必须留在脱敏结果里，而不是被丢去换原型')
+  assert.deepEqual(Object.getOwnPropertyDescriptor(parsed, '__proto__').value, { nested: 'keep-me' })
+  assert.equal(Object.getPrototypeOf(parsed), Object.prototype, '脱敏不得改掉结果对象的原型')
+  assert.match(sanitized, /__DSH_MCP_REDACTED__/, '同一份日志里的凭据照旧被脱敏')
+})
+
