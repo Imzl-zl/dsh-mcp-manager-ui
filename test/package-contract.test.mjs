@@ -342,6 +342,28 @@ test('client moves focus into dialogs so Escape handlers receive keyboard events
   assert.match(client, /dialogRef\.current\?\.focus\(\)/)
   assert.match(client, /panelRef\.current\?\.focus\(\)/)
   assert.match(client, /e\.stopPropagation\(\)/)
+  // 上面三条是整文件正则：新增一个「有 Escape 处理器但没把焦点吸进来」的对话框照样能过，
+  // 而那正是实测过的故障形态——焦点留在面板里的按钮上，Esc 冒泡到面板，按一次把面板和对话框
+  // 一起关掉（侧栏入口形态下则是毫无反应）。所以再加一组结构化计数当护栏。
+  const modalDialogs = client.match(/ref: dialogRef, className: 'dsh-mcp-modal[^}]*role: 'dialog'[^}]*Escape/g) || []
+  const refs = client.match(/ref: dialogRef/g) || []
+  const decls = client.match(/const dialogRef = useRef\(null\)/g) || []
+  const focuses = client.match(/dialogRef\.current\?\.focus\(\)/g) || []
+  assert.ok(modalDialogs.length >= 5, `modal 对话框数量变了（现在 ${modalDialogs.length} 个），先核对这组断言`)
+  assert.equal(refs.length, modalDialogs.length, '每个 modal 对话框都要绑 dialogRef')
+  assert.equal(decls.length, refs.length, '每个 dialogRef 都要有对应的 useRef 声明')
+  assert.equal(focuses.length, refs.length, '每个 dialogRef 都要在打开时把焦点吸进来')
+})
+
+test('every Host Remote has a Typert contract entry, and vice versa', async () => {
+  const { TYPERT } = await import('../lib/typert.js')
+  // 三边契约（Host 实现 / lib/typert.js / lib/client.js）里，Host 与 typert.js 之间此前没有
+  // 任何自动比对：加了 Remote 却忘了写契约（客户端永远调不到）、或删了实现却留着契约
+  //（调用必失败），测试都还是绿的。这条把两边钉在一起，对每个未来方法都生效。
+  const declared = [...hostIndex.matchAll(/Remote\("([A-Za-z0-9_]+)"\)/g)].map((match) => match[1])
+  const contract = TYPERT.invocations.map((entry) => entry.method)
+  assert.ok(declared.length >= 30, `从 index.js 读到的 Remote 数量异常（${declared.length}）`)
+  assert.deepEqual([...declared].sort(), [...contract].sort())
 })
 
 test('client Remote contract includes JSON preview and import operations', () => {

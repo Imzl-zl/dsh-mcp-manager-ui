@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, clearRevealState, consumeRevision, copyText, startVisibilityAwarePolling, wsSub };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyTargets, exportFileName, startVisibilityAwarePolling, wsSub };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -152,6 +152,90 @@ test('narrow connection details stack grids and allow long secret keys to wrap',
 
   assert.match(internals.MCP_CSS, /@media \(max-width:480px\)\{[^]*?\.dsh-mcp-kv\{grid-template-columns:1fr;/)
   assert.match(internals.MCP_CSS, /\.dsh-mcp-secret-row b\{[^}]*overflow-wrap:anywhere/)
+})
+
+// 「源工作区不会出现在自己的目标列表里」这条不变量现在住在纯函数里，所以能直接断言；
+// 写在组件闭包里就只能靠钉源码文本，而那种测试证明不了行为。
+test('copy targets exclude the current workspace and entries without a path', () => {
+  const { internals } = loadClientInternals(() => true)
+  const workspaces = [
+    { path: 'C:/proj-a', name: 'proj-a' },
+    { path: 'C:/proj-b', name: 'proj-b' },
+    { name: 'no-path-yet' },
+  ]
+
+  // Array.from 是必须的：函数在 vm realm 里跑，返回的数组原型不是本 realm 的 Array.prototype，
+  // 而 deepEqual 会比原型（同文件的 MCP_PRESETS 断言出于同样原因用了它）。
+  assert.deepEqual(Array.from(internals.copyTargets(workspaces, 'C:/proj-a').map((ws) => ws.name)), ['proj-b'])
+  assert.deepEqual(Array.from(internals.copyTargets(undefined, 'C:/proj-a')), [])
+})
+
+test('export file name stays a single safe file name', () => {
+  const { internals } = loadClientInternals(() => true)
+
+  assert.equal(internals.exportFileName('proj-a'), 'proj-a-mcp.json')
+  // 工作区名来自目录名，可能带分隔符或 Windows 非法字符：落成一个文件名，别让它变成路径。
+  assert.equal(internals.exportFileName('a/b:c*d?e"f<g>h|i j'), 'a-b-c-d-e-f-g-h-i-j-mcp.json')
+  assert.equal(internals.exportFileName(''), 'workspace-mcp.json')
+})
+
+// 组件能不能真的渲染出来，是「没有其他工作区」这条边界唯一能自动验证的地方：
+// 一个空下拉框会让用户以为面板坏了，所以这里断言提示文案真的在渲染结果里。
+function collectText(node, out) {
+  if (typeof node === 'string') { out.push(node); return out }
+  if (!node || typeof node !== 'object') return out
+  const children = node.children
+  if (Array.isArray(children)) for (const child of children) collectText(child, out)
+  return out
+}
+
+test('the copy dialog explains an empty target list instead of rendering an empty picker', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { WorkspaceCopyModal } = internals
+  const props = {
+    open: true,
+    onClose() {},
+    call: async () => ({ ok: true }),
+    busy: false,
+    setBusy() {},
+    onCopied() {},
+    from: 'C:/proj-a',
+    fromName: 'proj-a',
+    servers: [{ serverName: 'demo', transport: 'stdio' }],
+    workspaces: [{ path: 'C:/proj-a', name: 'proj-a' }],
+  }
+
+  const alone = collectText(WorkspaceCopyModal(props), [])
+  assert.ok(alone.some((text) => text.includes('没有其他已注册的工作区')), '只有一个工作区时必须说清原因')
+
+  const withTarget = collectText(WorkspaceCopyModal({ ...props, workspaces: [...props.workspaces, { path: 'C:/proj-b', name: 'proj-b', serverCount: 2 }] }), [])
+  assert.ok(withTarget.some((text) => text.includes('选择目标工作区…')), '有目标时要给出可选的目标')
+  assert.ok(!withTarget.some((text) => text.includes('没有其他已注册的工作区')))
+})
+
+test('copy preview text spells out what will be added, overwritten and skipped', () => {
+  const { internals } = loadClientInternals(() => true)
+
+  const text = internals.copyPlanText({ targetCount: 3, added: ['alpha'], updated: ['beta'], skipped: ['gamma'] })
+  assert.match(text, /目标工作区当前有 3 个 MCP/)
+  assert.match(text, /新增：alpha/)
+  assert.match(text, /覆盖同名：beta/)
+  // 「跳过」必须说清后果：目标那一条会保留原配置，而不是被静默改写。
+  assert.match(text, /跳过同名（保留目标原配置）：gamma/)
+  assert.match(internals.copyPlanText({ targetCount: 0, added: [], updated: [], skipped: [] }), /没有要写入的条目/)
+})
+
+test('section title uses an explicit fill element so header buttons stay outside it', () => {
+  const { internals } = loadClientInternals(() => true)
+
+  // 伪元素 ::after 永远排在最后一个子元素之后，横线会跑到按钮右边；改成显式元素后
+  // 「标题 —— 按钮」的顺序才由 DOM 决定。只有「本项目的 MCP」标题需要它：全局标题用的是
+  // .dsh-mcp-section-toggle（另一个类，本来就没有横线，靠 summary 的 margin-left:auto 推开），
+  // 给它加一条线是多出来的视觉变化。
+  assert.doesNotMatch(internals.MCP_CSS, /\.dsh-mcp-section-title::after/)
+  assert.match(internals.MCP_CSS, /\.dsh-mcp-section-fill\{flex:1;height:1px;background:var\(--mcp-line\)\}/)
+  const uses = clientSource.match(/className: 'dsh-mcp-section-fill'/g) || []
+  assert.equal(uses.length, 1, '只有本项目的 MCP 标题插这条横线')
 })
 
 test('polling pauses while the tab is hidden and refreshes on return', () => {
