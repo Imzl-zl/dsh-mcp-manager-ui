@@ -19,7 +19,7 @@ import {
 } from '../lib/skills-archive.js'
 // 夹具与 skills-file-ops 的导入用例共用一份：zip 的外部属性决定「是不是符号链接」，
 // 是安全断言的核心，两份拷贝里改漏一处就会静默失去覆盖。
-import { makeTar, makeZip } from '../scripts/archive-fixtures.mjs'
+import { makePaxTar, makeTar, makeZip } from '../scripts/archive-fixtures.mjs'
 
 async function makeTmp() {
   return await mkdtemp(join(tmpdir(), 'dsh-archive-'))
@@ -142,6 +142,71 @@ test('enforces the total-size limit using actual extracted bytes, not the declar
     await assert.rejects(
       () => extractArchive(zip, root, { maxTotalBytes: 500 }),
       /总量超过上限/,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('accepts real-world tars: PAX/GNU extension headers are metadata, not an unsupported entry type', async () => {
+  // `git archive`、GitHub codeload 的 tarball、部分 `npm pack` 产物，第一个 512 字节块都是
+  // `pax_global_header`（typeflag 'g'）。旧实现把它当非法条目光型直接拒 → 最常见的真实包
+  // **一个都进不来**，而只写纯 ustar 的夹具让这条一直是假绿。
+  const root = await makeTmp()
+  const rootGz = await makeTmp()
+  try {
+    const tar = makePaxTar([{ name: 'my-skill/SKILL.md', data: '---\nname: my-skill\n---\n' }])
+    const result = await extractArchive(tar, root)
+    assert.deepEqual(result.files, ['my-skill/SKILL.md'], 'PAX 头本身不落盘，只作为元数据消费')
+    assert.match(await readFile(join(root, 'my-skill', 'SKILL.md'), 'utf8'), /name: my-skill/)
+
+    const gz = await extractArchive(gzipSync(tar), rootGz)
+    assert.deepEqual(gz.files, ['my-skill/SKILL.md'], 'tar.gz 走同一条路')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(rootGz, { recursive: true, force: true })
+  }
+})
+
+test('a PAX path= record names the entry (ustar headers cannot hold a 100+ byte name)', async () => {
+  const root = await makeTmp()
+  try {
+    const longName = `${'d'.repeat(120)}/SKILL.md`
+    const tar = makePaxTar([{ name: 'short/SKILL.md', paxPath: longName, data: 'x' }])
+    const result = await extractArchive(tar, root)
+    assert.deepEqual(result.files, [longName], '条目名必须采用 PAX 的 path= 记录')
+    assert.equal(existsSync(join(root, longName)), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('enforces the per-file limit using actual bytes even when the header lies', async () => {
+  // 头里声明 1 字节、实际 4 MiB：判定必须按**实际解出的字节**（声明值是攻击者可控的）。
+  const root = await makeTmp()
+  try {
+    const zip = makeZip([{ name: 'big/SKILL.md', data: Buffer.alloc(4 * 1024 * 1024, 0x61), declaredUncompressedSize: 1 }])
+    await assert.rejects(
+      () => extractArchive(zip, root, { maxFileBytes: 1024 }),
+      /归档条目过大|解压后超过/,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a decompression bomb is stopped by the bounded inflate, not after the fact', async () => {
+  // 旧实现的顺序是「先整条解压、再判限额」：0.01 MiB 的 deflate 能先分配 8 MiB（真机实测
+  // 256 MiB 的包会让 RSS 涨 520 MiB）再被拒 —— 压缩比就是现成的 DoS 通道。
+  // 现在 zlib 自己带上界，错误消息也来自那一层（`解压后超过`），所以这条断言同时钉住顺序。
+  const root = await makeTmp()
+  try {
+    const zip = makeZip([{ name: 'bomb/SKILL.md', data: Buffer.alloc(8 * 1024 * 1024, 0x61) }], { deflate: true })
+    assert.ok(zip.length < 64 * 1024, '炸弹本身必须很小（否则测的是别的）')
+    await assert.rejects(
+      () => extractArchive(zip, root, { maxFileBytes: 1024 * 1024 }),
+      /解压后超过/,
+      '必须在**解压过程内**被拦下，而不是解完之后才判',
     )
   } finally {
     await rm(root, { recursive: true, force: true })

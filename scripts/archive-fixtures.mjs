@@ -29,7 +29,12 @@ function crc32(buffer) {
 
 /**
  * 造一个 zip（不引入依赖），支持 stored 与 deflate 两种方法。
- * @param {{ name: string, data?: string, unixMode?: number }[]} files
+ *
+ * `declaredUncompressedSize` 用来**说谎**：tar/zip 头里的大小是攻击者可控的，
+ * 只有实际解出的字节才算数——夹具必须能构造「声明 1 字节、实际 10 MiB」的包，
+ * 否则「按实际字节卡限额」这条永远测不到（旧夹具两个数都写真实值）。
+ *
+ * @param {{ name: string, data?: string|Buffer, unixMode?: number, declaredUncompressedSize?: number }[]} files
  * @param {{ deflate?: boolean }} [options]
  * @returns {Buffer}
  */
@@ -39,7 +44,8 @@ export function makeZip(files, { deflate = false } = {}) {
   let offset = 0
   for (const file of files) {
     const nameBuf = Buffer.from(file.name, 'utf8')
-    const data = Buffer.from(file.data ?? '', 'utf8')
+    const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data ?? '', 'utf8')
+    const declared = file.declaredUncompressedSize ?? data.length
     const method = deflate ? 8 : 0
     const body = deflate ? deflateRawSync(data) : data
     const crc = crc32(data)
@@ -50,7 +56,7 @@ export function makeZip(files, { deflate = false } = {}) {
     local.writeUInt16LE(method, 8)
     local.writeUInt32LE(crc, 14)
     local.writeUInt32LE(body.length, 18)
-    local.writeUInt32LE(data.length, 22)
+    local.writeUInt32LE(declared, 22)
     local.writeUInt16LE(nameBuf.length, 26)
     nameBuf.copy(local, 30)
     locals.push(local, body)
@@ -62,7 +68,7 @@ export function makeZip(files, { deflate = false } = {}) {
     central.writeUInt16LE(method, 10)
     central.writeUInt32LE(crc, 16)
     central.writeUInt32LE(body.length, 20)
-    central.writeUInt32LE(data.length, 24)
+    central.writeUInt32LE(declared, 24)
     central.writeUInt16LE(nameBuf.length, 28)
     // 外部属性高 16 位：普通文件 0x81a4；符号链接由用例显式传入。
     // 用 >>> 而非 << ：0x81a4 << 16 会溢出成有符号负数，writeUInt32LE 会拒绝。
@@ -99,6 +105,49 @@ export function makeTar(files) {
     header.write(file.typeFlag ?? '0', 156, 'latin1')
     header.write('ustar\0', 257, 'latin1')
     blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512))
+  }
+  blocks.push(Buffer.alloc(1024))
+  return Buffer.concat(blocks)
+}
+
+/** PAX 记录：`<长度> key=value\n`，长度**含自身**（tar 规范里的那条自指规则）。 */
+function paxRecord(key, value) {
+  const body = ` ${key}=${value}\n`
+  let length = Buffer.byteLength(body) + 1
+  while (String(length).length + Buffer.byteLength(body) !== length) length += 1
+  return `${length}${body}`
+}
+
+/**
+ * 造一个带 PAX / GNU 扩展头的 tar —— 也就是**真实世界**的形状。
+ *
+ * 为什么必须有这个夹具：`git archive`、GitHub codeload 的 tarball、部分 `npm pack` 产物，
+ * 第一个 512 字节块就是 `pax_global_header`（typeflag `g`）。旧实现把它当「不支持的条目
+ * 光型」直接拒 → 最常见的真实包一个都进不来，而只写纯 ustar 的 makeTar 让这条一直是假绿。
+ *
+ * @param {{ name: string, data?: string, paxPath?: string }[]} files
+ * @returns {Buffer}
+ */
+export function makePaxTar(files) {
+  const blocks = []
+  const push = (name, typeFlag, data) => {
+    const header = Buffer.alloc(512)
+    header.write(name, 0, 'utf8')
+    header.write('0000644\0', 100, 'latin1')
+    header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124, 'latin1')
+    header.write(typeFlag, 156, 'latin1')
+    header.write('ustar\0', 257, 'latin1')
+    blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512))
+  }
+  // ① 全局 PAX 头：真实包里它排在最前。
+  push('pax_global_header', 'g', Buffer.from(paxRecord('comment', 'b'.repeat(40)), 'utf8'))
+  for (const file of files) {
+    const data = Buffer.from(file.data ?? '', 'utf8')
+    // ② 逐文件 PAX 头：`path=` 能给出超过 100 字节的名字（ustar 头写不下）。
+    if (file.paxPath !== undefined) {
+      push(`PaxHeaders/${file.name}`, 'x', Buffer.from(paxRecord('path', file.paxPath), 'utf8'))
+    }
+    push(file.name, '0', data)
   }
   blocks.push(Buffer.alloc(1024))
   return Buffer.concat(blocks)

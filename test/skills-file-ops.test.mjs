@@ -10,7 +10,7 @@
 // 所以「已禁用」必须由本层自己扫 .disabled 得到。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, symlink, truncate } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,7 @@ import {
   resolveSkillTarget,
   setSkillEnabled,
 } from '../lib/skills-file-ops.js'
+import { MAX_ARCHIVE_BYTES } from '../lib/skills-archive.js'
 import { makeTar, makeZip } from '../scripts/archive-fixtures.mjs'
 
 /** 建一个临时技能根，含目录捆绑与扁平两种形态。 */
@@ -46,9 +47,38 @@ test('disables a directory bundle by renaming SKILL.md and re-enables it back', 
     assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), false, '禁用后 SKILL.md 应不存在')
     assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), true, '禁用后应有 .disabled')
 
-    await setSkillEnabled(target, true)
+    // ⚠️ 必须先**重新定位**再启用：宿主的每个 RPC 都是重新 resolve 的（lib/index.js 的 setEnabled），
+    // 而停用后定位结果的 path **本身带 .disabled**。首版这里复用了上面那个 target（启用态 path），
+    // 恰好绕过「拿 target.path 当基准」的方向 bug —— 于是「启用」在真机上永远 no-op，测试却一直绿。
+    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    assert.equal(disabled.disabled, true, '停用后重新定位应报告 disabled')
+    await setSkillEnabled(disabled, true)
     assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true, '启用后应恢复 SKILL.md')
     assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), false, '启用后不应残留 .disabled')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('enable/disable is idempotent in both directions and never produces .disabled.disabled', async () => {
+  // 回归闸：`SKILL.md.disabled.disabled` 既不被 scanDisabledSkills 认出、也不被宿主看到，
+  // 技能会**双向消失**且只能手工改名救回。陈旧列表 / 两个标签页 / RPC 重试都会走到这里。
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    assert.equal((await setSkillEnabled(target, false)).changed, true, '首次停用应真的改名')
+
+    // 对陈旧行再点一次「停用」：必须是 no-op。
+    assert.equal((await setSkillEnabled(target, false)).changed, false, '重复停用应是 no-op')
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), true)
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled.disabled')), false,
+      '不得产生 .disabled.disabled —— 那会让技能对宿主与面板双向消失')
+
+    // 对已启用的行再点一次「启用」同样是 no-op。
+    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    await setSkillEnabled(disabled, true)
+    assert.equal((await setSkillEnabled(disabled, true)).changed, false, '重复启用应是 no-op')
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -174,8 +204,12 @@ test('removes a skill bundle and a flat file, and reports what it removed', asyn
   }
 })
 
-test('refuses to delete outside the skill root even if the name looks like a path', async () => {
+test('a name that looks like a path is refused at resolve time, so nothing outside the root is touched', async () => {
   // 外部输入在系统边界必须校验：技能名来自面板/远端目录，不能让它跳出根目录。
+  //
+  // 注意这条只覆盖**本层**的解析（`resolveSkillTarget` 拒绝非法名）。「调用方能不能凭空
+  // 指定一个根」是另一层的事——那是 RPC 层的 `resolveTargetReference`（载荷里的 root 必须
+  // 能对上宿主自己算出来的目标），由 test/skillhub-install.test.mjs 的信任边界用例覆盖。
   const root = await makeRoot()
   const outside = join(root, '..', 'must-survive.txt')
   await writeFile(outside, 'keep me')
@@ -552,6 +586,104 @@ test('creates the destination root when importing into a scope that does not exi
     assert.equal(result.name, 'fresh-scope')
     assert.equal(existsSync(join(root, 'fresh-scope', 'SKILL.md')), true)
     assert.deepEqual(await readdir(root), ['fresh-scope'])
+  } finally {
+    await rm(parent, { recursive: true, force: true })
+  }
+})
+
+test('refuses an oversized archive before reading it into memory', async () => {
+  // 限额判定发生在解压之后，而调用方是先把整包读进内存的——没有这道闸，几十 MiB 的包
+  // 在读进来时就已经占满内存。用**稀疏文件**造出超限大小，不必真的写 32 MiB 数据。
+  const parent = await mkdtemp(join(tmpdir(), 'dsh-big-archive-'))
+  const root = join(parent, 'skills')
+  const archive = join(parent, 'huge.zip')
+  await writeFile(archive, '')
+  await truncate(archive, MAX_ARCHIVE_BYTES + 1)
+  try {
+    await assert.rejects(
+      () => importSkill({ root, scope: 'global', source: { type: 'archive', path: archive } }),
+      /压缩包过大/,
+    )
+    assert.equal(existsSync(root), false, '被拒的导入不该在用户根里留下任何东西')
+  } finally {
+    await rm(parent, { recursive: true, force: true })
+  }
+})
+
+test('two concurrent imports of the same name: exactly one wins and the winner stays intact', async () => {
+  // 旧实现没有锁：两次导入都会通过「目标空闲」检查，随后互相踩——实测一条的失败清理
+  // 会删掉另一条正在写的目录，最终根里空空如也、两个调用都失败；交错顺序稍不同就变成
+  // 「两个来源的文件混进同一个技能目录」（cp 是合并语义），恰好推翻「拒绝而不覆盖」。
+  const parent = await mkdtemp(join(tmpdir(), 'dsh-race-'))
+  const root = join(parent, 'skills')
+  const first = join(parent, 'first')
+  const second = join(parent, 'second')
+  await mkdir(first, { recursive: true })
+  await mkdir(second, { recursive: true })
+  const header = '---\nname: same-name\ndescription: 同名\n---\n'
+  await writeFile(join(first, 'SKILL.md'), `${header}\nA\n`)
+  await writeFile(join(first, 'a-only.txt'), 'a')
+  await writeFile(join(second, 'SKILL.md'), `${header}\nB\n`)
+  await writeFile(join(second, 'b-only.txt'), 'b')
+  try {
+    const results = await Promise.allSettled([
+      importSkill({ root, scope: 'global', source: { type: 'directory', path: first } }),
+      importSkill({ root, scope: 'global', source: { type: 'directory', path: second } }),
+    ])
+    const ok = results.filter((entry) => entry.status === 'fulfilled')
+    const failed = results.filter((entry) => entry.status === 'rejected')
+    assert.equal(ok.length, 1, '同名并发导入只能有一个成功')
+    assert.equal(failed.length, 1, '另一个必须被明确拒绝')
+    assert.match(String(failed[0].reason?.message), /已存在/, '被拒的原因要说清是「已存在」而不是随机 IO 错')
+    // 赢家必须完好：两个来源的文件**不得**混进同一个目录
+    const body = await readFile(join(root, 'same-name', 'SKILL.md'), 'utf8')
+    const files = (await readdir(join(root, 'same-name'))).sort()
+    const winnerIsA = body.includes('A')
+    assert.deepEqual(files, winnerIsA ? ['SKILL.md', 'a-only.txt'] : ['SKILL.md', 'b-only.txt'],
+      '赢家的目录里只能有它自己的文件（合并语义会让两个来源混在一起）')
+    // 不留暂存残骸
+    assert.deepEqual((await readdir(root)).filter((name) => name.startsWith('.dsh-import-')), [])
+  } finally {
+    await rm(parent, { recursive: true, force: true })
+  }
+})
+
+test('leaves no staging residue in the skill root after a bundle import', async () => {
+  // 原子提交的暂存放在技能根里（`<root>/.dsh-import-<随机>/skill`），所以必须证明它清干净了，
+  // 而且根里只剩目标那一项——否则暂存目录会被宿主当成一条技能（它只看 <dir>/SKILL.md）。
+  const parent = await mkdtemp(join(tmpdir(), 'dsh-atomic-'))
+  const root = join(parent, 'skills')
+  const archive = join(parent, 'skill.zip')
+  await writeFile(archive, makeZip([
+    { name: 'pkg/SKILL.md', data: '---\nname: atomic-demo\ndescription: 原子提交\n---\n' },
+    { name: 'pkg/references/notes.md', data: 'notes' },
+  ]))
+  try {
+    const result = await importSkill({ root, scope: 'global', source: { type: 'archive', path: archive } })
+    assert.equal(result.name, 'atomic-demo')
+    assert.deepEqual(await readdir(root), ['atomic-demo'], '根里只该有目标项，暂存必须清掉')
+    assert.deepEqual((await readdir(join(root, 'atomic-demo'))).sort(), ['SKILL.md', 'references'])
+  } finally {
+    await rm(parent, { recursive: true, force: true })
+  }
+})
+
+test('refuses a bundle whose root is itself a link/junction', async () => {
+  // 只从树内部查链接会漏掉「调用方给的路径本身就是一个 junction」这种情形：
+  // Windows 上 cp 会 EPERM（报错难懂），POSIX 上会把链接原样复制进用户的技能根。
+  const parent = await mkdtemp(join(tmpdir(), 'dsh-link-'))
+  const root = join(parent, 'skills')
+  const real = join(parent, 'real-skill')
+  await mkdir(real, { recursive: true })
+  await writeFile(join(real, 'SKILL.md'), '---\nname: linked\ndescription: 链接\n---\n')
+  const link = join(parent, 'linked-skill')
+  await symlink(real, link, 'junction')
+  try {
+    await assert.rejects(
+      () => importSkill({ root, scope: 'global', source: { type: 'directory', path: link } }),
+      /拒绝导入符号链接/,
+    )
+    assert.equal(existsSync(root) && (await readdir(root)).length > 0, false, '根里不得留下任何东西')
   } finally {
     await rm(parent, { recursive: true, force: true })
   }

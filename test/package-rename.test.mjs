@@ -107,6 +107,9 @@ test('the old package name survives only where it is still factually correct', (
     { pattern: /(?:旧包|旧版|让位|前者|migration|legacy|renamed|already registered|迁移)/, why: '明确指代旧包的说明文字' },
     // 让位检测的测试夹具：它**故意**模拟「另一个（旧的）管理插件」，旧包名是它要匹配的目标。
     { pattern: /dsh-mcp-manager-ui-old/, why: '让位检测的测试夹具（模拟旧包）' },
+    // 真机形态的夹具与断言：旧包的 loader `name` 就是旧包名本身（它与新包**共用同一个 patch id**，
+    // 所以判据只能按 name）。这里必须是旧包名的**带引号字面量**，否则测不到 C2 那条缺陷。
+    { pattern: /'dsh-mcp-manager-ui'/, why: '让位检测里「旧包真实 loader name」的夹具与断言' },
     // 旧包的安装命令断言：迁移说明要保留，否则老用户找不到升级路径。
     { pattern: /dsh plugin --profile web add dsh-mcp-manager-ui/, why: '旧包安装命令的断言' },
     // 「`name: <旧名>`」这种引用改名前的挂载名、用于说明的注释。

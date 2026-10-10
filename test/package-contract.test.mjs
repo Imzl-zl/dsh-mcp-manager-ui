@@ -396,25 +396,35 @@ test('importing from other MCP clients goes through the Host, with no client-sup
 })
 
 test('client places an explicit selectable builtin installer before manual add', () => {
-  assert.match(client, /BuiltinInstallModal/)
+  assert.match(client, /McpMarketView/)
   assert.match(client, /call\('builtins'\)/)
   assert.match(client, /call\('installBuiltins'/)
-  assert.match(client, /type: 'checkbox'/)
-  assert.match(client, /安装选中/)
+  assert.match(client, /安装/)
   // 市场形态：搜索是主操作、分类 chips、卡片网格、逐条安装、以及「已配置」时可移除。
   // 这几条一起把「市场」与旧的「勾选列表」区分开——少任何一条都会退回列表框。
-  assert.match(client, /className: 'dsh-mcp-modal dsh-mcp-market'/)
-  assert.match(client, /\.dsh-mcp-market-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
-  assert.match(client, /\.dsh-mcp-market-chips\{[^}]*overflow-x:auto/)
+  //
+  // ⚠️ 2025 改版：市场从**浮层**（.dsh-mcp-modal.dsh-mcp-market）改成**内联视图**
+  // （第二行的「发现市场」模式），与技能面共用 .dsh-mcp-grid / .dsh-mcp-mcard。
+  // 所以这里钉的是新契约：内联容器存在、且**不再**是 overlay/modal 的形态。
+  assert.match(client, /className: 'dsh-mcp-market-view'/)
+  assert.doesNotMatch(client, /dsh-mcp-modal dsh-mcp-market/, '市场不得再回退成浮层形态')
+  assert.match(client, /\.dsh-mcp-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
+  // 分类药丸：**换行**而不是横滚（横滚 + 隐藏滚动条会把最后一个药丸切在右边缘，
+  // 真机上就是「文件与…」被裁一半）。判别断言放在 panel-chrome 那条，这里只钉它存在。
+  assert.match(client, /\.dsh-mcp-chips\{[^}]*flex-wrap:wrap/)
   assert.match(client, /className: 'dsh-mcp-chip'/)
   assert.match(client, /placeholder: '搜索服务、用途或提供方…'/)
   assert.match(client, /install\(\[item\.id\]\)/)
   assert.match(client, /call\('removeServer'|call\('removeWorkspaceServer'/)
   assert.match(client, /call\('removeWorkspaceServer', \{ wsPath: scope, name \}\)/)
+  // 头部顺序：导入在「添加」之前，两者都在标题栏那一列里。市场不再是这里的一个按钮
+  // ——它升格成第二行的模式分段（与技能面同一个控件），所以「市场」不再参与这段排序。
   const importPosition = client.indexOf("children: '导入 MCP")
-  const marketPosition = client.indexOf("children: '市场'")
   const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
-  assert.ok(importPosition >= 0 && importPosition < marketPosition && marketPosition < addPosition)
+  assert.ok(importPosition >= 0 && importPosition < addPosition, '导入要排在「添加 MCP」之前')
+  // 模式层是**两个能力面共用**的那一个：只有一处定义、且两处都读它。
+  assert.equal((client.match(/const SKILL_MODES = \[/g) ?? []).length, 1, '模式层只能定义一次')
+  assert.match(client, /seg\(SKILL_MODES, mode, setMode, '模式'\)/)
 })
 
 test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {

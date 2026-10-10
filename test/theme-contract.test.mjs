@@ -177,22 +177,28 @@ test('the scanner reads rules out of minified css and nested at-rules', () => {
   assert.deepEqual(parseRules('/* } */ .a{color:red}').map((rule) => rule.selectors), [['.a']])
 })
 
-test('every dsh-mcp-* class the bundle renders has a style', () => {
+test('every panel class the bundle renders has a style', () => {
   // 拼错一个类名 / 忘了写样式，表现是「这块没排版」——不像报错那样显眼，jsdom 也看不出来。
   // 写市场 UI 时就漏过一次（筛选条右侧的「全选当前 N 个」引用了没定义的类）。
-  // 只查 dsh-mcp-* 前缀：其它类（dsh-mcp-btn 的组合类、状态类）由各自的规则覆盖。
+  // ⚠️ 前缀必须同时覆盖 dsh-mcp- 与 dsh-skills-：这里原先只扫 dsh-mcp-，注释写着
+  //   「其它类由各自的规则覆盖」——那个假设在 SKILLS_CSS 出现后就过期了。实际漏掉的代价
+  //   是安装弹窗里整块作用域单选（dsh-skills-list/-row）被当死 CSS 删掉后无人报警，
+  //   12 条主题测试全绿而那块没有排版。
   const stylesheet = parseRules(css);
   const defined = new Set(stylesheet.flatMap((rule) => rule.selectors
-    .flatMap((selector) => [...selector.matchAll(/\.(dsh-mcp-[a-z0-9-]+)/g)].map((m) => m[1]))));
+    .flatMap((selector) => [...selector.matchAll(/\.(dsh-(?:mcp|skills)-[a-z0-9-]+)/g)].map((m) => m[1]))));
   // 从 className 字符串里取 token，含 'a' + (x ? ' b' : '') 这种拼接的两侧。
   const rendered = new Set([...client.matchAll(/className:\s*'([^']*)'/g)]
     .flatMap((m) => m[1].split(/[^a-z0-9-]+/))
-    .filter((token) => token.startsWith('dsh-mcp-')));
+    .filter((token) => token.startsWith('dsh-mcp-') || token.startsWith('dsh-skills-')));
   const missing = [...rendered].filter((name) => !defined.has(name)).sort();
   assert.deepEqual(missing, [], '这些类被渲染但没有样式：' + missing.join(', '));
   // 反向也留个下限，避免上面两处一起退化成空集合而假通过。
   assert.ok(rendered.size > 40, `只扫到 ${rendered.size} 个类，疑似正则失效`);
   assert.ok(defined.size > 40, `样式表只解析出 ${defined.size} 个类，疑似解析失效`);
+  // 覆盖面本身要有下限：只扫到 dsh-mcp- 一个前缀，就说明技能面那套又脱离了检查。
+  assert.ok([...rendered].some((name) => name.startsWith('dsh-skills-')),
+    '扫描必须覆盖 dsh-skills-* 类，否则技能面板的悬空类无人报警');
 })
 
 test('the extractor collects every stylesheet constant, not just MCP_CSS', () => {

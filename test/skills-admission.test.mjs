@@ -170,7 +170,7 @@ test('a permissive declaration does not override explicit no-copy text', () => {
 })
 
 test('reports which scripts and declared tool permissions a skill brings', () => {
-  // 安装确认弹窗要把这三件事说清（见原型 panel.html 的「它会带来什么」）：
+  // 安装确认弹窗要把这三件事说清（见原型 unified-design.html 的「它会带来什么」）：
   // 进入模型上下文 / 含可执行片段 / 声明的工具权限。
   const risks = scanSkillRisks({
     files: ['SKILL.md', 'scripts/build.sh', 'scripts/lib/helper.mjs', 'references/notes.md'],

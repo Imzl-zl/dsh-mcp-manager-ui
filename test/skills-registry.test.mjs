@@ -10,7 +10,7 @@
 //     技能都在 ~/.agents/skills），UI 不得写死根路径。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { listSkillViews, projectSkillRow, revisionOfSkillRows } from '../lib/skills-registry.js'
+import { listSkillViews } from '../lib/skills-registry.js'
 
 /** 手搓一个只实现 list/get/snapshot 的 skills 服务替身。 */
 function fakeSkills(byCwd) {
@@ -178,17 +178,6 @@ test('exposes the invocation policy so the panel can tell model-only from user-o
   assert.equal(row.userInvocable, true)
 })
 
-test('loads one skill body through the host and reports it as missing when unknown', async () => {
-  const skills = fakeSkills({ '': [skill()] })
-  const ctx = ctxWith(skills)
-
-  const found = await projectSkillRow(ctx, { name: 'zhanggui' })
-  assert.equal(found.content, 'body of zhanggui')
-
-  const missing = await projectSkillRow(ctx, { name: 'no-such-skill' })
-  assert.equal(missing, undefined, '未知技能必须返回 undefined，不是抛错也不是空对象')
-})
-
 test('degrades to an empty list when no skills service is mounted', async () => {
   // 宿主可能没挂 dsh-skill（用户可禁用该内置插件）。读取层不得因此抛错——
   // 抛错会让整个面板打不开，而降级为空列表只影响技能这一块。
@@ -196,26 +185,95 @@ test('degrades to an empty list when no skills service is mounted', async () => 
   assert.deepEqual(rows, [])
 })
 
-test('produces a stable content revision that changes when the catalog changes', async () => {
-  const before = fakeSkills({ '': [skill()] })
-  const same = fakeSkills({ '': [skill()] })
-  const changed = fakeSkills({ '': [skill({ description: '改了描述' })] })
+test('reads through the default Agent preset scope, so user skills are visible', async () => {
+  // ⚠️ 这条抓的是一个**真机缺陷**（装上后技能列表只剩 1 个内置技能）：
+  //   宿主 dsh-web-app **有意**把基础行 skill-filesystem 置为 disabled，改由每个 agent
+  //   preset 各挂一份，于是文件系统 provider 注册进的是 **preset 的作用域层**；
+  //   而 dsh-skill 的注册表按层合并（全局层 + 查看作用域链）。本插件的 RPC 跑在宿主层，
+  //   不传 scope 时**只看得到 bundled 那一个**，用户装在 ~/.agents/skills 的全部不可见。
+  //
+  // 宿主的官方读法（dsh-api-session-controller 的 sessionSkillCatalog）就是借默认 preset
+  // 的作用域：`agentPresets.acquireScope()` → `skills.list({ cwd, scope: lease.key })`。
+  // 它的文档写着 “Resolve a live or standing preset scope **without creating an Agent**”，
+  // 所以这不违反 SPEC 约束 14（面板不得依赖活动会话）。
+  const seen = []
+  const scopeKey = { preset: 'standard' }
+  const skills = {
+    async list(options = {}) {
+      seen.push(options)
+      // 模拟宿主的分层：只有带 scope 的读取才看得到 preset 层注册的用户技能。
+      return options.scope === scopeKey ? [skill()] : [skill({ name: 'bundled-only', source: 'bundled' })]
+    },
+    async get() { return undefined },
+  }
+  let disposed = 0
+  const ctx = {
+    get(name) {
+      if (name === 'skills') return skills
+      if (name === 'agentPresets') {
+        return {
+          async acquireScope(id) {
+            assert.equal(id, undefined, '不传 id 时宿主用 defaultId（当前默认 preset）')
+            return {
+              key: scopeKey,
+              async [Symbol.asyncDispose]() { disposed += 1 },
+            }
+          },
+        }
+      }
+      return undefined
+    },
+  }
 
-  const revA = revisionOfSkillRows(await listSkillViews(ctxWith(before), {}))
-  const revB = revisionOfSkillRows(await listSkillViews(ctxWith(same), {}))
-  const revC = revisionOfSkillRows(await listSkillViews(ctxWith(changed), {}))
+  const rows = await listSkillViews(ctx, { workspaces: [] })
 
-  assert.equal(revA, revB, '内容相同则 revision 相同（面板据此避免无变化重渲染）')
-  assert.notEqual(revA, revC, '描述变化必须改变 revision')
+  assert.deepEqual(rows.map((row) => row.name), ['zhanggui'],
+    '不带 preset 作用域时只能读到 bundled；带上才读得到用户技能')
+  assert.ok(seen.length > 0 && seen.every((options) => options.scope === scopeKey),
+    '每次 skills.list 都必须带上 preset 作用域，否则用户技能不可见')
+  assert.equal(disposed, 1, '租约必须释放（宿主内部有 users 计数，不释放会留住那一代）')
 })
 
-test('the revision is a pure function of rows, so listing the host happens once', async () => {
-  // 指纹若自己去查宿主，面板每拉一次就要查两遍：既浪费，又会在两次查询之间
-  // 被其它改动撕开（指纹与实际渲染的行对不上 → 漏刷新）。这条钉住「指纹是纯函数」。
-  const skills = fakeSkills({ '': [skill()] })
-  const rows = await listSkillViews(ctxWith(skills), {})
-  const callsAfterList = skills.calls.length
-  revisionOfSkillRows(rows)
-  revisionOfSkillRows(rows)
-  assert.equal(skills.calls.length, callsAfterList, '算指纹不得再查宿主')
+test('releases the preset lease even when the catalog read throws', async () => {
+  // 租约不释放会留住 preset 的那一代注册；读取失败时更不能漏。
+  let disposed = 0
+  const scopeKey = { preset: 'standard' }
+  const ctx = {
+    get(name) {
+      if (name === 'skills') return { async list() { throw new Error('host exploded') } }
+      if (name === 'agentPresets') {
+        return { async acquireScope() { return { key: scopeKey, async [Symbol.asyncDispose]() { disposed += 1 } } } }
+      }
+      return undefined
+    },
+  }
+  await assert.rejects(() => listSkillViews(ctx, { workspaces: [] }), /host exploded/)
+  assert.equal(disposed, 1, '读取抛错时也必须释放租约')
+})
+
+test('falls back to the global read when no preset registry is present', async () => {
+  // 旧宿主 / 没装 preset 注册表的部署：拿不到作用域不是错误，退回原来的全局读取。
+  const seen = []
+  const skills = {
+    async list(options = {}) { seen.push(options); return [skill({ source: 'bundled' })] },
+    async get() { return undefined },
+  }
+  const rows = await listSkillViews(ctxWith(skills), { workspaces: [] })
+  assert.equal(rows.length, 1)
+  assert.ok(seen.every((options) => options.scope === undefined), '拿不到就退化为不带 scope 的读取')
+})
+
+test('a broken preset registry does not break the skills pane', async () => {
+  // preset 未注册/损坏时宿主会抛（agent-preset/not-found / invalid）。技能面必须仍然可用，
+  // 只是少了 preset 层的技能——不能让整个面板因此打不开。
+  const skills = { async list() { return [skill({ source: 'bundled' })] }, async get() { return undefined } }
+  const ctx = {
+    get(name) {
+      if (name === 'skills') return skills
+      if (name === 'agentPresets') return { async acquireScope() { throw new Error('agent-preset/not-found') } }
+      return undefined
+    },
+  }
+  const rows = await listSkillViews(ctx, { workspaces: [] })
+  assert.equal(rows.length, 1, 'preset 取不到时退回全局读取，而不是抛错')
 })

@@ -103,12 +103,11 @@ test('mounting the plugin exposes the skills service without a second patch entr
 })
 
 test('the handover probe never reports the plugin itself as a conflicting manager', async () => {
-  // ⚠️ SPEC 已核实的**最危险**陷阱（约束 10 / D15）：本插件自己的 loader `name` 就是
-  // package.json.name（cordis.patch.yml 的 `name: dsh-mcp-manager-ui`），而改名（row 16）
-  // 是最后一步。所以「按 name 判定是否装了另一个 MCP 管理插件」**必然命中自身** →
-  // 误判为「旧包已装」→ 静默让位 → **面板完全打不开**。
+  // SPEC 约束 10 / D15：本插件自己的 loader `name` 恒等于 package.json.name
+  // （cordis.patch.yml 的 `name:` 由 package-rename 钉住），所以自身判据是**包名**。
   //
-  // 正解：按 `entry.options.id` 排除自身条目（该 id 由 package-contract 断言唯一）。
+  // ⚠️ 不能用 patch 的 `id` 排自身：新旧两个包共用 `id: mcp-manager-ui`，
+  // 按 id 排会把旧包一起排掉 → 让位检测永不触发（下一条用例就是这个形态）。
   const ctx = {
     loader: {
       entries: () => [
@@ -120,6 +119,22 @@ test('the handover probe never reports the plugin itself as a conflicting manage
   const conflict = await SkillsManagerGateway.prototype.conflictingManager.call({ ctx })
   assert.equal(conflict, null,
     '只有自身条目时必须报告「无冲突」，否则面板会静默让位、完全打不开')
+})
+
+test('the handover probe sees the OLD package even though it shares our patch id', async () => {
+  // 真机形态：新旧两包**同 id**（都是 `mcp-manager-ui`），旧包的 name 是 `dsh-mcp-manager-ui`。
+  // 首版按 id 排自身，于是这一条被一起跳过、让位永不触发——而 desktop profile 恰恰装着旧包。
+  const ctx = {
+    loader: {
+      entries: () => [
+        { options: { id: 'mcp-manager-ui', name: 'dsh-toolbox-ui' } },
+        { options: { id: 'mcp-manager-ui', name: 'dsh-mcp-manager-ui' } },
+      ],
+    },
+  }
+  const conflict = await SkillsManagerGateway.prototype.conflictingManager.call({ ctx })
+  assert.notEqual(conflict, null, '旧包在场（哪怕与我们同 id）必须报告冲突，否则让位形同不存在')
+  assert.equal(conflict.name, 'dsh-mcp-manager-ui')
 })
 
 test('the handover probe reports a genuinely different manager plugin', async () => {
@@ -308,8 +323,6 @@ test('lists skills without requiring an active session', async () => {
   // 面板要按 source 显示**真实**作用域（本机 ~/.dsh/skills 就不存在，技能都在 ~/.agents/skills），
   // 所以 source 必须原样带出来，UI 不得写死根路径（SPEC 约束 12）。
   assert.equal(result.skills[0].source, 'user-agents')
-  // 目录 revision 供面板判断是否需要重渲染。
-  assert.equal(typeof result.revision, 'string')
 })
 
 test('degrades to an empty list when the skills service is missing', async () => {
@@ -348,70 +361,128 @@ test('merges project skills per workspace without duplicating globals', async ()
   assert.equal(result.skills.filter((row) => row.name === 'zhanggui').length, 1)
 })
 
-test('surfaces disabled skills that the host catalog cannot see', async () => {
+test('surfaces disabled skills even when a whole root is disabled', async () => {
   // SPEC 约束 3：禁用后技能从宿主目录**消失**（改名后按固定路径读不到），
   // 所以必须自行扫描各 root 的 .disabled，否则面板无法展示它们、也无法提供「启用」。
   //
-  // 根目录从哪来：`ctx.skills` **不暴露 roots()**（实测），所以只能从可见技能的
-  // `resourceBase` 推出（见 skills-registry.js 的 locateSkill）。因此这条用例刻意让
-  // 同一个根里**既有**启用的技能（提供根线索）**又有**被禁用的技能（必须被扫出来）。
-  const root = await mkdtemp(join(tmpdir(), 'dsh-skills-host-'))
-  const skillsRoot = join(root, 'skills')
+  // ⚠️ 待扫的根必须来自**能力**（skillTargetsView），不能从可见行反推：
+  // 某个根里的技能**全被停用**时，可见行里根本没有那个根 → 它永远不被扫 → 面板零显示、
+  // 也救不回来（首版就是这么写的；这条用例把「可见行为空」设成前提来钉住它）。
+  // 顺带钉住：禁用行必须带 source —— 客户端的分组/作用域标签/药丸全靠它。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-host-'))
+  const agentsHome = join(base, 'agents-home')
+  const skillsRoot = join(agentsHome, 'skills')
   await mkdir(join(skillsRoot, 'visible'), { recursive: true })
   await writeFile(join(skillsRoot, 'visible', 'SKILL.md'), '---\nname: visible\ndescription: v\n---\n\n正文\n')
   await mkdir(join(skillsRoot, 'hidden'), { recursive: true })
   await writeFile(join(skillsRoot, 'hidden', 'SKILL.md.disabled'), '---\nname: hidden\ndescription: h\n---\n\n正文\n')
   try {
-    const ctx = skillsHost({
-      skills: {
-        async list() {
-          return [{
-            name: 'visible',
-            description: 'v',
-            invocation: {},
-            source: 'user-agents',
-            provider: 'filesystem',
-            path: join(skillsRoot, 'visible', 'SKILL.md'),
-            resourceBase: { kind: 'directory', path: join(skillsRoot, 'visible') },
-          }]
-        },
+    const ctx = {
+      // 宿主目录里一个技能都看不见（全被停用了）
+      get: (name) => (name === 'skills' ? { list: async () => [] } : undefined),
+      loader: {
+        entries: () => [{
+          options: {
+            name: '@deepseek-ai/dsh-skill-filesystem',
+            config: { dshHome: join(base, 'dsh-home'), agentsHome },
+          },
+        }],
       },
-    })
+    }
     const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
-    assert.deepEqual(result.skills.map((row) => row.name), ['visible'])
-    // 宿主看不见的那条必须由本插件扫出来，并且带上可操作的目标。
-    assert.deepEqual(result.disabled.map((row) => row.name), ['hidden'])
-    assert.equal(result.disabled[0].root, skillsRoot, '禁用行必须带它所在的根，否则无法启用')
-    assert.equal(result.disabled[0].disabled, true)
+    assert.deepEqual(result.skills, [], '宿主目录里看不到任何技能（前提）')
+    assert.deepEqual(result.disabled.map((row) => row.name), ['hidden'], '全停用的根也必须被扫到')
+    const [row] = result.disabled
+    assert.equal(row.root, skillsRoot, '禁用行必须带它所在的根，否则无法启用')
+    assert.equal(row.source, 'user-agents', '禁用行必须带来源：客户端的分组与作用域标签靠它')
+    assert.equal(row.disabled, true)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(base, { recursive: true, force: true })
   }
 })
 
-test('reads one skill body through the host on demand', async () => {
-  const ctx = skillsHost({
-    skills: {
-      async get(name) {
-        if (name !== 'zhanggui') return undefined
-        return {
-          name: 'zhanggui',
-          description: '端到端拥有一个开发请求',
-          invocation: { modelInvocable: true, userInvocable: true },
-          source: 'user-agents',
-          provider: 'filesystem',
-          content: '# 掌柜\n\n正文',
-        }
+test('reads one skill body from the referenced root, on demand', async () => {
+  // 同一个名字可以存在于多个根（同名跨作用域是合法配置）。detail 必须读**引用指向的那个根**，
+  // 而不是宿主按 rank 给的胜者 —— 否则点「被遮蔽」那一行看到的是别人的正文（D8 的精确模型）。
+  // 这里让 user-dsh（rank 400，胜者）与 user-agents（rank 500）各有一份，读后者。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-detail-'))
+  const agentsHome = join(base, 'agents-home')
+  const dshHome = join(base, 'dsh-home')
+  const agentsRoot = join(agentsHome, 'skills')
+  const dshRoot = join(dshHome, 'skills')
+  await mkdir(join(agentsRoot, 'zhanggui'), { recursive: true })
+  await writeFile(join(agentsRoot, 'zhanggui', 'SKILL.md'), '---\nname: zhanggui\ndescription: 端到端拥有一个开发请求\n---\n\n# 掌柜\n\n正文\n')
+  await mkdir(join(dshRoot, 'zhanggui'), { recursive: true })
+  await writeFile(join(dshRoot, 'zhanggui', 'SKILL.md'), '---\nname: zhanggui\ndescription: 另一份\n---\n\n# 另一个根\n')
+  try {
+    const ctx = {
+      get: () => undefined,
+      loader: {
+        entries: () => [{
+          options: {
+            name: '@deepseek-ai/dsh-skill-filesystem',
+            config: { dshHome, agentsHome },
+          },
+        }],
       },
+    }
+    const found = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-agents', root: agentsRoot })
+    assert.equal(found.skill.name, 'zhanggui')
+    assert.match(found.skill.content, /正文/)
+    assert.equal(found.skill.source, 'user-agents')
+    const other = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-dsh', root: dshRoot })
+    assert.match(other.skill.content, /另一个根/, '读的必须是引用指向的那个根，不是 rank 胜者')
+    // 找不到要**报错**而不是返回空对象：面板要区分「没有这个技能」与「读失败」。
+    await assert.rejects(
+      () => SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'nope', source: 'user-agents', root: agentsRoot }),
+      /nope/,
+    )
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('importSkill lands in the referenced root and refuses a read-only one', async () => {
+  // 网关层的导入路径（`skillsManager/importSkill`）：落点只认引用，只读根一律拒。
+  // 这条补的是「变更类 RPC 零用例」的缺口——之前只有 skillHubInstall 被端到端跑过。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-import-rpc-'))
+  const agentsHome = join(base, 'agents-home')
+  const bundled = join(base, 'bundled')
+  const source = join(base, 'to-import')
+  await mkdir(source, { recursive: true })
+  await writeFile(join(source, 'SKILL.md'), '---\nname: imported-by-rpc\ndescription: 来自 RPC 的导入\n---\n\n正文\n')
+  const ctx = {
+    get: () => undefined,
+    loader: {
+      entries: () => [{
+        options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome: join(base, 'dsh-home'), agentsHome, bundledSkillDir: bundled } },
+      }],
     },
-  })
-  const found = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui' })
-  assert.equal(found.skill.name, 'zhanggui')
-  assert.match(found.skill.content, /正文/)
-  // 找不到要**报错**而不是返回空对象：面板要区分「没有这个技能」与「读失败」。
-  await assert.rejects(
-    () => SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'nope' }),
-    /nope/,
-  )
+  }
+  const root = join(agentsHome, 'skills')
+  try {
+    const result = await SkillsManagerGateway.prototype.importSkill.call({ ctx }, {
+      source: 'user-agents',
+      root,
+      type: 'directory',
+      path: source,
+    })
+    assert.equal(result.name, 'imported-by-rpc')
+    assert.equal(existsSync(join(root, 'imported-by-rpc', 'SKILL.md')), true)
+    // 只读根（bundled）：即使载荷里没有任何 writable 字段也必须被拒
+    await assert.rejects(
+      () => SkillsManagerGateway.prototype.importSkill.call({ ctx }, {
+        source: 'bundled',
+        root: bundled,
+        type: 'directory',
+        path: source,
+      }),
+      /只读/,
+    )
+    assert.deepEqual(await readdir(bundled), [], '内置根不得被写入')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
 })
 
 test('reports the license gate and risk disclosure for catalog entries', async () => {
