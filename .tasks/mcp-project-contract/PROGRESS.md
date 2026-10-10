@@ -1,12 +1,33 @@
 # Progress
 
 - Shape: durable
-- FinalizationStatus: **delivered**（v1.5.1 已发布：npm + GitHub Release）
-- Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由本轮真机复核替代完成，见下）
+- FinalizationStatus: **delivered**（v1.5.2 已发布：npm + GitHub Release）
+- Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由第三轮真机复核替代完成，见下）
 - Workspace: 已并入 `main`（`fbcf22d`）；worktree 保留在 D:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract
-- Commits: 主体链见 `git log`；最近三轮为 **737ad85（折进未发布的 v1.5.0：更新卡片 + Release notes）**、**fbcf22d（第二轮审查 5 条处置）**、**190a1ad（第三轮审查处置：三条规则各收敛到一个表达点）** 与 **b5cdfc0（v1.5.1 发布）**
-- Latest validation: `main` 上 `node --test` = **301 tests / 301 pass / 0 fail**；CI（ci run 38056945305）success；release run 38056957009 success
+- Commits: 主体链见 `git log`；最近两轮为 **190a1ad（第三轮审查处置）→ b5cdfc0（v1.5.1 发布）** 与 **44fe85d（第四轮审查处置 + 用户当场发现的勾选列表布局缺陷 + v1.5.2 发布）**
+- Latest validation: `main` 上 `node --test` = **304 tests / 304 pass / 0 fail**；CI（ci run 38063936834）success；release run 38063943578 success
 - Next: 无。后续如需改动请从 `main` 开新分支
+
+## 第四轮独立审查（只读）与 v1.5.2 发布（2026-10-10）
+
+审查范围 `f21196e..539c206`（当前 main，含功能提交 `17c9f5d` 与第三轮重构 `190a1ad`），结论 **fixes-required**：无 Critical、4 条 Important。用户在真机复核期间另当场发现一条界面缺陷（复制弹框的勾选列表挤成一团），一并修掉。
+
+| 发现 | 判定 | 处置 |
+|---|---|---|
+| **I1** 重要：客户端预览可以落后于当前选择——effect 只靠 cleanup 的 `cancelled` 拦「谁写状态」，不拦「手上这份计划是不是当前选择的」；在新预览返回前点确认，就是文档承诺「不会出现」的「预览说跳过、实际却覆盖」 | **接受** | `copyPlanKey`（把输入压成可比较的键）+ `copyPlanReady`（确认按钮的唯一准入条件 = 当前选择已有一份**成功**的计划）；计划与输入一起存，过时即失效、按钮不可按 |
+| **I2** 重要：`planMerge` 的注释与 `docs/design.md` 都声称「三条写盘路径都走它」，而全局导入走的是 `updateManagedMcpPatch`（profile patch 形态）——把「已收敛」写在注释里，实际还留着一份 | **接受** | 不改代码：两种形态操作的对象不同（整份 JSON vs 带 entry id 的增量），硬合一会丢结构；改成如实描述「判定只有一份（`classifyMerge`），物化有两份」，并点明改同名语义时两处都要动 |
+| **I3** 重要/测试：`resolveWorkspaceCopy` 里的目标校验对 copy 路径是死代码（写门先拦），它唯一真正生效的**预览**路径没有任何用例——实测删掉那行校验，全仓 301 条全绿 | **接受** | 预览单独钉一条；用例里的「未注册目录」改成真实存在的目录，「注册过」与「目录存在」由此可区分 |
+| **I4** 重要/测试：导出往返用例对「对称丢失」免疫（某类条目整体蒸发时两边一起少、深比较照样相等），`count` 又来自 `config.servers.length` | **接受** | 补断言：导出文档的键集合 + http 条目逐字段 |
+| **M5-M6** 次要：`docs/json-import.md` 把写路径授权说成「只按路径**字面值**写」（代码与另两处文档都是「只按 **canonical** 路径写」）；`docs/installation.md` 的 tag 示例停在 v1.4.0、且 `git tag -a v1.5.1 -m "v1.5.0 ..."` 版本自相矛盾 | **接受** | 前者抄 design.md 的措辞；后者订正——顺带被证实：`git tag --format` 显示 v1.5.1 的注解真的就是 `v1.5.0 ...` |
+| **M7-M8** 次要：`README.md` 的复制结果文案漏「覆盖」（EN 版有）；`planMerge` 注释说 incoming 重名「只认第一条」而 `new Map(...)` 实际留最后一条 | **接受** | README 补词；重名规则收进 `firstByName` 一处表达（与 `import-admission` 同一取舍） |
+| **M9** 次要：Typert 三边契约的护栏两边都 `sort()` 再比，顺序漂移测不出来（`index.js` 的装饰器静态块确实把 source-import 三个方法排在末尾） | **接受** | 装饰器块顺序对齐 typert 与客户端；护栏改成顺序敏感的三边比对 |
+| **M10-M11** 次要：mtime 断言依赖文件系统时间戳分辨率且无正控；`docs/design.md` 把回传面说小了 | **接受** | mtime 改哨兵时间戳 + 正控（真写一次必须让哨兵前移）；design.md 补计数与客户端侧不变量 |
+| **用户当场发现**：复制弹框的勾选列表挤成一团（`☑alphastdio`），名字与传输类型都贴在一起 | **接受** | 根因是字段标题用**后代**选择器 `.dsh-mcp-field label`，特异性 (0,1,1) 压过行自己的 `.dsh-mcp-check-row` (0,1,0)，把 `display:flex` 压成 `block`（`gap` 与 `margin-left:auto` 双双失效）。改成 `.dsh-mcp-field>label`（只作用于字段自己的标题）并加一条棘轮；真机实测间距 0px/0px → 8px/7px |
+| **第三轮遗留待确认项**：`env`/`headers` 的键是否也覆盖到了 `setOwn` 纪律 | **接受** | 四跳断言（内部配置 → 落盘 → 读回 → 下发 mcp-client）：`workspace-config.js` 的 `mapValues`、`mcp-config.js` 与 `toMcpClientConfig` 都是 own property |
+
+**真机复核（用户要求「功能必须真的能用」，且本次碰了 `lib/client.js`，按 `docs/installation.md` 在打 tag 之前做）**：为避免污染真实数据，用**隔离 `DSH_HOME`** 起真 Web 实例（`profiles` 经 junction 复用已 link 到本工作树的 uitest profile，`storages` 全新，自造两个临时工作区 `iso-a`/`iso-b`）。逐项结果：面板与全局 MCP 真连接（`exa`，2 工具）正常；复制对话框未选目标时「复制」不可按；选目标后预览给出 `新增：alpha、gamma / 跳过同名：beta` 且按钮变可用；切「覆盖」预览立即重算；确认后落盘 `beta` 原样保留、`alpha`/`gamma` 追加、键顺序 existing→新增，`${TOKEN}` 模板与 `idleTimeoutMs`/`disabled` 原样过关；再复制并选「覆盖」→ `覆盖 3 条（beta、alpha、gamma）`；只勾同名 + 跳过 → `未改动任何配置（跳过 1 条：beta）` 且 mtime 逐字节不变；选空 → 报「没有选中任何要复制的 MCP」且按钮保持不可按；导出给出文件形态 JSON（无 `!!js`、`${TOKEN}` 保持引用）；控制台无 error/warn。CSS 修复用 `getComputedStyle` + 几何量核对，并确认未波及字段标题、编辑弹框单选行、`.dsh-mcp-input-action` 里的输入框。环境已还原：临时目录删除、junction 只删链接、端口释放、`~/.dsh/storages/workspace.json` 的 SHA256 与动手前完全一致（`A2ABD854…AED7`，仍是 7 个工作区）。
+
+**发布（v1.5.2）**：提交 `44fe85d`（15 个文件，+250/−60）。1.5.1 已发布且 tag 不可变，所以这批走 **1.5.2**；发布闸门（`whats-new` 末条 == `package.json`、`.github/release-notes/v1.5.2.md`、README/README.en/docs 的版本与 tag 引用、两处版本断言）同步后 `npm test` = **304 pass**（1.5.1 基线 301，本轮 +3）。四条新/加强的护栏逐条验证过「破坏即变红」并逐字节还原：字段标题选择器、Release notes 稿子、whats-new 末尾条目、预览的目标校验。CI：ci run `38063936834` success（30s）；release run `38063943578` success（39s：tag==version → 装依赖 → 测试 → publish → Release）。npm 上 `+ dsh-mcp-manager-ui@1.5.2`（带 provenance，sigstore 已收录）；初查 `npm view` 仍是 1.5.1、注册表原文也没有 1.5.2，约 2 分钟后（15:33:54）可见——npm 自己回了「being processed and may take a few minutes」。`releases/latest` 现在返回 `v1.5.2`，所以面板的更新横幅与「一键升级」对 1.5.1 用户已经生效。
 
 ## 第三轮独立审查（只读）与 v1.5.1 发布（2026-10-10）
 
