@@ -398,15 +398,21 @@ test('copyWorkspaceServers leaves the target file untouched when everything is s
 
 test('copyWorkspaceServers rejects an empty selection and a malformed names payload', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
-  const fixture = await createHostFixture('[]\n', [{ title: 'proj-a' }], [], ['proj-b'])
+  const fixture = await createHostFixture('[]\n', [{ title: 'proj-a' }], [], ['proj-b', 'proj-c'])
   try {
     const gateway = { ctx: fixture.ctx }
     const target = fixture.extraWorkspaces['proj-b']
     await mkdir(join(fixture.wsRoot, '.dsh'), { recursive: true })
     await writeFile(configPath(fixture.wsRoot), JSON.stringify({ mcpServers: { alpha: { command: 'node' } } }))
 
+    // 「这次一条都没勾」与「源里本来就没有」是两件事：报同一句话会把用户指向错误的方向
+    //（源项目里明明有 MCP，却被告知"源工作区没有可复制的 MCP"）。
     await assert.rejects(
       McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: target, names: [] }),
+      /没有选中任何要复制的 MCP/,
+    )
+    await assert.rejects(
+      McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.extraWorkspaces['proj-c'], to: target }),
       /源工作区没有可复制的 MCP/,
     )
     await assert.rejects(

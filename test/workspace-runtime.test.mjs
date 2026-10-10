@@ -181,7 +181,13 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {}, idle
       },
       get: (name, scope) => (scope !== undefined ? scopedTools.get(scope)?.get(name) : undefined),
     },
-    get(name) { if (name === 'agents') return agentsService; if (name === 'tools') return ctx.tools; return undefined; },
+    get(name) {
+      if (name === 'agents') return agentsService;
+      if (name === 'tools') return ctx.tools;
+      // 项目级写路径要求目标是已注册的工作区：真实宿主里这个项目就是被打开的那个。
+      if (name === 'workspaceRegistry') return { list: () => [{ path: wsRoot, title: 'ws' }] };
+      return undefined;
+    },
     // 与 cordis 一致：注销时监听器真的从表里消失（否则「卸载后不该再收到事件」这类断言是假的）。
     on(event, handler) { handlers[event] = handler; return () => { if (handlers[event] === handler) delete handlers[event] } },
     effect: makeEffect([effects]),

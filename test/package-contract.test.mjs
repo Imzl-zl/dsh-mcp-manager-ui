@@ -339,20 +339,27 @@ test('client preserves prototype-shaped header and env keys entered in the form'
 })
 
 test('client moves focus into dialogs so Escape handlers receive keyboard events', () => {
-  assert.match(client, /dialogRef\.current\?\.focus\(\)/)
   assert.match(client, /panelRef\.current\?\.focus\(\)/)
   assert.match(client, /e\.stopPropagation\(\)/)
-  // 上面三条是整文件正则：新增一个「有 Escape 处理器但没把焦点吸进来」的对话框照样能过，
-  // 而那正是实测过的故障形态——焦点留在面板里的按钮上，Esc 冒泡到面板，按一次把面板和对话框
-  // 一起关掉（侧栏入口形态下则是毫无反应）。所以再加一组结构化计数当护栏。
-  const modalDialogs = client.match(/ref: dialogRef, className: 'dsh-mcp-modal[^}]*role: 'dialog'[^}]*Escape/g) || []
-  const refs = client.match(/ref: dialogRef/g) || []
-  const decls = client.match(/const dialogRef = useRef\(null\)/g) || []
-  const focuses = client.match(/dialogRef\.current\?\.focus\(\)/g) || []
-  assert.ok(modalDialogs.length >= 5, `modal 对话框数量变了（现在 ${modalDialogs.length} 个），先核对这组断言`)
-  assert.equal(refs.length, modalDialogs.length, '每个 modal 对话框都要绑 dialogRef')
-  assert.equal(decls.length, refs.length, '每个 dialogRef 都要有对应的 useRef 声明')
-  assert.equal(focuses.length, refs.length, '每个 dialogRef 都要在打开时把焦点吸进来')
+  // 面板里的每个 modal 对话框都通过 Dialog 构造器渲染，而焦点契约（ref + 打开即 focus + role +
+  // tabIndex + Escape）就在那个构造器里。所以这里不数"写了 dialogRef 的对话框有几个"——那种计数
+  // 只统计已经写对的那些，漏写 ref 的新对话框照样能过（实测过：把一段无 ref 的 modal 拼进源码，
+  // 四个相等断言全绿）。改成从**渲染站点**出发：手写 role="dialog" 的地方只允许三处已知的例外，
+  // 新增第四处必须显式改这条断言，而不是悄悄绕过焦点契约。
+  const dialogSites = [...client.matchAll(/role: 'dialog'/g)].length
+  assert.equal(dialogSites, 3, `手写的 role="dialog" 从三处变成了 ${dialogSites} 处：Dialog 构造器 / 面板本体 / 更新卡片之外不应再有`);
+  const dialogCtor = client.slice(client.indexOf('const Dialog = ('), client.indexOf('const CONTROLS_THRESHOLD'))
+  assert.match(dialogCtor, /const dialogRef = useRef\(null\)/)
+  assert.match(dialogCtor, /useEffect\(\(\) => \{ dialogRef\.current\?\.focus\(\); \}, \[\]\)/, 'Dialog 必须在挂载时把焦点吸进来（挂载即打开）')
+  assert.match(dialogCtor, /role: 'dialog'/)
+  assert.match(dialogCtor, /tabIndex: -1/)
+  // 五个 modal 全部走构造器；有任何一个回去手写内层 div，这里就会掉下来。
+  const uses = [...client.matchAll(/h\(Dialog, \{ label: /g)].length
+  assert.equal(uses, 5, `走 Dialog 的对话框数量变了（现在 ${uses} 个）`)
+  assert.equal((client.match(/className: 'dsh-mcp-modal' \+ \(cls/g) || []).length, 1, 'modal 的 class 组合只该在 Dialog 里做一次')
+  // 遮罩由调用点渲染一次（五个 modal + 更新卡片自己那层，共六处）。Dialog 内部再套一层就会
+  // 嵌套出两个 overlay——实测踩过，所以钉住。
+  assert.equal((client.match(/className: 'dsh-mcp-overlay'/g) || []).length, 6, '遮罩只在调用点渲染，Dialog 不重复套一层')
 })
 
 test('every Host Remote has a Typert contract entry, and vice versa', async () => {
@@ -364,6 +371,24 @@ test('every Host Remote has a Typert contract entry, and vice versa', async () =
   const contract = TYPERT.invocations.map((entry) => entry.method)
   assert.ok(declared.length >= 30, `从 index.js 读到的 Remote 数量异常（${declared.length}）`)
   assert.deepEqual([...declared].sort(), [...contract].sort())
+})
+
+test('every workspace write goes through the one registered-target gate', async () => {
+  const runtime = await readFile(new URL('../lib/workspace-runtime.js', import.meta.url), 'utf8')
+  // 「本插件只写自己认识的工作区」这条不变量只表达一次：所有会落盘 <工作区>/.dsh/mcp.json 的
+  // Remote 都从 withRegisteredWorkspaceWrite 过。少一条在功能上完全看不出来（写照样成功），
+  // 所以钉成结构断言——新增写路径时它必须自己走进这道门。
+  assert.equal((hostIndex.match(/withWorkspaceWrite\(/g) || []).length, 0, 'index.js 不得绕过授权直接用裸的写锁')
+  const gated = (hostIndex.match(/withRegisteredWorkspaceWrite\(/g) || []).length
+  const writes = (hostIndex.match(/writeWorkspaceConfigFile\(/g) || []).length
+  assert.ok(writes >= 7, `写盘调用点数量变了（现在 ${writes} 个），先核对这组断言`)
+  assert.equal(gated, writes, '每个写盘调用点都必须经过已注册工作区校验')
+  // 注册表只在一处取用：再写一份 ctx.get('workspaceRegistry') 就等于又出现一份"哪些目录算工作区"。
+  // 注释里提到这个表达式是正常的（说明原理），所以只数非注释行。
+  const runtimeCode = runtime.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+  assert.equal((runtimeCode.match(/get\(["']workspaceRegistry["']\)/g) || []).length, 1)
+  // 裸写锁不再对外导出：绕过授权的那条路在模块边界上就不存在，而不只是"我们不这么写"。
+  assert.doesNotMatch(runtime.slice(runtime.lastIndexOf('export {')), /withWorkspaceWrite/, '唯一的写入口是 withRegisteredWorkspaceWrite')
 })
 
 test('client Remote contract includes JSON preview and import operations', () => {
@@ -395,7 +420,7 @@ test('client places an explicit selectable builtin installer before manual add',
   assert.match(client, /安装选中/)
   // 市场形态：搜索是主操作、分类 chips、卡片网格、逐条安装、以及「已配置」时可移除。
   // 这几条一起把「市场」与旧的「勾选列表」区分开——少任何一条都会退回列表框。
-  assert.match(client, /className: 'dsh-mcp-modal dsh-mcp-market'/)
+  assert.match(client, /h\(Dialog, \{ label: 'MCP 市场', cls: 'dsh-mcp-market', onClose: dismiss \}/)
   assert.match(client, /\.dsh-mcp-market-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
   assert.match(client, /\.dsh-mcp-market-chips\{[^}]*overflow-x:auto/)
   assert.match(client, /className: 'dsh-mcp-chip'/)
