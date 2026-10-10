@@ -1,12 +1,30 @@
 # Progress
 
 - Shape: durable
-- FinalizationStatus: **delivered**（v1.5.0 已发布：npm + GitHub Release）
+- FinalizationStatus: **delivered**（v1.5.1 已发布：npm + GitHub Release）
 - Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由本轮真机复核替代完成，见下）
 - Workspace: 已并入 `main`（`fbcf22d`）；worktree 保留在 D:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract
-- Commits: 主体链见 `git log`；本轮为 **737ad85（折进未发布的 v1.5.0：更新卡片 + Release notes）** 与 **fbcf22d（第二轮审查 5 条处置）**
-- Latest validation: `main` 上 `node --test` = **283 tests / 283 pass / 0 fail**；CI（ci run 37722369463）success；release run 37722426672 success
+- Commits: 主体链见 `git log`；最近三轮为 **737ad85（折进未发布的 v1.5.0：更新卡片 + Release notes）**、**fbcf22d（第二轮审查 5 条处置）**、**190a1ad（第三轮审查处置：三条规则各收敛到一个表达点）** 与 **b5cdfc0（v1.5.1 发布）**
+- Latest validation: `main` 上 `node --test` = **301 tests / 301 pass / 0 fail**；CI（ci run 38056945305）success；release run 38056957009 success
 - Next: 无。后续如需改动请从 `main` 开新分支
+
+## 第三轮独立审查（只读）与 v1.5.1 发布（2026-10-10）
+
+审查范围 `f21196e..17c9f5d`（跨工作区复制 + 项目配置导出），结论 **fixes-required**：无 Critical，3 条 Important 是同一个病——**同一条规则在两处各写了一遍**，再用注释/断言保证它们一致。处置方式是把「一致」改成由结构保证（提交 `190a1ad`），不给局部补丁。
+
+| 发现 | 判定 | 处置 |
+|---|---|---|
+| **I1** 重要/架构：合并结果有两份实现（一个出 servers、一个出名字清单），导入路径报告的 `updated` 与真正落盘的 servers **不同源、连顺序都不同**（实测 `['gamma','alpha']` vs `['alpha','gamma']`） | **接受** | `classifyMerge`（唯一名字规则）+ `planMerge(existing, incoming, { replaceAll, onExisting })`（唯一落盘形态），三条写盘路径全走它 |
+| **I2** 重要/测试：新增的 `dialogRef` 护栏是**自指**的——只统计已经写了 `dialogRef` 的对话框，所以它声称要拦的「新对话框漏了焦点」照样能过（内存探针实测四个断言全绿） | **接受** | 抽出 `Dialog` 构造器（焦点契约只有一份实现），断言改成从渲染站点出发 + 数遮罩层数；两种破坏形态都验证过变红 |
+| **I3** 重要/架构：写边界只钉在 7 条写路径中的 1 条上（另 6 条按客户端给的路径直接写），而文档把这道门描述成安全边界 | **接受** | `withRegisteredWorkspaceWrite` 成为唯一入口（7/7），`withWorkspaceWrite` 不再对外导出；注册表访问同收一处；文档改成「不是复制专有的」 |
+| **M1** 次要：`setOwn` 的注释声称「所有按用户可控名字建映射的地方都必须用它」，但工具计数与日志脱敏仍是普通赋值（名叫 `__proto__` 的 serverName 会让面板永远报「未连接」、脱敏静默丢键） | **接受** | 抽出 `lib/own-property.js`（收掉宿主侧 4 份定义）并补齐这两处——让声明成真，而不是削弱声明；两条回归用例 |
+| **M2** 次要：空选择与「源里本来没有」报同一句话 | **接受** | 两种事实分开报，两条都进测试 |
+| **M3-M6** 次要：无 await 的 `async`、冗余的 `planSeq`、`overwrite` 下同内容也重写（文档未说明）、导出的「只在项目作用域」是入口性质而非 Host 强制 | **接受** | 删前两个；后两个写进 `docs/design.md` 让文档成真（不改语义） |
+| **M7** 次要/测试：复制与注册表查找只在夹具 ctx 下测过 | 部分接受 | 共享的写盘/对齐路径已有真宿主集成用例；本轮补的是真机交互复核（见下），未另加真宿主用例 |
+
+**真机复核（按 `docs/installation.md` 的要求，在打 tag 之前做）**：`uitest` profile（`link:` 到本工作树）起真 Web 实例 19687，先从页面 fetch 实际下发的 plugin bundle 确认拿到的是本次构建（`const Dialog =` 在、`role:'dialog'` 3 处、遮罩 6 处、`h(Dialog` 5 处）。逐项结果：面板入口在位；`添加 MCP` / `导入 MCP` / `导出项目 MCP` / `复制项目 MCP` 四个弹框的 `document.activeElement` **都真的是弹框本体**、单层遮罩、`role=dialog` + `tabIndex=-1`；**真实 CDP 按键** Esc 只关弹框、面板仍在（这正是上一轮修的故障形态）；点遮罩同样只关弹框；导入弹框真扫到本机 5 份客户端配置；导出弹框跑到真 RPC，textarea 拿到 `{"mcpServers":{}}` 且只读、字面凭据警告在场；复制弹框列出 7 个目标、**当前工作区不在目标列表里**、选目标后真调 `previewWorkspaceCopy`；连采 15 次 / 9 秒（跨两个轮询周期）弹框与选择没被重置；控制台无插件错误。**未被真机覆盖**：导出的「下载文件」与复制的实际写入——那需要往真实工作区写 `.dsh/mcp.json`，按约束没做，由夹具宿主用例覆盖。环境已还原：19687 释放、`workspace.json` 未改、四个真实项目下都没有新建 `.dsh/mcp.json`。
+
+**发布（v1.5.1）**：`main` 上三个未发布提交（复制/导出 + 这轮重构）折进 **1.5.1**，1.6.0 留给 skills 那边的统一版。发布闸门（`whats-new` 最后一条 == `package.json`、`.github/release-notes/v1.5.1.md`、README/README.en/docs 的版本与 tag 引用、`package-contract` 与 `package-artifact` 两处版本断言）同步后 `npm test` = **301 pass**。CI：ci run `38056945305` success；release run `38056957009` success（Publish 带 provenance 并已发到 sigstore；Release 页面用手写稿）；npm 上 `+ dsh-mcp-manager-ui@1.5.1`（`npm view` 初查还是 1.5.0，是 registry 复制延迟，约 1 分钟后可见）。
 
 ## 发布与真机复核（2026-10-08）
 
