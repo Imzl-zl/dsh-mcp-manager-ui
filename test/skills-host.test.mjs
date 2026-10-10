@@ -24,7 +24,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SkillsManagerGateway } from '../lib/index.js'
-import { resetSkillsSearchCache } from '../lib/skills-remote.js'
 
 const hostIndex = readFileSync(fileURLToPath(new URL('../lib/index.js', import.meta.url)), 'utf8')
 
@@ -206,55 +205,6 @@ test('the handover probe requires both mcp and manager in the name', async () =>
     }
     assert.equal(await SkillsManagerGateway.prototype.conflictingManager.call({ ctx }), null,
       `${entry.name} 不含 mcp+manager 两段，不得被判成冲突（否则面板打不开）`)
-  }
-})
-
-test('searchRemote exposes the skills.sh search through the host with an allowlist', async () => {
-  // SPEC 约束 11：内置目录是首屏，远端搜索只是**补充**。所以这个方法：
-  //   · 必须在没有网络时静默降级（返回空 + 说明），不能抛错；
-  //   · 白名单 owner 过滤在**库层**完成（约束 9），宿主只负责透传。
-  //
-  // ⚠️ 每条用例都要先 resetSkillsSearchCache()：库层有 5 分钟缓存，而两条用例用的是
-  // 同一个查询串——不清缓存时第二条会命中第一条的结果，「离线降级」那条就永远测不到
-  // 真正的网络路径（实测踩到：它拿到的是上一条的缓存值）。
-  resetSkillsSearchCache()
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    async json() {
-      return {
-        skills: [
-          { id: 'obra/superpowers/tdd', source: 'obra/superpowers', skillId: 'tdd', name: 'tdd', installs: 5 },
-          { id: 'fake/superpowers/tdd', source: 'fake-owner/superpowers', skillId: 'tdd', name: 'tdd', installs: 900 },
-        ],
-        count: 2,
-      }
-    },
-  })
-  try {
-    const ctx = skillsHost({})
-    const result = await SkillsManagerGateway.prototype.searchRemote.call({ ctx }, { query: 'tdd' })
-    // 仿冒同名必须被挡掉，只留白名单里的那个。
-    assert.deepEqual(result.skills.map((row) => row.source), ['obra/superpowers'])
-  } finally {
-    globalThis.fetch = originalFetch
-    resetSkillsSearchCache()
-  }
-})
-
-test('searchRemote degrades instead of throwing when the network is broken', async () => {
-  resetSkillsSearchCache()
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => { throw new Error('offline') }
-  try {
-    const ctx = skillsHost({})
-    const result = await SkillsManagerGateway.prototype.searchRemote.call({ ctx }, { query: 'tdd' })
-    assert.deepEqual(result.skills, [])
-    assert.equal(typeof result.degraded, 'string', '降级必须说明原因，供 UI 显示「仅内置目录」')
-  } finally {
-    globalThis.fetch = originalFetch
-    resetSkillsSearchCache()
   }
 })
 
@@ -485,17 +435,4 @@ test('importSkill lands in the referenced root and refuses a read-only one', asy
   }
 })
 
-test('reports the license gate and risk disclosure for catalog entries', async () => {
-  // 市场数据必须离线可用（SPEC 约束 11），故 market 直接返回内置目录，
-  // 且每条都带许可判定与风险披露（安装确认弹窗要用）。
-  const result = await SkillsManagerGateway.prototype.market.call({ ctx: skillsHost({}) }, {})
-  assert.ok(Array.isArray(result.skills) && result.skills.length > 0)
-  const docx = result.skills.find((entry) => entry.name === 'docx')
-  assert.ok(docx, '目录里应有 anthropics/skills 的 docx（用于展示许可门禁）')
-  assert.equal(docx.installable, false, 'docx 必须不可安装')
-  assert.equal(typeof docx.licenseReason, 'string')
-  // 分类顺序与标签必须随数据一起带给面板（面板是预构建 bundle，读不到 lib 常量）。
-  assert.deepEqual(result.categoryOrder, ['docs', 'dev', 'process', 'design', 'agent', 'data', 'infra', 'writing'])
-  assert.equal(typeof result.categoryLabels, 'object')
-  assert.equal(result.categoryLabels.docs, '文档处理')
-})
+

@@ -133,8 +133,10 @@ test('client descriptors carry both codec channels, including the skills namespa
     }
     // 反向下限：skills 的 descriptor 确实在里面，否则上面的循环对它们空转也会「通过」。
     // 数量必须与 lib/typert.js 的 skills 条目数一致（typert-manifest 会独立核对那一边）。
+    // 11 = 13 − 2：内置精选目录（market）与 skills.sh 补充搜索（searchRemote）随市场只留
+    // skillhub.cn 一起下线，三条契约边同时删，所以这里的数字跟着降。
     const skills = contribution.descriptors.filter((descriptor) => descriptor.namespace === 'skillsManager')
-    assert.equal(skills.length, 13, `客户端的 skills descriptor 应为 13 条，实际 ${skills.length}`)
+    assert.equal(skills.length, 11, `客户端的 skills descriptor 应为 11 条，实际 ${skills.length}`)
     await dispose()
   } finally {
     cleanup()

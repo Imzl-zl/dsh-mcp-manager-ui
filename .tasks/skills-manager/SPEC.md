@@ -10,6 +10,14 @@
 Retired-ids: D3, D4
 （这两个号来自已删除的 `DESIGN.md`，内容随该文件消失、未进入本 SPEC。任何引用它们的文字都是**过期引用**：按名字重新定位，不要去找 D3/D4。`test/tasks-spec-integrity.test.mjs` 读这一行，所以格式不能改。）
 
+## 撤回记录
+
+**2026-10-10 撤回：内置精选目录与 skills.sh 补充搜索整条线下线，市场只留 skillhub.cn。**
+两条原因：① skillhub.cn 上游已有的技能足够多，自维护一份精选清单不再值得；② 内置精选目录的数据里**没有可固定的 commit/tag**，只能抓默认分支、不可复现，所以它本来就做不成可复现的安装来源（Non-goals 里那条待办随之取消）。
+随之删除：目录数据与生成器、目录产物、许可门禁模块、skills.sh 远端搜索模块，以及契约三边对应的 `market` / `searchRemote` 两条端点（各剩 11 条）；宿主侧的 skills.sh 白名单（`REMOTE_SKILL_ALLOWLIST`）一并删除。
+被撤回的条目（原编号与大意**保留**，就地标「已撤回」，不重写历史）：**D6**、**D12**、**约束 8**（含其三条子项）、**约束 9**、**约束 18** 里「来源默认内置精选」那一句、Non-goals 里「内置精选的一键安装」一条、Final validation 第 2 条里的「许可门禁拒绝」与「市场远端过滤」。
+**撤销的是闸门，不是披露纪律**：许可门禁随目录一起下线；外部源本来就不做许可判定（约束 17）——安装前仍要摆出发布方认证、安全扫描结论与是否需 API Key，并要一次**显式确认**。
+
 **Goal:** 在 `dsh-toolbox-ui` 这条产品线里新增 Skills 能力面（管理 + 市场），与既有 MCP 能力并列；`main` 上的 `dsh-mcp-manager-ui` 保持 MCP-only 并继续维护。
 
 **Decisions:** 设计阶段确认；R1 追加 D19。「决定者」＝该决定由谁拍板：`user` 表示用户拍板、改动须重新经用户确认；`model` 表示模型在授权范围内确定、用户可推翻；`待确认` 表示尚未取得该确认。这 18 行**不是**「都经用户确认」——原表头那么写是错的。
@@ -21,19 +29,19 @@ Retired-ids: D3, D4
 | D2/D9 | 改名为新包；**旧包不 deprecate**，`main` 保持 MCP-only 并继续维护（两条线并行） | user |
 | D2b | 市场安装**跟随当前选中的作用域**，不每次询问 | user |
 | D5 | `extractPanelCss` 改为支持多 `*_CSS` 常量（已实施） | model |
-| D6 | 市场以**内置精选目录**为主，skills.sh 作搜索补充 | user |
+| D6 | ~~市场以**内置精选目录**为主，skills.sh 作搜索补充~~ **已撤回（2026-10-10，见顶部「撤回记录」）**：整条线删除，市场只留 skillhub.cn | user |
 | D7 | IA = 双层分段控件（标题栏：能力层 MCP/技能 → 第二行：模式层 **已安装/发现市场**）；**作用域药丸只在「已安装」出现**；两层都只由外壳渲染一次 | model |
 | D8 | 管理行按（名称 + 作用域）精确操作；新增「被遮蔽 / 非法条目」提示 | model |
 | D10 | 入口维持现状（`shell.overlay` + `sidebar.footer.action`），不用 `sidebar.panellist` | user |
 | D11 | 管理页 = 左列表 + 右详情；市场页 = 卡片网格 | user |
-| D12 | 市场源分档，许可门禁为硬闸门 | model |
+| D12 | ~~市场源分档，许可门禁为硬闸门~~ **已撤回（2026-10-10，见顶部「撤回记录」）**：市场只剩 skillhub.cn 一个来源，许可门禁随内置精选目录一起下线（外部源本就不做许可判定，见约束 17） | model |
 | D13 | **同一代码库双包发布**；MCP 修复走 `git merge` 而非 cherry-pick | user |
 | D14 | 新包名 `dsh-toolbox-ui` | user |
 | D15 | 新包检测到旧包时**主动让位**（须排除自身，见约束 10） | user |
 | D16 | **先做功能，最后改名** | user |
 | D17 | skills 服务作独立子插件（自带 `inject = ["skills"]`），现有 gateway 的 inject 不变 | model |
 | D18 | `SKILLS_CSS` 与 `MCP_CSS` **合并为一次** `__injectCss` 调用 | model |
-| D19 | 市场引入**第二个外部源 skillhub.cn**（宿主侧直连上游、不复用第三方同源路由、不做许可判定）；R1 轮次，见约束 17–19 | user |
+| D19 | 市场引入**第二个外部源 skillhub.cn**（宿主侧直连上游、不复用第三方同源路由、不做许可判定）；R1 轮次，见约束 17–19。**2026-10-10 起它是市场唯一的来源**（内置精选与 skills.sh 已撤回，见顶部「撤回记录」），决策本身不变 | user |
 | D20 | UI 作用域模型＝**「全局 + 各工作区」**（候选项来自实际发现的 source）——**不采用**原型的 `当前项目 / 系统内置` 分段：多个工作区并存时「当前项目」本身有歧义；原型那一行**只对齐外观，不逐字照抄** | user |
 
 **Constraints:**
@@ -49,15 +57,15 @@ Retired-ids: D3, D4
 6. **样式闸门**：新增样式必须并入 `*_CSS` 常量（`extractPanelCss` 已支持多常量）；禁字面色值、禁自造圆角刻度；别名层唯一宿主为 `body`；全圆角同规则补 `corner-shape:round`；等宽只用 `--ds-font-family-code`；抬升面（`--dsw-elevation-*` / `--dsw-shadow-lv*`）**不得再叠中性边框**（elevation 自带 0.5px stroke）；品牌色是单色（`--dsw-alias-brand-primary` 浅 `#0f1115` / 深 `#f9fafb`），蓝色是 `--dsw-alias-state-business-primary`，别混；**每个被渲染出来的类都必须有样式**（有扫描器，拼错类名的表现是「这块没排版」，不像报错那样显眼）。
    - 已有 `@media (prefers-reduced-motion:reduce)` 动效降级并有用例守着，**保留**；`.dsh-mcp-dot.loading` 的呼吸是刻意不关的例外。
 7. **`dsh-mcp-*` 样式前缀保留不改**：它是内部类名，与包名无关；改了会与 `main` 大面积冲突，且 `theme-contract` 的 class 扫描正则写死该前缀。数量只做下界断言（`> 500`），不钉精确值。
-8. **许可门禁是硬闸门，仅适用于内置精选目录**：逐技能判定、**不得按仓库聚合**；白名单（MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/CC0-1.0/Unlicense/0BSD）之外一律 unknown → 不可安装（未声明 = 无授权）；GPL/AGPL **故意不在**白名单（传染性义务由用户自己判断）。
-   - *证据*：`anthropics/skills` 没有顶层 LICENSE（GitHub API 的 `license` 为 `null`），docx/pdf/pptx/xlsx 四者的 `LICENSE.txt` 逐字节相同（1467 B），其 `ADDITIONAL RESTRICTIONS` 禁止「retain copies of these materials outside the Services」，故四者硬阻断；同仓库另有 Apache-2.0 技能可正常安装——逐技能判定由此得到实证。反向风险同样要守：用 BSD-2 / MIT / Apache-2.0 的逐字原文测「不得误杀」，因此**刻意不把 `All rights reserved` 当拒绝特征**（它是 BSD 的标准开头）。
-   - *做法*：`installable` 由生成器调用 `classifyLicense()` 算出，**不写进 YAML**（写进数据会形成第二真相源：改了规则却漏改数据，门禁静默失效）。许可证据优先级＝目录内许可文件 > frontmatter > 未核实，**没有逐技能声明时不得回落到仓库级许可**。
-   - *没有旁路*：内置精选**不提供一键安装**（唯一可安装来源是外部源，见约束 17–19），所以门禁是**构造上**成立的——不存在「许可受限也能勾选装进去」的入口。
-9. **市场来源必须白名单 owner，且形态合法**：skills.sh 的 `source` 实测含仿冒同名（`obra/superpowers` vs `obra/superpowers-skills`）与非 GitHub 值（`smithery.ai/…`、`open.feishu.cn`）。白名单与形态校验是**两道独立的闸**；形态校验不能只看「两段」——`smithery.ai/x` 恰好两段但是域名，故 owner 段必须符合 GitHub 命名法（不含点）。
+8. **已撤回（2026-10-10，见顶部「撤回记录」）：许可门禁是硬闸门，仅适用于内置精选目录**——原规则：逐技能判定、**不得按仓库聚合**；白名单（MIT/Apache-2.0/BSD-2/BSD-3/ISC/MPL-2.0/CC0-1.0/Unlicense/0BSD）之外一律 unknown → 不可安装（未声明 = 无授权）；GPL/AGPL **故意不在**白名单（传染性义务由用户自己判断）。内置精选目录与 skills.sh 删除后这道闸已无适用对象（外部源不做许可判定，约束 17）；以下三条子项一并**已撤回**，原文只作历史与证据保留。
+   - *证据（历史，规则已撤回）*：`anthropics/skills` 没有顶层 LICENSE（GitHub API 的 `license` 为 `null`），docx/pdf/pptx/xlsx 四者的 `LICENSE.txt` 逐字节相同（1467 B），其 `ADDITIONAL RESTRICTIONS` 禁止「retain copies of these materials outside the Services」，故四者硬阻断；同仓库另有 Apache-2.0 技能可正常安装——逐技能判定由此得到实证。反向风险同样要守：用 BSD-2 / MIT / Apache-2.0 的逐字原文测「不得误杀」，因此**刻意不把 `All rights reserved` 当拒绝特征**（它是 BSD 的标准开头）。
+   - *做法（已随本轮删除作废，原文保留）*：`installable` 由生成器调用 `classifyLicense()` 算出，**不写进 YAML**（写进数据会形成第二真相源：改了规则却漏改数据，门禁静默失效）。许可证据优先级＝目录内许可文件 > frontmatter > 未核实，**没有逐技能声明时不得回落到仓库级许可**。
+   - *没有旁路（已撤回）*：内置精选**不提供一键安装**（唯一可安装来源是外部源，见约束 17–19），所以当时门禁是**构造上**成立的——不存在「许可受限也能勾选装进去」的入口；现在这份目录本身已删除。
+9. **已撤回（2026-10-10，见顶部「撤回记录」）：市场来源必须白名单 owner，且形态合法**——这条只针对 skills.sh：它的 `source` 实测含仿冒同名（`obra/superpowers` vs `obra/superpowers-skills`）与非 GitHub 值（`smithery.ai/…`、`open.feishu.cn`）。白名单与形态校验是**两道独立的闸**；形态校验不能只看「两段」——`smithery.ai/x` 恰好两段但是域名，故 owner 段必须符合 GitHub 命名法（不含点）。skills.sh 整条线已删除，本约束随之作废（skillhub.cn 走上游自己的搜索接口，没有 owner 白名单）。
 10. **让位检测（D15）失败时 fail-open，且必须排除自身。**
     - *证据与做法*：fail-open 是刻意的——漏检最坏是两个按钮并存（可自愈），误判则用户**完全打不开面板**（代价不对称），所以 loader 缺失、`entries()` 抛错、返回非数组一律视为无冲突、catch 里不抛。**自身判据只能有一处，用 loader entry 的 `options.id`，不能用 `name`**：本插件自己的 loader `name` 就是 `package.json.name`，按 name 判定必然自伤 → 静默让位 → 面板打不开。名字判据保持保守（须同时含 `mcp` 与 `manager` 两段）。
     - 「让位」的准确含义：不注册会互相遮挡、且都写同一份 profile 配置的**入口**，但**让位提示仍要渲染**，否则用户只看到「装了但什么都没有」。
-11. **面板本身不开新网络依赖；联网只发生在宿主侧**：本插件历史上唯一 HTTP 是 `checkForUpdate()`；市场首屏必须**离线可用**（内置目录随包发布），远端搜索失败必须静默降级。外部源的两条补充规则见约束 18、19。
+11. **面板本身不开新网络依赖；联网只发生在宿主侧**：本插件历史上唯一 HTTP 是 `checkForUpdate()`；市场首屏原为**离线可用**（内置目录随包发布）——**该前提已于 2026-10-10 随目录撤回失效**（见顶部「撤回记录」）：市场只剩 skillhub.cn，技能面一挂载就会发出宿主侧请求，因此**失败必须静默降级**、面板照旧可用。外部源的两条补充规则见约束 18、19。
 12. **UI 不得写死 skill 根路径**：按宿主返回的 `source`（`user-dsh` / `user-agents` / `project-dsh` / `project-agents` / `custom` / `bundled`）显示其真实路径，不得假设某一级存在；作用域选择器的候选项来自**实际发现的 source 集合**，而非硬编码列表。
     - *证据*：同一台机器两次实测——2026-10-08 `~/.dsh/skills`（rank 400）**不存在**、11 个技能全在 `~/.agents/skills`（rank 500）；2026-10-10 复查 rank 400 目录**已存在但为空**。两次观测正好证明规则本身：**不能假设某一级存在或不存在**，判定只能按宿主实际返回的 `source`。
     - *作用域分段的语义按 D20*：用「全局 + 每个工作区」，**不设**「当前项目」「系统内置」两个语义段（`bundled` 以来源标签呈现）。与原型一致的只有外观——**不要**为了逐字对齐原型而改语义。
@@ -66,8 +74,8 @@ Retired-ids: D3, D4
 14. **管理动作不依赖会话**：面板的读取与文件操作都不得要求存在活动会话。官方 `ctx.remote.skills.list` 需要真实 `sessionId` 且会激活冷 Agent，故本插件必须走自己的 RPC。
 15. **第二个服务必须在同一条 patch 条目内挂载**：`cordis.patch.yml` 只有一条 `- id: mcp-manager-ui / name: <包名>`，且 `test/package-contract.test.mjs` 断言该 id 与 name 各出现恰好 1 次、条目总数恰好 1。Cordis 支持子插件挂载（`ctx.plugin(plugin, config)`，`cordis/lib/index.js:1619`），故 `SkillsManagerGateway` 由现有 gateway 的构造函数 `ctx.plugin()` 挂载。`TypertRemoteService` 的构造签名是 `(ctx, serviceKey, options?)`，`serviceKey` 同时是 Cordis 服务键与默认 wire namespace：MCP 用 `mcpManager`，skills 用 `skillsManager`。
 16. **`skills` 不得进入现有插件的 `static inject`**：Cordis 的 `inject` 是**依赖声明**——服务缺失时该 fiber 只保持不激活并等待，**不报错也不激活**（`cordis/lib/index.js` 的 `notify()` → `fiber._refresh()`）。若把 `skills` 加进现有 gateway 的 inject，任何未挂载 `@deepseek-ai/dsh-skill` 的 profile（用户可禁用该内置插件）都会让**整个 MCP 面板一起失效**。现有 gateway 的 `inject` 保持 `["loader","tools"]` 不变，skills 服务作独立子插件自带 `inject = ["skills"]`；客户端取不到 `remote.skillsManager` 时按「技能服务未连接」降级，MCP 面板照常可用。
-17. **外部源（skillhub.cn）不做许可判定**（R1）：上游条目**没有 license 字段**，只有发布方企业认证 `publisher.certifiedName` 与腾讯安全扫描结论 `securityReports.keen/sanbu`——假装能判就是编。外部源安装前必须把发布方认证、安全扫描结论、是否需 API Key 摆出来，明确写出「本插件未核验」，并要求一次**显式确认**（勾选后才可点安装）。内置目录那套闸门（约束 8）不受影响；两个来源在同一个安装弹窗里只有披露块不同。
-18. **外部源直连上游，且由宿主侧发起**（R1）：`api.skillhub.cn` 公开无鉴权，请求由宿主侧发出，面板仍不联网（因此也不存在浏览器 CORS 问题）。首屏依旧离线：来源默认「内置精选」，切到 skillhub.cn 才发请求，且搜索是**显式触发**（切来源/切分类/回车）；任何失败（网络断/超时/5xx/JSON 坏/字段缺失）只在结果区显示一条告警 + 重试，**永不抛错、永不拖垮面板**。
+17. **外部源（skillhub.cn）不做许可判定**（R1）：上游条目**没有 license 字段**，只有发布方企业认证 `publisher.certifiedName` 与腾讯安全扫描结论 `securityReports.keen/sanbu`——假装能判就是编。外部源安装前必须把发布方认证、安全扫描结论、是否需 API Key 摆出来，明确写出「本插件未核验」，并要求一次**显式确认**（勾选后才可点安装）。内置目录那套闸门（约束 8）**已随 2026-10-10 撤回一起下线**（见顶部「撤回记录」）；市场只剩这一个来源，安装弹窗也只服务它。
+18. **外部源直连上游，且由宿主侧发起**（R1）：`api.skillhub.cn` 公开无鉴权，请求由宿主侧发出，面板仍不联网（因此也不存在浏览器 CORS 问题）。首屏依旧离线：~~来源默认「内置精选」，切到 skillhub.cn 才发请求~~ **已撤回（2026-10-10，见顶部「撤回记录」）**：内置精选已删除，skillhub.cn 是唯一来源，技能面一挂载就会发一次搜索与一次分类请求，此后的搜索按「切分类 / 回车」触发；⚠️ **已知偏离（记录于 2026-10-10，未修）**——本地搜索框与市场搜索框共用同一个 `query` 状态，而挂载副作用依赖它，于是在**管理面**击键也会逐次触发上游搜索，与「不随击键打网络」相反；任何失败（网络断/超时/5xx/JSON 坏/字段缺失）只在结果区显示一条告警 + 重试，**永不抛错、永不拖垮面板**。
 19. **不复用第三方插件的同源路由**（R1）：如 `@cocofhu/skillhub` 的 `/skillhub` 是它的私有协议而非宿主契约（它卸载/改版即失效），且那个插件同时握有装/重启 DSH 插件的权限。直连上游另有一条实质好处：**落点由面板选**（复用同一套「安装到」＝全局/项目 × `.dsh`/`.agents`），而不是由上游替用户决定。
 20. **文件动作按 `(name, scope, root)` 精确定位，找不到即报错不回退**（同名跨作用域是合法配置，静默回退会作用到错的目录上——本层最危险的失败模式）；bundled 根拒写。
     - 读-改-写类动作在 `withFileLock` 内做。导入按 **frontmatter 的 `name`** 落盘（宿主身份取自 frontmatter，不是文件/目录名，`dsh-skill-filesystem/lib/index.js:696-704`），否则本层自己的 `resolveSkillTarget(name)` 找不到刚导入的技能；导入前跑完整 frontmatter 诊断（宿主对非法技能只 warn + 跳过，放进来等于装了一条「看不见的技能」）；**先全量校验再落盘**，任何失败都不在用户技能根里留残骸；同名已存在（含 `.md` / `.md.disabled` 各种形态）**拒绝而不覆盖**。
@@ -98,16 +106,16 @@ Retired-ids: D3, D4
 - 不做技能正文编辑（只读展示 + 打开外部预览）
 - 不改 MCP 侧既有行为与配置语义
 - 不在本轮引入 `sidebar.panellist` 全页面板
-- 内置精选的**一键安装**：目录数据里只有 `source` + `path`，**没有可固定的 commit/tag**，抓默认分支不可复现 —— 要做必须先给 110 条补 commit 并实现宿主侧抓取（TODO row 19）。在那之前内置精选只做浏览 + 许可门禁，卡片给出来源与仓库内路径
+- ~~内置精选的**一键安装**：目录数据里只有 `source` + `path`，**没有可固定的 commit/tag**，抓默认分支不可复现 —— 要做必须先给 110 条补 commit 并实现宿主侧抓取（TODO row 19）~~ **已撤回（2026-10-10，见顶部「撤回记录」）**：不做，改为整体删除内置精选目录，市场只留 skillhub.cn；TODO row 19 已改写成只剩「本地导入入口」那一半
 - 面板的本地导入入口（`.md` / 目录 / 压缩包三种形态；宿主 RPC 已支持，同一行 TODO 一起做）
 - 需要新 Host RPC 的能力（备份导出、批量启停、重启服务、Resources/Prompts 投影、frontmatter 自动修复、技能提升/复制）——要做就单独立项并先定契约
 
-**Architecture:** 宿主侧新增独立 `skillsManager` 服务（不复用 `mcpManager` namespace），以 `lib/skills-registry.js` 薄封装宿主 `ctx.skills`，以 `lib/skills-file-ops.js` 承担文件级动作（启停/删除/导入，全部按 `(name, scope, root)` 精确定位、不做回退）；市场数据走「`.tasks/skills-verified.yaml` → `scripts/build-skills-catalog.mjs` → `lib/skills-catalog.js`」的离线生成管线，与 MCP 目录同构。客户端在 `lib/client.js` 内新增 `SKILLS_CSS` 与技能组件，面板顶部加「能力层」枚举（MCP / 技能）复用现有悬浮窗与侧栏入口；`apply()` 先探测旧包是否挂载，命中则只渲染让位提示、不注册入口。
+**Architecture:** 宿主侧新增独立 `skillsManager` 服务（不复用 `mcpManager` namespace），以 `lib/skills-registry.js` 薄封装宿主 `ctx.skills`，以 `lib/skills-file-ops.js` 承担文件级动作（启停/删除/导入，全部按 `(name, scope, root)` 精确定位、不做回退）；市场**不再有随包目录**——唯一来源是 skillhub.cn，由宿主侧直连上游（`lib/skillhub.js`）搜索、取详情与安装，失败只降级（原先那条「目录数据 → 生成器 → 目录产物」的离线管线已于 2026-10-10 整条删除，见顶部「撤回记录」）。客户端在 `lib/client.js` 内新增 `SKILLS_CSS` 与技能组件，面板顶部加「能力层」枚举（MCP / 技能）复用现有悬浮窗与侧栏入口；`apply()` 先探测旧包是否挂载，命中则只渲染让位提示、不注册入口。
 
 **Final validation:**
 
 1. `node --test` 全量通过，0 失败（当次条数记在 `PROGRESS.md` 的 `Latest validation`）。
-2. `node --test test/skills-*.test.mjs` 覆盖：作用域精确定位、非法 frontmatter 诊断、启停重命名、许可门禁拒绝、让位检测、市场远端过滤。
+2. `node --test test/skills-*.test.mjs` 覆盖：作用域精确定位、非法 frontmatter 诊断、启停重命名、让位检测、外部源（skillhub.cn）搜索与安装确认。~~许可门禁拒绝、市场远端过滤~~ **已撤回（2026-10-10，见顶部「撤回记录」）**：随内置精选目录与 skills.sh 下线，对应用例已删。
 3. `node --test test/theme-contract.test.mjs`：`SKILLS_CSS` 被全部主题扫描器覆盖（不得假绿），且真实样式表 0 违规。
 4. `node --test test/client-lifecycle.test.mjs test/typert-manifest.test.mjs test/package-rename.test.mjs`：新增 RPC 两侧契约 deepEqual、过宿主 `validateTypertManifest`、身份耦合点全部落在新包名上。
 5. `node --test test/tasks-spec-integrity.test.mjs`：本 SPEC 的决策 id、约束编号、路径引用与三件套的协议字段可机械解析。

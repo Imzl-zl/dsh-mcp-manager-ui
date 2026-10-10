@@ -522,8 +522,11 @@ test('外部源（skillhub.cn）：安装走同一套落点，但闸门换成披
   assert.match(clientSource, /acknowledged: true,/, '确认必须上 wire，不能只留在客户端')
   assert.match(clientSource, /installTargets\.find\(\(item\) => item\.id === scope\)/,
     '落点必须按安装目标身份解析，不能按 source 取首个')
-  // 内置精选**不得**再出现那条必然失败的安装调用（type:'market' 不在 importSkill 的取值里）
-  assert.doesNotMatch(clientSource, /type: 'market'/, '内置精选没有可固定的 commit，不得假装能一键安装')
+  // 市场只剩 skillhub.cn 一条来源，所以安装只走 skillHubInstall，不存在第二条「假装能装」的路。
+  // 原来这里钉的是「内置精选不得出现 type:'market'」——那条路已经整条删掉了（没有可固定的
+  // commit，抓默认分支不可复现），现在钉的是**不再有任何别的安装入口**。
+  assert.equal((clientSource.match(/await call\('skillHubInstall'/g) ?? []).length, 1,
+    '安装只能有一个入口：skillHubInstall')
   // 落点是**同一份** installTargets，两个能力面不各建一套
   assert.equal((clientSource.match(/scopeOptions: installTargets/g) ?? []).length, 1)
 })
@@ -541,12 +544,13 @@ test('外部源的两类失败必须分开说：宿主没这接口 ≠ 上游挂
   assert.equal(classifyHubError('skillhub.cn 返回 HTTP 500'), 'upstream', '上游自己 500 是上游的问题')
   assert.equal(classifyHubError(''), 'upstream', '拿不准时按上游处理（不假装是宿主没装）')
 
-  // 接线：分类结果决定文案与处置，且宿主缺失时来源药丸被禁掉
+  // 接线：分类结果决定文案与处置。市场只剩 skillhub 一条来源之后，「宿主没这个接口」不再
+  // 有「返回内置精选」这条退路——那反而更要说清楚该怎么办（重启宿主），否则用户面对的是
+  // 一个没有任何可用来源的空市场。
   assert.match(clientSource, /hub\.kind === 'missing'/)
   assert.match(clientSource, /当前宿主进程还没有外部源接口/)
   assert.match(clientSource, /重启宿主（dsh 进程）后即可使用/)
   assert.match(clientSource, /连接 skillhub\.cn 失败/)
-  assert.match(clientSource, /disabled: id === 'hub' && hub\.kind === 'missing'/)
 })
 
 test('底栏统计必须跟着看得见的那一批行走', () => {

@@ -19,7 +19,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__skills = { SCOPE_LABELS, projectLabelOf, skillScopeLabel, skillGroups, skillGroupRank, skillTwinCounts, skillScopeOptions, skillRows, shadowedSkills, skillDiagnostics, skillRiskLevel, SKILL_RISK_LABEL, SKILL_RISK_HINT, skillDetailRequest, skillFilter, skillSourceLabel, SkillsPanel, SkillRow, SkillGroupHeader, SkillDetail, SkillDetailPane, SkillCard, SkillInstallModal, McpTab, McpOverlay, panelVisibility };`,
+  `${exportMarker}\nexports.__skills = { SCOPE_LABELS, projectLabelOf, skillScopeLabel, skillGroups, skillGroupRank, skillTwinCounts, skillScopeOptions, skillRows, shadowedSkills, skillDiagnostics, skillDetailRequest, SkillsPanel, SkillRow, SkillGroupHeader, SkillDetail, SkillDetailPane, SkillInstallModal, McpTab, McpOverlay, panelVisibility };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -208,9 +208,9 @@ const skill = (over = {}) => ({
  * 见 lib/typert.js 的说明与 test/client-admission.test.mjs。
  */
 const SKILLS_METHODS = new Set([
-  'list', 'detail', 'setEnabled', 'removeSkill', 'importSkill', 'market',
+  'list', 'detail', 'setEnabled', 'removeSkill', 'importSkill',
   'skillTargets', 'skillHubSearch', 'skillHubDetail', 'skillHubCategories', 'skillHubInstall',
-  'conflictingManager', 'searchRemote',
+  'conflictingManager',
 ])
 
 /**
@@ -300,27 +300,6 @@ test('the manage list actually draws the skill data it was given', async () => {
   })).join(' | ')
   assert.match(detailTree, /\/home\/u\/\.agents\/skills/, '详情必须画出真实根目录')
   assert.match(detailTree, /正文内容/, '详情必须画出技能正文')
-
-  // 市场卡片：内置精选**不提供一键安装**（目录里只有 source + 仓库内路径，没有可固定的
-  // commit，抓默认分支不可复现）。所以卡片给的是「获取坐标 + 许可门禁说明」，
-  // 而不是一个点了必然失败的按钮 —— 约束 8 的硬闸门因此没有旁路。
-  const blocked = textOf(internals.SkillCard({
-    entry: { name: 'docx', summary: 'Word', source: 'anthropics/skills', path: 'skills/docx', license: 'Proprietary', installable: false, licenseReason: '禁止在服务之外保留副本', scripts: true },
-    installed: false,
-  })).join(' | ')
-  assert.match(blocked, /许可受限/, '许可阻断的卡片必须说明受限')
-  assert.match(blocked, /禁止在服务之外保留副本/, '必须给出受限理由')
-  assert.match(blocked, /anthropics\/skills/, '必须给出获取坐标（来源）')
-  assert.match(blocked, /skills\/docx/, '必须给出获取坐标（仓库内路径）')
-  assert.match(blocked, /未提供一键安装/, '必须说清没有一键安装，而不是给一个装不动的按钮')
-  assert.doesNotMatch(blocked, /仍要安装/, '不得再保留绕过许可门禁的安装入口')
-
-  // 声明与实际冲突要披露（真实样本 anti-ui-slop）。
-  const conflict = textOf(internals.SkillCard({
-    entry: { name: 'anti-ui-slop', summary: 'x', source: 'github/awesome-copilot', path: 'plugins/x', license: 'Apache-2.0', installable: true, licenseConflict: true, scripts: false },
-    installed: false,
-  })).join(' | ')
-  assert.match(conflict, /声明不一致/, '声明与许可文件冲突时必须披露')
 })
 
 test('a failed body read renders as a failure, never as an endless spinner', async () => {
@@ -390,7 +369,6 @@ test('the managed list carries scope in group headers, never again in row badges
   const projectRow = skill({ name: 'wewrite', source: 'project-agents', scope: 'project', cwd: 'C:\\Users\\u\\Desktop\\公众号', root: 'C:\\Users\\u\\Desktop\\公众号\\.agents\\skills' })
   const globalRow = skill({ name: 'zhanggui', source: 'user-agents', scope: 'global' })
   const callSkills = async (method) => {
-    if (method === 'market') return { ok: true, skills: [], categoryOrder: [], categoryLabels: {} }
     return { ok: true, skills: [projectRow, globalRow], disabled: [] }
   }
   internals.__effects.length = 0
@@ -474,27 +452,9 @@ function skillRows(internals, rows) {
   return list(internals.skillRows(rows))
 }
 
-test('the traffic light is not color-only: it carries a text label and an accessible hint', () => {
-  // 「市场这点点是咋回事」的直接答案在 title/aria 里；颜色单独当语义过不了无障碍。
-  const internals = loadClientInternals()
-  const entry = { name: 'convert-pdf-to-md', summary: 'x', source: 'github/awesome-copilot', license: 'MIT', installable: true, scripts: true }
-  const tree = internals.SkillCard({ entry, installed: false, onInstall() {} })
-  const dot = findNode(tree, (node) => typeof node.props?.className === 'string' && node.props.className.includes('dsh-skills-dot'))
-  assert.ok(dot, '卡片要有状态点')
-  assert.match(dot.props.title, /黄：/, '点要有解释自己含义的 title')
-  assert.ok(dot.props['aria-label'], '点要有 aria-label（颜色不能是唯一载体）')
-  const cardText = textOf(tree).join(' | ')
-  assert.match(cardText, /有披露项/, '黄灯要有文字承载')
-
-  // 三点必须都在**卡片首行行首**，而不是被名字推到右上角。
-  // 首行的类名跟着市场卡片原语走：技能面与 MCP 面现在共用 .dsh-mcp-mcard*（同一种卡片）。
-  const head = findNode(tree, (node) => node.props?.className === 'dsh-mcp-mcard-top')
-  assert.equal(head.children[0].type, 'span', '状态点必须是卡片首行第一个元素（与列表行同一位置规则）')
-})
-
 test('the install modal serves the external source only, and always demands an acknowledgement', () => {
-  // 内置精选不提供一键安装（见 SkillCard 的「获取坐标」），所以这个弹窗只服务外部源。
-  // 外部源没有许可字段：能做且该做的只有披露 + 显式确认。约束 8 的硬闸门因此没有旁路。
+  // 市场只剩 skillhub.cn 一条来源，所以这个弹窗就是唯一的安装入口。
+  // 上游条目没有许可字段：能做且该做的只有披露 + 显式确认。
   const internals = loadClientInternals()
   const entry = { name: 'convert', slug: 'convert', summary: 'x', source: 'skillhub', pageUrl: 'https://skillhub.cn/skills/convert' }
   const props = {
@@ -520,16 +480,18 @@ test('the install modal serves the external source only, and always demands an a
   assert.equal(confirm.props.disabled, true, '未勾选时安装按钮必须不可点')
   assert.match(texts, /确认并安装/, '按钮文案要说清这是确认动作')
 
-  // 内置精选的许可受限条目**没有安装入口**：它在卡片层就是「获取坐标」。
-  const cardTree = internals.__render(internals.SkillCard, {
-    entry: { name: 'docx', source: 'anthropics/skills', path: 'skills/docx', license: 'Proprietary', installable: false, licenseReason: '禁止在服务之外保留副本', scripts: true },
-    installed: false,
-  })
-  assert.equal(
-    findNode(cardTree, (node) => String(node.props?.cls || '').includes('primary')),
-    undefined,
-    '内置精选卡片不得有主操作（安装）按钮——它没有可复现的获取路径',
-  )
+  // ⚠️ 真机抓到的反例（外部证据，不是推演）：装 skillhub.cn 的 dev-expert 时，弹框写着
+  // 「无 scripts/ 目录」，而落盘出来的技能**带 scripts/ 与 hooks/*.py**。
+  // 根因：上游条目没有 scripts / allowedTools 字段（normalizeHubSkill 拿不到），
+  // 所以 entry.scripts 恒为 undefined，三元表达式的 else 分支把「没核验」渲染成了「没有」。
+  // 这个弹框是市场现在**唯一**的安装路径，把未核验说成事实是它最不该犯的错——所以钉住：
+  // 对外部源不得出现「无 scripts/ 目录」，且必须写明未提供 + 未核验。
+  assert.doesNotMatch(texts, /无 scripts\/ 目录/, '外部源不得断言"无 scripts/ 目录"（上游不给该字段）')
+  assert.match(texts, /上游未提供清单，本插件未核验/, '可执行片段必须如实写"上游未提供"')
+
+  // 市场只剩 skillhub.cn 之后，市场里不存在「许可受限但能被勾选装进去」的条目——
+  // 那种条目连来源都没有了（卡片层 SkillCard 已整条删除）。
+  // 弹窗自身不提供第二条旁路：未勾选时主操作不可点（上面已断）。
 })
 
 test('「删除技能」走的是 removeSkill，不是启停开关', async () => {
@@ -652,41 +614,6 @@ test('diagnostics are derived from the merged rows, so disabled skills actually 
   // 注意逐字段/length 断言：返回值来自 vm 沙箱，跨 realm 的 deepEqual 会因原型不同而失败。
   assert.equal(internals.skillDiagnostics([]).length, 0)
   assert.equal(internals.skillDiagnostics(undefined).length, 0)
-})
-
-test('the risk level drives the traffic light from license and disclosure data', () => {
-  // 市场卡片的红绿灯：红=不可安装（许可门禁）、黄=有披露项（含脚本/声明工具权限）、
-  // 绿=无额外披露。判定必须是数据驱动的，不能在组件里各写一套。
-  const internals = loadClientInternals()
-  assert.equal(internals.skillRiskLevel({ installable: false, scripts: false }), 'red')
-  assert.equal(internals.skillRiskLevel({ installable: true, scripts: true }), 'yellow')
-  assert.equal(internals.skillRiskLevel({ installable: true, scripts: false }), 'green')
-})
-
-test('the market filter matches name, summary and source without case sensitivity', () => {
-  const internals = loadClientInternals()
-  const entries = [
-    { name: 'pdf', summary: 'PDF 全流程', source: 'anthropics/skills', category: 'docs' },
-    { name: 'drawio', summary: '生成图表', source: 'github/awesome-copilot', category: 'docs' },
-  ]
-  // 空查询返回全部。
-  assert.equal(internals.skillFilter(entries, '', 'all').length, 2)
-  // 匹配名字（大小写不敏感）。
-  assert.deepEqual(internals.skillFilter(entries, 'PDF', 'all').map((e) => e.name), ['pdf'])
-  // 匹配来源（用户常按 owner 找）。
-  assert.deepEqual(internals.skillFilter(entries, 'awesome', 'all').map((e) => e.name), ['drawio'])
-  // 分类筛选。
-  assert.equal(internals.skillFilter(entries, '', 'docs').length, 2)
-  assert.equal(internals.skillFilter(entries, '', 'nonexistent').length, 0)
-})
-
-test('the source label renders owner and repo as a readable line', () => {
-  const internals = loadClientInternals()
-  assert.equal(internals.skillSourceLabel({ source: 'anthropics/skills', license: 'Apache-2.0' }), 'anthropics/skills · Apache-2.0')
-  // 许可缺失时不得渲染出 undefined。
-  assert.equal(internals.skillSourceLabel({ source: 'obra/superpowers' }), 'obra/superpowers')
-  // 本地已装条目没有 source（它们不在市场目录里）。
-  assert.equal(internals.skillSourceLabel({ source: '', local: true }), '本地 · 已安装')
 })
 
 test('the skills pane receives a working call, all the way from the mount to the panel', () => {
@@ -891,7 +818,6 @@ test('both ability panes share the same layout primitives, so switching does not
   // 且不得再出现自己那套 .dsh-skills-body / -list / -detail。
   const internals = loadClientInternals()
   const callSkills = async (method) => {
-    if (method === 'market') return { ok: true, skills: [], categoryOrder: [], categoryLabels: {} }
     return { ok: true, skills: [{ name: 'zhanggui', description: 'd', source: 'user-agents', scope: 'global', root: '/r', writable: true }], disabled: [] }
   }
   // 先渲染一次并**跑掉首屏 useEffect**（列表数据在 effect 里加载），再重渲染——
