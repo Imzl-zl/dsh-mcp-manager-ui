@@ -52,10 +52,10 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 
 ```sh
 # Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.0
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.1
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.1
 ```
 
 Then **restart `dsh web`**. To upgrade:

@@ -50,10 +50,10 @@ DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏�
 
 ```sh
 # 推荐：npm 安装 —— 之后 `dsh plugin update` 会在 ^1.x 内自动升到最新小版本
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.0
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.1
 
 # 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.0
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.1
 ```
 
 装完**重启 `dsh web`**。升级：
