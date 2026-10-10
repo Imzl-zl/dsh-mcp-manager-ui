@@ -38,7 +38,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.5.1')
+  assert.equal(packageJson.version, '1.5.2')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -362,15 +362,20 @@ test('client moves focus into dialogs so Escape handlers receive keyboard events
   assert.equal((client.match(/className: 'dsh-mcp-overlay'/g) || []).length, 6, '遮罩只在调用点渲染，Dialog 不重复套一层')
 })
 
-test('every Host Remote has a Typert contract entry, and vice versa', async () => {
+test('the three contract faces list the same methods in the same order', async () => {
   const { TYPERT } = await import('../lib/typert.js')
   // 三边契约（Host 实现 / lib/typert.js / lib/client.js）里，Host 与 typert.js 之间此前没有
   // 任何自动比对：加了 Remote 却忘了写契约（客户端永远调不到）、或删了实现却留着契约
-  //（调用必失败），测试都还是绿的。这条把两边钉在一起，对每个未来方法都生效。
+  //（调用必失败），测试都还是绿的。这条把三边钉在一起，对每个未来方法都生效。
+  // **顺序也是契约**，所以比较不排序：三份清单是同一件事的三面，位置一致才可能一眼对照。
+  // 曾经这里排过序，于是 scanImportSources 一组在 index.js 里被追加到末尾而没人发现。
+  // 新增方法时，请在同样的位置插入三份清单。
   const declared = [...hostIndex.matchAll(/Remote\("([A-Za-z0-9_]+)"\)/g)].map((match) => match[1])
   const contract = TYPERT.invocations.map((entry) => entry.method)
+  const descriptors = [...client.matchAll(/id: 'dsh-mcp-manager-ui#mcpManager\/([A-Za-z0-9_]+)'/g)].map((match) => match[1])
   assert.ok(declared.length >= 30, `从 index.js 读到的 Remote 数量异常（${declared.length}）`)
-  assert.deepEqual([...declared].sort(), [...contract].sort())
+  assert.deepEqual(contract, declared, 'lib/typert.js 的 invocation 必须与 Host 的 Remote 同序')
+  assert.deepEqual(descriptors, declared, 'lib/client.js 的 descriptor 必须与它们同序')
 })
 
 test('every workspace write goes through the one registered-target gate', async () => {

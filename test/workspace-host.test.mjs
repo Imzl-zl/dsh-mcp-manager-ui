@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, utimes, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -352,8 +352,18 @@ test('copyWorkspaceServers refuses unregistered targets, self copies and unknown
     await writeFile(configPath(fixture.wsRoot), JSON.stringify({ mcpServers: { alpha: { command: 'node' } } }))
 
     // 写路径比读路径严：目标必须是这台机器上注册过的工作区，否则这就是「往任意目录写文件」。
+    // 目录真实存在（下面 mkdir）："注册过"与"目录存在"必须能区分，否则存在性检查也能糊过这条。
+    const notRegistered = join(fixture.root, 'not-registered')
+    await mkdir(notRegistered, { recursive: true })
     await assert.rejects(
-      McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: join(fixture.root, 'not-registered') }),
+      McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: notRegistered }),
+      /不在已注册的工作区列表/,
+    )
+    // copy 这条腿是被写门（withRegisteredWorkspaceWrite）拦下的；**预览没有写动作**，它的目标校验
+    // 只存在于 resolveWorkspaceCopy 里，所以必须单独钉一次——否则把那行校验删掉，全仓测试不会红，
+    // 而 resolveWorkspaceCopy 的注释恰恰声称"用户正是在预览里该知道这个目标不能写"。
+    await assert.rejects(
+      McpManagerGateway.prototype.previewWorkspaceCopy.call(gateway, { from: fixture.wsRoot, to: notRegistered }),
       /不在已注册的工作区列表/,
     )
     await assert.rejects(
@@ -381,6 +391,9 @@ test('copyWorkspaceServers leaves the target file untouched when everything is s
     await writeFile(configPath(fixture.wsRoot), JSON.stringify({ mcpServers: { alpha: { command: 'node' } } }))
     await mkdir(join(target, '.dsh'), { recursive: true })
     await writeFile(configPath(target), JSON.stringify({ mcpServers: { alpha: { command: 'other' } } }))
+    // 哨兵时间戳：把 mtime 先钉到 2001 年再断言它没变。直接比"写入前后的 now"在 1s/2s 粒度的
+    // 文件系统（HFS+、exFAT/FAT32、部分网络目录）上会静默变成永真，与分辨率无关的哨兵才不会。
+    await utimes(configPath(target), new Date('2001-01-01T00:00:00Z'), new Date('2001-01-01T00:00:00Z'))
     const before = await stat(configPath(target))
 
     const result = await McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: target })
@@ -389,8 +402,14 @@ test('copyWorkspaceServers leaves the target file untouched when everything is s
     assert.equal(result.changed, false)
     // 只比文件内容不够：内容一样也可能是"原样重写了一遍"。这条捷径的意义正是不碰文件
     // （不刷新 mtime → 配置缓存不失效、不白跑一次连接对齐），所以直接钉时间戳。
-    const after = await stat(configPath(target))
-    assert.equal(after.mtimeMs, before.mtimeMs)
+    assert.equal((await stat(configPath(target))).mtimeMs, before.mtimeMs)
+    // 内容也得一字不动（不能借"跳过"顺手规范化目标文件）。
+    assert.deepEqual(JSON.parse(await readFile(configPath(target), 'utf8')), { mcpServers: { alpha: { command: 'other' } } })
+    // 正控：同一环境下真写一次必须让哨兵前移。少了它，上面那两条断言在粗粒度文件系统上会
+    // 静默失效而没人知道。
+    const rewritten = await McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: target, overwrite: true })
+    assert.deepEqual(rewritten.updated, ['alpha'])
+    assert.notEqual((await stat(configPath(target))).mtimeMs, before.mtimeMs, '覆盖模式必须真的落盘')
   } finally {
     await fixture.cleanup()
   }
@@ -417,6 +436,11 @@ test('copyWorkspaceServers rejects an empty selection and a malformed names payl
     )
     await assert.rejects(
       McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: target, names: 'alpha' }),
+      /必须是字符串数组/,
+    )
+    // 元素类型也要钉：只留 Array.isArray 而丢掉 every(typeof === 'string') 时，上面那条仍会通过。
+    await assert.rejects(
+      McpManagerGateway.prototype.copyWorkspaceServers.call(gateway, { from: fixture.wsRoot, to: target, names: ['alpha', 42] }),
       /必须是字符串数组/,
     )
     // 空选择不该顺手把目标配置建出来。
@@ -456,7 +480,7 @@ test('a server named __proto__ is really written instead of vanishing into the p
 
 test('previewWorkspaceCopy reports the plan without writing anything', async () => {
   const { McpManagerGateway } = await import('../lib/index.js')
-  const fixture = await createHostFixture('[]\n', [{ title: 'proj-a' }], [], ['proj-b'])
+  const fixture = await createHostFixture('[]\n', [{ title: 'proj-a' }], [], ['proj-b', 'proj-c'])
   try {
     const gateway = { ctx: fixture.ctx }
     const target = fixture.extraWorkspaces['proj-b']
@@ -464,6 +488,7 @@ test('previewWorkspaceCopy reports the plan without writing anything', async () 
     await writeFile(configPath(fixture.wsRoot), JSON.stringify({ mcpServers: { alpha: { command: 'node' }, beta: { command: 'node' } } }))
     await mkdir(join(target, '.dsh'), { recursive: true })
     await writeFile(configPath(target), JSON.stringify({ mcpServers: { beta: { command: 'other' } } }))
+    await utimes(configPath(target), new Date('2001-01-01T00:00:00Z'), new Date('2001-01-01T00:00:00Z'))
     const before = await stat(configPath(target))
 
     const preview = await McpManagerGateway.prototype.previewWorkspaceCopy.call(gateway, { from: fixture.wsRoot, to: target })
@@ -479,8 +504,12 @@ test('previewWorkspaceCopy reports the plan without writing anything', async () 
     assert.deepEqual(overwriting.skipped, [])
 
     // 预览是纯读：目标文件一个字节都不该变（写盘那次会在锁内重新解析）。
-    const after = await stat(configPath(target))
-    assert.equal(after.mtimeMs, before.mtimeMs)
+    assert.equal((await stat(configPath(target))).mtimeMs, before.mtimeMs)
+    assert.deepEqual(JSON.parse(await readFile(configPath(target), 'utf8')), { mcpServers: { beta: { command: 'other' } } })
+    // 目标还没有 .dsh/ 时也不能被"读"出目录和文件来：纯读包括不产生副作用。
+    const virgin = fixture.extraWorkspaces['proj-c']
+    await McpManagerGateway.prototype.previewWorkspaceCopy.call(gateway, { from: fixture.wsRoot, to: virgin })
+    await assert.rejects(readFile(configPath(virgin), 'utf8'), /ENOENT/)
   } finally {
     await fixture.cleanup()
   }
@@ -510,6 +539,16 @@ test('exportWorkspaceJson round-trips through the paste import path', async () =
     const doc = JSON.parse(exported.json)
     assert.deepEqual(doc.mcpServers.alpha, { command: 'node', args: ['-y', 'alpha-mcp'], env: { TOKEN: '${TOKEN}' }, idleTimeoutMs: 60000, disabled: true })
     assert.deepEqual(doc.exclude, ['github'])
+    // 键集合必须单独钉：下面的往返比较是"生产 vs 生产"，某一类条目在导出里整体蒸发时两边会一起少，
+    // deepEqual 照样相等，而 count 也来自 config.servers.length，看不出来。
+    assert.deepEqual(Object.keys(doc.mcpServers).sort(), ['alpha', 'beta'])
+    // http 条目走的是另一个分支（type/url/headers），逐字段钉住，别只靠对称往返自证。
+    assert.deepEqual(doc.mcpServers.beta, {
+      type: 'http',
+      url: 'https://example.com/mcp',
+      headers: { Authorization: 'Bearer ${TOKEN}' },
+      readyTimeoutMs: 0,
+    })
 
     // 往返不变量：导出的 mcpServers 经粘贴导入进另一个工作区后再导出，逐字段一致
     //（环境变量引用、插件专有字段都不能在某一趟里被悄悄丢掉）。

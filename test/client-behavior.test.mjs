@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyTargets, exportFileName, startVisibilityAwarePolling, wsSub };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyPlanKey, copyPlanReady, copyTargets, exportFileName, startVisibilityAwarePolling, wsSub };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -211,6 +211,45 @@ test('the copy dialog explains an empty target list instead of rendering an empt
   const withTarget = collectText(WorkspaceCopyModal({ ...props, workspaces: [...props.workspaces, { path: 'C:/proj-b', name: 'proj-b', serverCount: 2 }] }), [])
   assert.ok(withTarget.some((text) => text.includes('选择目标工作区…')), '有目标时要给出可选的目标')
   assert.ok(!withTarget.some((text) => text.includes('没有其他已注册的工作区')))
+})
+
+// 「手上这份预览还是不是当前选择的结论」以前住在组件 state 里，只能靠钉源码文本；抽成纯函数后
+// 它才被真正断言——而这条判定正是"预览说跳过、实际却覆盖"能不能发生的唯一开关。
+test('a copy preview is only trusted for the exact selection it was computed from', () => {
+  const { internals } = loadClientInternals(() => true)
+
+  // 还没选目标：不存在"当前计划"。
+  assert.equal(internals.copyPlanKey({ from: 'C:/a', to: '', names: ['x'], overwrite: false }), '')
+  assert.equal(internals.copyPlanReady('', { key: '', plan: { added: [] } }), false)
+
+  const base = { from: 'C:/a', to: 'C:/b', names: ['x', 'y'], overwrite: false }
+  const key = internals.copyPlanKey(base)
+  assert.ok(key)
+  // 同一份输入必须给出同一个键，否则每次渲染都会重新请求预览。
+  assert.equal(internals.copyPlanKey({ ...base, names: ['x', 'y'] }), key)
+  // 三个输入里任何一个变了，旧计划就不再是当前选择的结论。
+  for (const changed of [{ ...base, to: 'C:/c' }, { ...base, names: ['x'] }, { ...base, overwrite: true }]) {
+    assert.notEqual(internals.copyPlanKey(changed), key, `输入变化必须换键：${JSON.stringify(changed)}`)
+  }
+
+  const preview = { key, plan: { targetCount: 1, added: ['x'], updated: [], skipped: [] }, error: '' }
+  assert.equal(internals.copyPlanReady(key, preview), true)
+  assert.equal(internals.copyPlanReady(internals.copyPlanKey({ ...base, overwrite: true }), preview), false, '换过选择后不能再按确认')
+  assert.equal(internals.copyPlanReady(key, { key, plan: null, error: '目标工作区配置无效：…' }), false, '预览失败时不能按确认')
+  assert.equal(internals.copyPlanReady('', null), false, '没有目标时不能按确认')
+})
+
+// 字段标题那条规则曾经用后代选择器：特异性 (0,1,1) 压过 `.dsh-mcp-check-row` 的 (0,1,0)，复选框行
+// 被变成 display:block，gap 失效、传输类型不再右对齐（真实浏览器实测：复选框与名字、名字与类型
+// 两段间距都成 0px，类型标签离行右边缘 439px）。所以标题只作用于字段自己的标题，嵌套行才保得住布局。
+test('field captions stay child-scoped so nested label rows keep their own layout', () => {
+  const { internals } = loadClientInternals(() => true)
+
+  assert.match(internals.MCP_CSS, /\.dsh-mcp-field>label\{display:block/)
+  assert.doesNotMatch(internals.MCP_CSS, /\.dsh-mcp-field label\{/)
+  // 被压掉的那两条：行自己的 flex+间距，以及靠 margin-left:auto 右对齐的传输标签。
+  assert.match(internals.MCP_CSS, /\.dsh-mcp-check-row\{display:flex;align-items:center;gap:8px/)
+  assert.match(internals.MCP_CSS, /\.dsh-mcp-check-meta\{margin-left:auto/)
 })
 
 test('copy preview text spells out what will be added, overwritten and skipped', () => {

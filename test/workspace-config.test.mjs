@@ -86,6 +86,25 @@ test('idleTimeoutMs is a project-level policy and never reaches the mcp-client c
   assert.throws(() => normalizeMcpImport({ mcpServers: { local: { command: 'node', idleTimeoutMs: 1.5 } } }), /idleTimeoutMs 必须是非负整数/)
 })
 
+// env/headers 的**键**同样来自用户配置，而 `__proto__` 在对象字面量里会走原型 setter：从内部 spec
+// → 文件 → 读回 → 下发给 mcp-client，四跳里任何一跳用普通赋值都会静默吃掉它。这里钉住四跳。
+test('env keys named __proto__ survive every hop', async () => {
+  // 真实来源就是 JSON（JSON.parse 建出来的是 own property），所以这里也用它构造。
+  const spec = { name: 'local', transport: 'stdio', command: 'node', env: JSON.parse('{"__proto__":"literal"}') }
+  const own = (value) => Object.getOwnPropertyDescriptor(value, '__proto__')?.value
+
+  assert.equal(own(specToMcpEntry(spec).env), 'literal', 'specToMcpEntry 必须把 env 的键写成 own property')
+
+  const written = {}
+  await writeWorkspaceConfig('/ws', { servers: [spec], exclude: [] }, async (path, text) => { written.path = path; written.text = text }, async () => {})
+  const fileEntry = JSON.parse(written.text).mcpServers.local
+  assert.equal(own(fileEntry.env), 'literal', '落盘的文件里必须真的有这条')
+
+  const back = normalizeMcpImport({ mcpServers: { local: fileEntry } }).servers[0]
+  assert.equal(own(back.env), 'literal', '读回时不能被原型吃掉')
+  assert.equal(own(toMcpClientConfig(back, '/ws').env), 'literal', '下发给 mcp-client 的那一份同样要带过去')
+})
+
 test('http spec roundtrip keeps type/url/headers', () => {
   const spec = {
     name: 'remote',
