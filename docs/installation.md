@@ -131,6 +131,12 @@ git tag -a v1.5.5 -m "dsh-mcp-manager-ui v1.5.5" && git push origin v1.5.5
 > 老线的面板因此会看到**旧线自己的最新版**（例如 1.5.5）——点一下就能升到中转版，再点「迁移」到新线。
 > 忘了加这个标志的后果是真机上验证过的：老用户点「升级」会去装一个不存在的版本，直接报错。
 > 新线自己的更新提示不依赖该 feed（它问的是自己包在 npm 上的 latest），所以标 pre-release 不影响它。
+>
+> **这个标志是过渡手段，老线迁完就撤**（`TODO.csv` row 11）：只有 **≤1.5.3** 的构建会读仓库 feed，
+> 1.5.4 起已改成问后继包的 npm latest。判断依据是
+> `https://api.npmjs.org/versions/dsh-mcp-manager-ui/last-week` 里 **<1.5.4 的下载量趋近 0**。
+> 撤的时候三件一起做：本 workflow 去掉 `--prerelease`、`gh release edit <tag> --prerelease=false`
+> 把已标的那几个恢复、顺手 `npm deprecate` 整个旧包指向后继包。
 
 **第 2 步的真机检查什么时候必须做**：客户端那一半是替身测试——组件在 node 里渲染不起来（见[设计与限制](design.md#版本范围怎么定以及它管不到什么)），所以 CI 全绿也证明不了面板能显示。因此**只要本次改动碰了 `lib/client.js`、或推进了 DSH 基线，就必须做**：起 `dsh web`，确认侧栏入口能打开面板、悬浮按钮在位，然后导入 / 预览 / 启停各点一次。
 
