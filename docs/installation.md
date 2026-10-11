@@ -150,9 +150,9 @@ dsh plugin --profile web remove dsh-toolbox-ui
 本地开发才使用目录安装：
 
 ```sh
-cd C:\sudy\github\dsh-mcp-manager-ui
+cd C:\path\to\dsh-toolbox-ui
 pnpm install
-dsh plugin --profile web add C:\sudy\github\dsh-mcp-manager-ui
+dsh plugin --profile web add C:\path\to\dsh-toolbox-ui
 ```
 
 修改 Host 代码后需要重启 `dsh web`；浏览器 bundle 是否热更新取决于当前 DSH 的 client HMR 状态。

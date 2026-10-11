@@ -97,7 +97,7 @@ test('the old package name survives only where it is still factually correct', (
   // 现在的做法：逐**出现**判定上下文，且只认「明确的事实性引用」形态——
   // URL、安装命令、localStorage 键、环境变量名，以及在**同一行内**明确指代旧包的措辞。
   const reasons = [
-    { pattern: /Imzl-zl\/dsh-mcp-manager-ui/, why: '指向真实仓库（D13 双包同仓，仓库本身仍叫这个名字）' },
+    { pattern: /Imzl-zl\/dsh-mcp-manager-ui/, why: '改名前的仓库坐标（历史链接与夹具；GitHub 对旧地址 301）' },
     // ⚠️ 这里**故意不再**放行「`dsh plugin … add/update <旧包>`」这类安装命令行。
     // 曾经的放行理由是"旧包的安装命令（迁移说明要保留）"，但它在**行的形状**上做判定：
     // 「叫用户装旧包」和「告诉用户怎么从旧包迁过来」长得一模一样，于是 v1.6.0 的发布稿把
@@ -125,8 +125,8 @@ test('the old package name survives only where it is still factually correct', (
     // 走同一仓库」。1.6.2 起更新检查问的是**本包在 npm 上的 latest**（lib/index.js 的
     // updateLatestUrl），那条 URL 全仓已不再产生——豁免随之删掉：留一条永不命中的规则，
     // 等于把「为什么放行」记成一句假话。
-    // 作者本地 checkout 路径：事实。
-    { pattern: /github\\dsh-mcp-manager-ui/, why: '作者本地 checkout 路径' },
+    // 曾经还有一条「作者本地 checkout 路径」的豁免：文档里的本地开发示例已改成通用占位路径
+    // （`C:\path\to\dsh-toolbox-ui`），旧路径不再出现在仓库里，豁免随之删掉。
     // 既装旧包的 source fixture（link:/file:/tgz）：正是被测对象要识别的输入。
     { pattern: /^(?:'|\s)*'?(?:link:|file:)[^']*dsh-mcp-manager-ui/, why: '「已装旧包」的 source 夹具' },
     // localStorage 键的两种分隔符写法已在上面覆盖；这里补「文档里举例说明键名」的行。
