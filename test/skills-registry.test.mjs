@@ -10,6 +10,9 @@
 //   - 宿主返回的 source 是唯一可靠的作用域依据（本机 ~/.dsh/skills 就不存在，
 //     技能都在 ~/.agents/skills），UI 不得写死根路径。
 import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { listSkillViews } from '../lib/skills-registry.js'
 
@@ -143,6 +146,99 @@ test('derives the skill root from the host resourceBase, for both skill shapes',
   const flat = rows.find((row) => row.name === 'flat-skill')
   assert.equal(flat.root, '/u/.agents/skills', '扁平文件：根就是 resourceBase 自身')
   assert.equal(flat.kind, 'flat')
+})
+
+test('resolves the root when the skill directory is a link (the two host fields disagree)', async () => {
+  // ⚠️ 真机缺陷（issue #5，2026-10-11 复现）：技能目录本身是符号链接/junction 时，
+  // 面板那一行显示「位置（未报告）/调用权限未知」，悬浮提示还冤枉 frontmatter。
+  //
+  // 根因是两个字段来自**不同的路径口径**（宿主源码，已核对）：
+  //   resourceBase.path = locator.directory      —— 展示路径（配置原样，链接就是链接）
+  //   path              = fs.processPath(target) —— realpath（fs-local 里就是 targetKey）
+  // 链接目录下两者必然分叉，字面比较落进「形态不认识」→ 根推不出来 → 整行不可操作。
+  // 宿主自己的用例也钉着这个分叉（skill-filesystem.spec.ts 的 linked-dir 那条）。
+  //
+  // 这条用**真实文件系统语义**（真建链接目录 + 真 realpath），不是手搓字符串——
+  // 手搓一对「看起来像」的路径证明不了 realpath 之后它们会相等。
+  //
+  // Windows 上真正的 file symlink 需要特权（实测 EPERM），而目录 junction 不需要；
+  // POSIX 上 type 参数被忽略，建的是普通符号链接（与 skills-file-ops.test.mjs 同一手法）。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-link-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-skills-ext-'))
+  const root = join(base, '.dsh', 'skills')
+  await mkdir(root, { recursive: true })
+  await mkdir(join(external, 'linked-skill'), { recursive: true })
+  await writeFile(
+    join(external, 'linked-skill', 'SKILL.md'),
+    '---\nname: linked-skill\ndescription: 链接技能\n---\n\n正文\n',
+  )
+  try {
+    await symlink(join(external, 'linked-skill'), join(root, 'linked-skill'), 'junction')
+  } catch (error) {
+    // 环境连 junction 都不给建：这条用例无法表达它的意图，明说而不是静默放过。
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+    throw new Error(`本环境无法创建链接（${error.code}），该用例未能执行`)
+  }
+  try {
+    const displayBase = join(root, 'linked-skill')
+    const realFile = await realpath(join(displayBase, 'SKILL.md'))
+    // 前提：磁盘上文件确实存在且宿主的两个字段确实分叉（否则这条用例测不到东西）。
+    assert.notEqual(displayBase, await realpath(displayBase), '前提：该技能目录确实是链接')
+
+    const skills = fakeSkills({
+      '': [skill({
+        name: 'linked-skill',
+        // 宿主真实的形状：base 是展示路径，path 是 realpath。
+        resourceBase: { kind: 'directory', path: displayBase },
+        path: realFile,
+      })],
+    })
+    const [row] = await listSkillViews(ctxWith(skills), {})
+
+    assert.equal(row.root, root, '链接目录下根必须推得出来，且用**展示路径**（要喂给 fs、也要与目标集合对上）')
+    assert.equal(row.kind, 'bundle')
+    // 这一行必须真的可操作：调用权限来自文件本身，读得到就不是 null。
+    assert.equal(row.modelInvocable, true, '根定位到之后，调用权限要从文件里读出来，不能再是「未知」')
+    assert.equal(row.userInvocable, true)
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+  }
+})
+
+test('one physical skill file is one row, even when two roots resolve to the same directory', async () => {
+  // ⚠️ 真机缺陷（issue #5，2026-10-11 复现）：`DSH_HOME=D:\DSH\.dsh` 而工作区 `D:\DSH`
+  // 本身是 git 根，于是 project-dsh 的根 = `<DSH_HOME>/skills` = user-dsh 的根——同一个物理
+  // 目录被两种 source 各报一份。实测同一个文件被列成 N+1 行（全局 1 + 每个工作区 1），
+  // 名字相同 → 面板互判「被遮蔽」，用户看到一整份重复的技能。
+  //
+  // 去重判据必须是**物理位置**（宿主给的 path 就是 realpath），不是字符串也不只是 source。
+  const skills = fakeSkills({
+    '': [skill({ name: 'decision-notes', path: 'D:/DSH/.dsh/skills/decision-notes/SKILL.md' })],
+    // 项目查询返回合并视图；同一个文件在这里被换了个 source 再报一次。
+    'D:/DSH': [skill({ name: 'decision-notes', source: 'project-dsh', path: 'D:/DSH/.dsh/skills/decision-notes/SKILL.md' })],
+    'D:/DSH/temp': [skill({ name: 'decision-notes', source: 'project-dsh', path: 'D:/DSH/.dsh/skills/decision-notes/SKILL.md' })],
+  })
+  const rows = await listSkillViews(ctxWith(skills), { workspaces: ['D:/DSH', 'D:/DSH/temp'] })
+
+  const same = rows.filter((row) => row.name === 'decision-notes')
+  assert.equal(same.length, 1, '同一个物理文件只能占一行（原先会出 3 行）')
+  // 留下的是 rank 更前的那份：它才是宿主实际采纳、模型真正收到的条目。
+  assert.equal(same[0].source, 'project-dsh', '同一文件两处报时，留 rank 更小（真正生效）的那份')
+})
+
+test('keeps same-named skills in different roots as separate rows (real shadowing)', async () => {
+  // 与上一条成对：**不同文件**的同名技能是真实的跨作用域遮蔽，必须各占一行。
+  // 去重如果按名字做，就会把用户真装了的那份藏起来（这正是 SPEC 约束 12 的边界）。
+  const skills = fakeSkills({
+    '': [skill({ name: 'zhanggui', path: 'C:/u/.agents/skills/zhanggui/SKILL.md' })],
+    'C:/proj': [skill({ name: 'zhanggui', source: 'project-dsh', path: 'C:/proj/.dsh/skills/zhanggui/SKILL.md' })],
+  })
+  const rows = await listSkillViews(ctxWith(skills), { workspaces: ['C:/proj'] })
+
+  assert.equal(rows.filter((row) => row.name === 'zhanggui').length, 2, '不同根里的同名技能必须各占一行')
+  assert.deepEqual(rows.map((row) => row.scope).sort(), ['global', 'project'])
 })
 
 test('omits the root rather than guessing when the host gives no resourceBase', async () => {

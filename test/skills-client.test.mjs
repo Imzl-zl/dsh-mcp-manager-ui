@@ -590,6 +590,31 @@ test('the model-invocation switch flips both ways and is disabled when it cannot
   assert.match(textOf(unknown).join(' '), /未知/, '并且要说清是「未知」，不能显示成一个确定的值')
 })
 
+test('「调用权限未知」说的是**真实原因**，不能一律冤枉 frontmatter', () => {
+  // ⚠️ 真机报告（issue #5）：技能目录是符号链接时那一行显示「调用权限未知」，悬浮提示写着
+  // 「SKILL.md 的 frontmatter 读不出来（宿主会跳过这条技能）」——而文件完全合法、宿主也
+  // 照常加载，坏的只是面板的根定位。用户照这句去查 frontmatter 只会白费功夫。
+  // 原因必须分开说：根没定位到 ≠ 文件读不出来。
+  const internals = loadClientInternals()
+  const row = {
+    name: 'linked-skill', description: 'x', source: 'user-agents', scope: 'global',
+    enabled: true, modelInvocable: null, userInvocable: null, writable: true,
+  }
+  const detail = (over) => internals.__expand(internals.SkillDetail({
+    row: { ...row, ...over },
+    shadowedBy: null, body: { status: 'ok', text: '正文' }, busy: false,
+    onRetry() {}, onToggle() {}, onRemove() {}, onModelInvocable() {},
+  }))
+  // textOf 会把 props 里的字符串（含 title）一起收进来，所以悬浮提示也在断言范围内。
+  const unlocated = textOf(detail({})).join(' ');
+  assert.match(unlocated, /符号链接/, '根没定位到时要指向定位问题，而不是让人去查 frontmatter');
+  assert.doesNotMatch(unlocated, /frontmatter 读不出来/, '不能把定位失败说成 frontmatter 的问题');
+
+  // 有 root 但读不到（文件被删/搬走）：这时才轮到 frontmatter/文件那一类说法。
+  assert.match(textOf(detail({ root: '/u/.agents/skills' })).join(' '), /frontmatter/,
+    '有根却读不到时，说的才是文件本身');
+})
+
 test('the panel wires the model-invocation switch to setModelInvocable with the row reference', async () => {
   const internals = loadClientInternals()
   const calls = []
@@ -691,6 +716,11 @@ test('shadowed entries are reported relative to the model-visible catalog', () =
   // 「被遮蔽」提示是管理面板相对模型可见目录的独有价值：DSH 按 rank 裁决同名技能谁生效，
   // 被遮蔽的那份**模型收不到**，但用户确实装了它。必须能指出来，否则用户会以为改的是
   // 生效的那份。
+  //
+  // ⚠️ 方向由 **rank** 决定，不是数组位置：项目级(100/200) 优先于用户级(400/500)。
+  // 这条用例原先断言 user-agents 遮蔽 project-agents——那是把缺陷写成了期望（真机报告
+  // 指出方向相反，已复现）。所以这里刻意把 rank 更大的一份放在**前面**：按位置算会得到
+  // 错的答案，按 rank 算才对。
   const internals = loadClientInternals()
   const rows = [
     skill({ source: 'user-agents', root: '/u/.agents/skills' }),
@@ -701,11 +731,18 @@ test('shadowed entries are reported relative to the model-visible catalog', () =
   assert.equal(shadowed.length, 1, '同名条目里应恰有一份被遮蔽')
   assert.equal(shadowed[0].name, 'zhanggui')
   // 被遮蔽的那份必须能指出**谁**遮蔽了它，否则用户不知道去看哪一行。
-  assert.equal(shadowed[0].shadowedBy.source, 'user-agents', '要指出生效者是哪一个来源')
+  assert.equal(shadowed[0].shadowedBy.source, 'project-dsh',
+    '生效者是 rank 更小的那份（项目级 100 胜用户级 500），与它在数组里的位置无关')
+  assert.equal(shadowed[0].source, 'user-agents', '被遮蔽的是 rank 更大的那份')
   assert.notEqual(shadowed[0].source, shadowed[0].shadowedBy.source)
 
   // 名字唯一时没有任何遮蔽。
   assert.equal(internals.shadowedSkills([skill()]).length, 0)
+
+  // 已停用的行不参与：它的文件是 SKILL.md.disabled，模型看不到它，说它遮蔽/被遮蔽都是假的。
+  const parked = { ...skill({ source: 'project-agents', scope: 'project' }), enabled: false }
+  assert.equal(internals.shadowedSkills([skill(), parked]).length, 0,
+    '已停用的行不该参与遮蔽判定（它根本没进模型目录）')
 })
 
 test('diagnostics are derived from the merged rows, so disabled skills actually show up', () => {

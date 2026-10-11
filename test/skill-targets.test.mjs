@@ -77,11 +77,48 @@ test('还没建的位置照样列出来，并标 exists=false', async () => {
 
 test('bundled 只读，其余可写', async () => {
   const base = await tempRoot()
-  const { targets } = await skillTargetsView(ctxWith({ dshHome: base, agentsHome: base, bundledSkillDir: join(base, 'bundled') }), { workspaces: [] })
+  // ⚠️ 两个 home 必须**不同目录**：写成同一个 base 会让 user-dsh 与 user-agents 的根
+  // （都是 `<home>/skills`）变成同一个物理目录，而那正是「同一目录被列两次」的缺陷形状——
+  // skillTargetsView 现在会（正确地）把它们合成一项，于是这里就取不到 user-agents 了。
+  const { targets } = await skillTargetsView(
+    ctxWith({ dshHome: join(base, 'dsh'), agentsHome: join(base, 'agents'), bundledSkillDir: join(base, 'bundled') }),
+    { workspaces: [] },
+  )
   const bySource = Object.fromEntries(targets.map((t) => [t.source, t]))
   assert.equal(bySource.bundled.writable, false, 'bundled 随包发布，装进去会被升级覆盖')
   for (const source of ['user-dsh', 'user-agents']) assert.equal(bySource[source].writable, true)
   assert.equal(bySource['user-dsh'].scope, 'global')
+})
+
+test('同一个物理目录只列一次（DSH_HOME 与工作区重合时）', async () => {
+  // ⚠️ 真机缺陷（issue #5，2026-10-11 复现）：`DSH_HOME=D:\DSH\.dsh` 而工作区 `D:\DSH`
+  // 本身是 git 根 → project-dsh 根 = `<DSH_HOME>/skills` = user-dsh 根，**同一个物理目录**。
+  // 不去重的话安装下拉里同一个位置出现两次（一个写「项目 DSH」、一个写「全局」），
+  // 用户以为有两个落点可选。留 rank 更前的那份——rank 决定宿主优先采纳哪个根。
+  const base = await tempRoot()
+  const dshHome = join(base, 'dsh-home')
+  const project = join(base, 'proj')
+  // 项目根与 DSH_HOME 重合：`.dsh/skills` 两边算出来是同一个目录。
+  await mkdir(join(project, '.git'), { recursive: true })
+  await mkdir(join(project, '.dsh', 'skills'), { recursive: true })
+
+  const { targets } = await skillTargetsView(
+    ctxWith({ dshHome: join(project, '.dsh'), agentsHome: join(base, 'agents-home') }),
+    { workspaces: [project] },
+  )
+  const skillsRoot = join(project, '.dsh', 'skills')
+  const same = targets.filter((target) => target.root === skillsRoot)
+  assert.equal(same.length, 1, `同一个物理目录只能列一次，实际：${JSON.stringify(same.map((t) => t.source))}`)
+  assert.equal(same[0].source, 'project-dsh', '留 rank 更小（宿主优先采纳）的那份')
+  assert.equal(same[0].rank, 100)
+
+  // 对照：两个 home 真的是不同目录时，两档都还在（别把去重做成了误杀）。
+  const { targets: separate } = await skillTargetsView(
+    ctxWith({ dshHome: join(base, 'dsh-a'), agentsHome: join(base, 'dsh-b') }),
+    { workspaces: [] },
+  )
+  assert.equal(separate.filter((t) => t.root === join(base, 'dsh-a', 'skills')).length, 1)
+  assert.equal(separate.filter((t) => t.root === join(base, 'dsh-b', 'skills')).length, 1)
 })
 
 test('includeDefaultRoots=false 时不列默认位置（与 provider 的 roots 一致）', async () => {
