@@ -12,7 +12,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, UPGRADE_PACKAGE };`,
+  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, pnpmOutputTail, UPGRADE_PACKAGE };`,
 )
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
 
@@ -108,6 +108,36 @@ test('upgrade failures say what happened instead of just "failed"', () => {
   assert.match(unknown, /7/)
   // 连码都没有时也要有话说，不能是空串。
   assert.ok(upgradeFailureText(null, null).length > 0)
+})
+
+test('an unknown failure carries pnpm own words, cleaned up', () => {
+  const { upgradeFailureText, pnpmOutputTail } = loadUpgradeRule()
+  // 真机实测过的那次失败：面板只显示一个 Windows 崩溃码，而 pnpm 原文说得很清楚。
+  // 官方把整段输出放在 packageResult.output 里，所以要把它接上——但要挑干净。
+  const output = [
+    'Progress: resolved 4, reused 3, downloaded 0, added 3',
+    'npm notice',
+    'npm notice package size: 222.9 kB',
+    '\u001b[31m[ERR_PNPM_NO_MATCHING_VERSION] No matching version found for example-plugin@9.9.9\u001b[0m',
+    '',
+    'The latest release of example-plugin is "1.5.3".',
+  ].join('\n')
+  const text = upgradeFailureText({ code: 'operation-error' }, 3221226505, output)
+  assert.match(text, /ERR_PNPM_NO_MATCHING_VERSION/, '必须把 pnpm 的原句带出来，否则只有崩溃码')
+  assert.match(text, /The latest release/, 'pnpm 的结论行更该出现（它直接告诉用户"最新是什么"）')
+  assert.match(text, /operation-error/)
+  // 噪声与 ANSI 颜色码不该出现：横幅是给人看的，不是把日志贴上去。
+  assert.doesNotMatch(text, /Progress:|npm notice|package size/)
+  assert.doesNotMatch(text, /\u001b\[/, 'ANSI 颜色码要剥掉')
+  // 已知码的解释优先：它已经把原因和下一步说清了，不该再被 pnpm 输出淹没。
+  assert.equal(upgradeFailureText({ code: 'stop-profile' }, 1, output), '宿主正在停止，未升级；请重启后再试。')
+  // 没有 output 时行为与改动前逐字一致（老宿主/老官方版本不带这个字段）。
+  assert.equal(upgradeFailureText({ code: 'brand-new-code' }, 7), '升级失败（错误码 brand-new-code，pnpm 退出码 7）。')
+  // 挑行本身：没有报错行时取末尾三行；有报错行时从它开始带（结论就在它后面一行）。
+  assert.equal(pnpmOutputTail(''), '')
+  assert.equal(pnpmOutputTail('a\nb\nc\nd\ne'), 'c d e')
+  assert.equal(pnpmOutputTail('one\nERR_PNPM_X boom\n因为原因在这里\n还有一句'), 'ERR_PNPM_X boom 因为原因在这里 还有一句')
+  assert.ok(pnpmOutputTail('x'.repeat(500)).length <= 300)
 })
 
 test('the post-upgrade banner survives the hint going away', () => {
