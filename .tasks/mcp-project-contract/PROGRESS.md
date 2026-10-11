@@ -1,12 +1,26 @@
 # Progress
 
 - Shape: durable
-- FinalizationStatus: **delivered**（v1.5.3 已发布：npm + GitHub Release）
+- FinalizationStatus: **delivered**（v1.5.3 与 v1.5.4 均已发布：npm + GitHub Release）
 - Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由第三轮真机复核替代完成，见下）
 - Workspace: 已并入 `main`（`fbcf22d`）；worktree 保留在 D:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract
-- Commits: 主体链见 `git log`；最近三轮为 **190a1ad → b5cdfc0（v1.5.1）**、**44fe85d（v1.5.2）** 与 **本轮（issue #4 同名项目挂不上 + v1.5.3 发布）**
-- Latest validation: `main` 上 `node --test` = **308 tests / 308 pass / 0 fail**（v1.5.2 基线 304；v1.5.3 本轮 +4）
-- Next: 无。后续如需改动请从 `main` 开新分支
+- Commits: 主体链见 `git log`；最近两轮为 **v1.5.3（issue #4 同名项目挂不上 + 失败提示给出原因）** 与 **v1.5.4 迁移版（把用户送到后继包 `dsh-toolbox-ui`）**
+- Latest validation: `main` 上 `node --test` = **309 tests / 309 pass / 0 fail**（v1.5.3 基线 308；迁移版 +1：先装后继再卸自己的顺序用例）
+- Next: **这条线已冻结**——`dsh-mcp-manager-ui` 自 1.5.4 起只做一件事：把用户迁到后继包 `dsh-toolbox-ui`（MCP + 技能面）。功能改动一律去那边；本线如需修补仍从 `main` 开分支
+
+## v1.5.4 迁移版：把这条线接到 dsh-toolbox-ui（2026-10-11）
+
+**为什么需要这一版**：这条线（只有 MCP 面板）已并入后继包 `dsh-toolbox-ui`（MCP + 技能面，是它的超集）。但 1.5.3 的一键升级**必然失败**：它下发的规格是 `dsh-mcp-manager-ui@^1.6.0`，而这条线的版本号停在 1.5.x，npm 上根本没有那个版本——用户只会看到「新版本 v1.6.0 可用」，点下去报错。
+
+**三处改动**：
+
+1. **版本真源改成后继包在 npm 上的 latest**（`registry.npmjs.org/dsh-toolbox-ui/latest`），不再问本仓库的 `/releases/latest`：仓库级 latest 是两条线**共用**的、谁先发谁赢，拿它当"我的最新版"结构上就是错的。结果里多回一个 `package`，面板据此把提示说成"迁移"而不是"本包有新版本"。
+2. **规格指向后继包**（`dsh-toolbox-ui@^<latest>`）并带上 `replaces`（本包名）；`not-npm` 那道守卫照旧按**本包**的 source 判（link/file/github 装的不给按钮）。
+3. **动作两步：先装后继、再卸自己**。顺序是安全边界——两个包的 `cordis.patch.yml` 共用 id `mcp-manager-ui`，composer 按 id 取**后列的那个**；真机实测两个都装着时应用照常启动、只注册一个面板、注册的是后继包，所以即便第二步失败，用户手里仍是一个能用的面板（反过来先卸自己会把面板弄没）。第二步失败不假装成功：横幅明说"旧的没卸掉、可手动 `dsh plugin remove`"。
+
+**真机验证**（隔离 `DSH_HOME`，用本地 tarball 当后继包；两处临时探针——假装 registry 上有 1.6.0、规格换成那个 tarball——**验完已还原，grep `TEMP-PROBE` = 0**）：横幅「这条线已并入 dsh-toolbox-ui（MCP + 技能）：v1.6.0 可用」+「迁移」按钮 → 点一下 4 秒 →「已迁移到 dsh-toolbox-ui v1.6.0，重启宿主后生效」→ `dsh.profile.bundles` 与 `dependencies` 里新包已登记、旧包已移除 → 重启后集合版在跑（面板有"技能"页签）、无失败。
+
+**发布顺序（有依赖，不能反）**：先发集合版 `dsh-toolbox-ui@1.6.0`（新包名的**首个版本必须由维护者本地交互式发布**——npm 要求包先存在才能配 trusted publisher），再发本版 `dsh-mcp-manager-ui@1.5.4`（推 tag → CI）。`release.yml` 顺带补了一条：**已经存在于 npm 的版本跳过 publish**——否则新包名首个版本本地发完、再推同一个 tag 时 CI 会撞「版本已存在」而失败，连 Release 都建不出来。
 
 ## issue #4「同时开两个项目 MCP 会失败」与 v1.5.3 发布（2026-10-11）
 
