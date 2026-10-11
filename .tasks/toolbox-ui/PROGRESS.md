@@ -5,7 +5,8 @@
 - Truth: .tasks/toolbox-ui/TODO.csv
 - Current: 源码整改第 4 批已完成（解包上界 / 输入大小闸 / PAX 头 / withFileLock / 原子提交 / 树根链接检查）；剩余见 Next
 - Latest validation: `node --test` → **503 pass / 0 fail**（2026-10-11 实测，本分支首次全绿）。R1 记的 537 是「删除内置精选目录 / skills.sh」**之前**的数，那一轮（`1876605`）连应用例一起删了，所以基线据实重置为 503 而不是把它当覆盖率下降；四批整改累计 13 项变异验证（启用判据、让位判据、内置安装、载荷 root/writable、acknowledged、删除接线、诊断恒空、扫描根、detail 读错根、解压上界、PAX 头、输入大小闸、并发锁、树根链接），2026-10-11 另加 4 项（同名 MCP 判重键、只读根守卫、只读根被写入、命名闸塞回旧安装命令）；`node .tasks/toolbox-ui/prototype/check-prototype.mjs` → 全部通过
-- Next: ① 整改第 5 批（TODO row 22）：`scanSources` 删、`searchRemote` 接线或删、`revision` 消费或删、剩余假绿、端到端用例 ② TODO row 21 非法条目诊断 ③ row 18 真机检查单 ④ row 17 外部源真机验收
+- Next: ① 整改第 5 批（TODO row 22）：`scanSources` 删、`searchRemote` 接线或删、`revision` 消费或删、剩余假绿、端到端用例 ② TODO row 21 非法条目诊断 ③ row 18 真机检查单 ④ row 17 外部源真机验收 ⑤ **同名副本扫描**（与 ② 同源）：宿主 `ctx.skills.list` 按名字去重、只返回**生效**的那一份，所以「两份都启用」时落选副本根本进不了面板——`docs/skills.md` 与 v1.6.0 稿子已按事实收窄措辞；要让"标出被遮蔽的那一份"对全部情形成立，得恢复一张**按根扫描全部技能文件**的候选表（`1876605` 删 `scanSources` 时一并丢了这条数据源），那张表同时就是 ② 的生产者
+- **2026-10-11 全功能验收发现并修掉的缺陷（技能面启停后列表错乱）**：真机在面板里停用一个技能后，列表把那一行**重复渲染 3 份**、并把「被遮蔽」徽章挂到邻居身上，详情状态停在旧值。根因：宿主发现缓存仍把改名前的技能报成「已启用」，而面板自己扫到了它的 `.disabled`，于是**同一身份**（`source \0 cwd \0 name`）在 `{skills, disabled}` 里各出现一次 → 客户端行 key 相同 → React **重复 key**（生产版不报警告，所以静默）。修法：在这两个数组的**产出处**（`SkillsManagerGateway.list`）保证互斥，停用件优先；身份元组由 `lib/skills-registry.js` 的 `skillRowKey` 与客户端 `skillIdentity` 两处用例钉同一个字面量。撤掉去重即变红（已验）。
 
 ## 恢复须知
 

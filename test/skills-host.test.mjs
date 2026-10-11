@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SkillsManagerGateway } from '../lib/index.js'
+import { skillRowKey } from '../lib/skills-registry.js'
 
 const hostIndex = readFileSync(fileURLToPath(new URL('../lib/index.js', import.meta.url)), 'utf8')
 
@@ -351,8 +352,54 @@ test('surfaces disabled skills even when a whole root is disabled', async () => 
   }
 })
 
-test('reads one skill body from the referenced root, on demand', async () => {
-  // 同一个名字可以存在于多个根（同名跨作用域是合法配置）。detail 必须读**引用指向的那个根**，
+test('a stale enabled row and the freshly scanned .disabled file are ONE row (the disabled one)', async () => {
+  // 真机复现的缺陷（2026-10-11）：面板刚把 SKILL.md 改名成 .disabled，宿主的发现缓存**仍然
+  // 报「已启用」**，而我们现场扫盘已经看到 .disabled —— 同一个身份在 `skills` 与 `disabled`
+  // 里各出现一次。客户端按 `source\0cwd\0name` 生成行 key，两行 key 相同 → React 重复 key：
+  // **生产版不报警告**，只是把那一行重复渲染（实测 3 份）、把「被遮蔽」徽章挂到邻居身上，
+  // 详情里的状态也停在旧值。所以契约是「一个身份一行，停用件优先」，在这两个数组的产出处成立。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-stale-'))
+  const agentsHome = join(base, 'agents-home')
+  const skillsRoot = join(agentsHome, 'skills')
+  const skillDir = join(skillsRoot, 'zhanggui')
+  await mkdir(skillDir, { recursive: true })
+  await writeFile(join(skillDir, 'SKILL.md.disabled'), '---\nname: zhanggui\ndescription: 磁盘上是停用那份\n---\n\n正文\n')
+  try {
+    const staleRow = {
+      name: 'zhanggui',
+      description: '缓存里那份（其实已经改名了）',
+      source: 'user-agents',
+      path: join(skillDir, 'SKILL.md'),
+    }
+    const ctx = {
+      // 陈旧视图：宿主缓存仍把它当**已启用**返回 —— 这正是缺陷的输入
+      get: (name) => (name === 'skills' ? { list: async () => [staleRow] } : undefined),
+      loader: {
+        entries: () => [{
+          options: {
+            name: '@deepseek-ai/dsh-skill-filesystem',
+            config: { dshHome: join(base, 'dsh-home'), agentsHome },
+          },
+        }],
+      },
+    }
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
+    assert.deepEqual(result.skills.map((row) => row.name), [],
+      '缓存里那条陈旧行必须被剔掉：它和停用件是同一个身份，同时出现就是客户端重复 key 的来源')
+    assert.deepEqual(result.disabled.map((row) => row.name), ['zhanggui'], '停用件才是磁盘上的真相，必须留下')
+    // 契约本身：两个数组的身份**互不相交**（客户端行 key 就是这个身份）。
+    const keys = [...result.skills, ...result.disabled].map((row) => skillRowKey(row))
+    assert.equal(new Set(keys).size, keys.length, `同一个身份只能出现一次，实际：${JSON.stringify(keys)}`)
+    // 元组钉死：与客户端 lib/client.js 的 skillIdentity 必须是同一个字面量
+    // （client-behavior 那条用例钉的是同一串）。
+    assert.equal(skillRowKey(staleRow), 'user-agents\u0000\u0000zhanggui',
+      '身份元组变了就要同时改客户端 skillIdentity —— 否则去重失效、重复 key 回归')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('reads one skill body from the referenced root, on demand', async () => {  // 同一个名字可以存在于多个根（同名跨作用域是合法配置）。detail 必须读**引用指向的那个根**，
   // 而不是宿主按 rank 给的胜者 —— 否则点「被遮蔽」那一行看到的是别人的正文（D8 的精确模型）。
   // 这里让 user-dsh（rank 400，胜者）与 user-agents（rank 500）各有一份，读后者。
   const base = await mkdtemp(join(tmpdir(), 'dsh-skills-detail-'))
