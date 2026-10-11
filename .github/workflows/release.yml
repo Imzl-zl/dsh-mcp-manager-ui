@@ -83,18 +83,23 @@ jobs:
 
       # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
       # 不放 docs/ —— docs 会随包发布到 npm。
+      #
+      # ⚠️ 标题里的包名**从 package.json 取，不写死**：同一个仓库里有两条产品线
+      # （main 的 dsh-mcp-manager-ui 与 toolbox 线的 dsh-toolbox-ui），写死会让其中一条
+      # 的 Release 标题挂上另一条的包名（v1.6.0 的稿子当初就是这么错的）。
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          name="$(node -p "require('./package.json').name")"
           notes=".github/release-notes/${GITHUB_REF_NAME}.md"
           if [ -f "$notes" ]; then
             gh release create "$GITHUB_REF_NAME" \
-              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
+              --title "${name} ${GITHUB_REF_NAME}" \
               --notes-file "$notes" --verify-tag
           else
             gh release create "$GITHUB_REF_NAME" \
-              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
+              --title "${name} ${GITHUB_REF_NAME}" \
               --generate-notes --verify-tag
           fi

@@ -98,20 +98,22 @@ test('the old package name survives only where it is still factually correct', (
   // URL、安装命令、localStorage 键、环境变量名，以及在**同一行内**明确指代旧包的措辞。
   const reasons = [
     { pattern: /Imzl-zl\/dsh-mcp-manager-ui/, why: '指向真实仓库（D13 双包同仓，仓库本身仍叫这个名字）' },
-    { pattern: /^dsh plugin --profile web (?:add|update) (?:github:Imzl-zl\/dsh-mcp-manager-ui|dsh-mcp-manager-ui)/, why: '**旧包**的安装命令（迁移说明要保留）' },
+    // ⚠️ 这里**故意不再**放行「`dsh plugin … add/update <旧包>`」这类安装命令行。
+    // 曾经的放行理由是"旧包的安装命令（迁移说明要保留）"，但它在**行的形状**上做判定：
+    // 「叫用户装旧包」和「告诉用户怎么从旧包迁过来」长得一模一样，于是 v1.6.0 的发布稿把
+    // 旧包名当成主安装路径（npm 上装不到这条线）也照样通过。迁移说明现在靠**同行的
+    // 「旧包 / 此前叫 / 迁移」措辞**放行（见下面那条），安装命令本身不再有豁免。
     // localStorage 键有**两种**写法（SPEC 附录 A 点名：`/entry`、`/fab-pos`、`.updateHint.dismissed`、
     // `.whatsNew.seen`），所以分隔符既可能是 `/` 也可能是 `.`——只写 `/` 会漏放行一半。
     { pattern: /dsh-mcp-manager-ui[/.]/, why: 'localStorage 键（键名不影响功能，改了会丢用户设置）' },
     { pattern: /DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK/, why: '既有环境变量名（改了会让用户已设的开关失效）' },
     // 指代旧包的说明文字：必须**同行**出现明确的指代词，光有包名不算。
-    { pattern: /(?:旧包|旧版|让位|前者|migration|legacy|renamed|already registered|迁移)/, why: '明确指代旧包的说明文字' },
+    { pattern: /(?:旧包|旧版|让位|前者|migration|legacy|renamed|already registered|迁移|此前叫)/, why: '明确指代旧包的说明文字' },
     // 让位检测的测试夹具：它**故意**模拟「另一个（旧的）管理插件」，旧包名是它要匹配的目标。
     { pattern: /dsh-mcp-manager-ui-old/, why: '让位检测的测试夹具（模拟旧包）' },
     // 真机形态的夹具与断言：旧包的 loader `name` 就是旧包名本身（它与新包**共用同一个 patch id**，
     // 所以判据只能按 name）。这里必须是旧包名的**带引号字面量**，否则测不到 C2 那条缺陷。
     { pattern: /'dsh-mcp-manager-ui'/, why: '让位检测里「旧包真实 loader name」的夹具与断言' },
-    // 旧包的安装命令断言：迁移说明要保留，否则老用户找不到升级路径。
-    { pattern: /dsh plugin --profile web add dsh-mcp-manager-ui/, why: '旧包安装命令的断言' },
     // 「`name: <旧名>`」这种引用改名前的挂载名、用于说明的注释。
     { pattern: /name: dsh-mcp-manager-ui/, why: '注释里引用改名前的挂载名' },
     // 定义基准的测试自身：OLD_NAME 及其注释**必须**保留旧名（否则判据就失效了）。
@@ -127,11 +129,15 @@ test('the old package name survives only where it is still factually correct', (
     // localStorage 键的两种分隔符写法已在上面覆盖；这里补「文档里举例说明键名」的行。
     { pattern: /dsh-mcp-manager-ui[./](?:entry|fab-pos|updateHint|whatsNew)/, why: '文档里举例说明 localStorage 键名' },
     // npm Trusted Publisher 的 repository 字段 = GitHub 仓库名（仍叫旧名）。
-    { pattern: /repository \`dsh-mcp-manager-ui\`|repository `dsh-mcp-manager-ui`/, why: 'Trusted Publisher 的 repository = 仓库名' },
+    // npm Trusted Publisher 的 repository 字段、以及 workflow 注释里的同一件事：
+    // 值是 **GitHub 仓库名**（仓库仍叫旧名），分隔符按写法可能是 `=` 也可能被反引号包着。
+    { pattern: /repository\s*[=:]?\s*`?dsh-mcp-manager-ui/, why: 'Trusted Publisher / workflow 里的 repository = 仓库名' },
     // 本测试自己的白名单模式行（它们**必须**含旧名字面量才起作用）。
     { pattern: /\{ pattern: \//, why: '本测试的模式定义行' },
-    // 解释「仓库名 ≠ 包名」的注释：它必须写出两个名字才能说明区别。
-    { pattern: /仓库仍是|仓库不跟着改|仓库名与包名/, why: '解释仓库名与包名区别的注释' },
+    // 解释「仓库名 ≠ 包名」的注释：必须写出两个名字才能说明区别（仓库仍叫旧名）。
+    { pattern: /仓库仍|仓库名(?:与包名|不变)|仓库不跟着改/, why: '解释仓库名与包名区别的注释' },
+    // 解释「同一个仓库里两条产品线」的注释：同理必须同时写出两个包名。
+    { pattern: /两条产品线|toolbox 线/, why: '解释同一仓库两条产品线的注释' },
   ]
   /** 这一行里旧包名的每一次出现，是否都落在某个可解释的上下文里。 */
   const excusable = (line) => {
@@ -142,13 +148,21 @@ test('the old package name survives only where it is still factually correct', (
 
   const stragglers = []
   const files = []
-  for (const dir of ['lib', 'test', 'scripts', '.github', 'docs']) {
-    try {
-      for (const name of readdirSync(join(ROOT, dir))) {
-        if (/\.(?:js|mjs|md|ya?ml)$/.test(name)) files.push(`${dir}/${name}`)
-      }
-    } catch { /* 目录不存在就跳过 */ }
+  // ⚠️ 必须**递归**：首版只 readdir 一层，于是 `.github/` 下的子目录整个没被看过——
+  // `.github/release-notes/v1.6.0.md` 把旧包名当成主安装路径（npm 上根本装不到这条线）、
+  // `release.yml` 把 Release 标题写死成旧包名，两处都因此留了好几轮才被翻出来。
+  // 这条闸的价值全在覆盖面，漏一个子目录就等于漏一整类文件。
+  const walk = (dir) => {
+    let entries
+    try { entries = readdirSync(join(ROOT, dir), { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+      const relative = `${dir}/${entry.name}`
+      if (entry.isDirectory()) { walk(relative); continue }
+      if (/\.(?:js|mjs|md|ya?ml)$/.test(entry.name)) files.push(relative)
+    }
   }
+  for (const dir of ['lib', 'test', 'scripts', '.github', 'docs']) walk(dir)
   files.push('package.json', 'cordis.patch.yml', 'README.md', 'README.en.md', 'pnpm-workspace.yaml')
 
   let occurrences = 0
@@ -158,6 +172,9 @@ test('the old package name survives only where it is still factually correct', (
     // ⚠️ 历史设计文档**按文件**豁免：它记的是「当时（包还叫旧名）为什么这么决策」，
     // 改它等于改写历史记录。行级白名单表达不了这件事——它的每一行都只是普通叙述。
     if (relative.endsWith('mcp-market-design.md')) continue
+    // 历史**发布稿**同理豁免：v1.5.x 及更早发的是旧包，稿子里的安装命令与 compare 链接
+    // 是既成事实。但**当前版本**那份必须查——它就是这次要发出去的稿子。
+    if (/^\.github\/release-notes\//.test(relative) && relative !== `.github/release-notes/v${packageJson.version}.md`) continue
     for (const line of text.split('\n')) {
       if (!line.includes(OLD_NAME)) continue
       occurrences += line.split(OLD_NAME).length - 1

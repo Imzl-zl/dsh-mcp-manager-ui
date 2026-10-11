@@ -238,7 +238,7 @@ test('no second cordis.patch.yml entry was added for the skills service', () => 
   // `- id: mcp-manager-ui / name: <包名>`。
   //
   // ⚠️ 必须数**条目总数**，不能只数某个特定 id——首版只断言 `id: mcp-manager-ui` 出现 1 次，
-  // 于是「新增一条 id: skills-manager-ui」照样通过（变异测试抓到）。真正的约束是
+  // 于是「新增一条别的 id 的条目」照样通过（变异测试抓到）。真正的约束是
   // 「不得为 skills 新增 patch 条目」，与那条新条目叫什么名字无关。
   const patch = readFileSync(fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)), 'utf8')
   const ids = [...patch.matchAll(/^\s*-\s*id:\s*(\S+)/gm)].map((match) => match[1])

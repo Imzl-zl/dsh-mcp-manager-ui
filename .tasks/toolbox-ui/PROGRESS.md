@@ -4,7 +4,7 @@
 - FinalizationStatus: active
 - Truth: .tasks/toolbox-ui/TODO.csv
 - Current: 源码整改第 4 批已完成（解包上界 / 输入大小闸 / PAX 头 / withFileLock / 原子提交 / 树根链接检查）；剩余见 Next
-- Latest validation: `node --test` → **503 pass / 0 fail**（2026-10-11 实测，本分支首次全绿）。R1 记的 537 是「删除内置精选目录 / skills.sh」**之前**的数，那一轮（`1876605`）连应用例一起删了，所以基线据实重置为 503 而不是把它当覆盖率下降；四批整改累计 13 项变异验证（启用判据、让位判据、内置安装、载荷 root/writable、acknowledged、删除接线、诊断恒空、扫描根、detail 读错根、解压上界、PAX 头、输入大小闸、并发锁、树根链接），2026-10-11 另加 3 项（同名 MCP 判重键、只读根守卫、只读根被写入）；`node .tasks/toolbox-ui/prototype/check-prototype.mjs` → 全部通过
+- Latest validation: `node --test` → **503 pass / 0 fail**（2026-10-11 实测，本分支首次全绿）。R1 记的 537 是「删除内置精选目录 / skills.sh」**之前**的数，那一轮（`1876605`）连应用例一起删了，所以基线据实重置为 503 而不是把它当覆盖率下降；四批整改累计 13 项变异验证（启用判据、让位判据、内置安装、载荷 root/writable、acknowledged、删除接线、诊断恒空、扫描根、detail 读错根、解压上界、PAX 头、输入大小闸、并发锁、树根链接），2026-10-11 另加 4 项（同名 MCP 判重键、只读根守卫、只读根被写入、命名闸塞回旧安装命令）；`node .tasks/toolbox-ui/prototype/check-prototype.mjs` → 全部通过
 - Next: ① 整改第 5 批（TODO row 22）：`scanSources` 删、`searchRemote` 接线或删、`revision` 消费或删、剩余假绿、端到端用例 ② TODO row 21 非法条目诊断 ③ row 18 真机检查单 ④ row 17 外部源真机验收
 
 ## 恢复须知
@@ -12,7 +12,8 @@
 - **恢复入口**：本文件 → `TODO.csv` 的 `status` / `notes`。设计真值＝`SPEC.md`；界面设计真值＝`prototype/unified-design.html`。
 - **双包关系**：本分支产出 `dsh-toolbox-ui`（1.6.0）；`main` 上的 `dsh-mcp-manager-ui` 继续 MCP-only 维护。MCP 修复先落 main，再 **git merge** 进本分支（不是 cherry-pick）。
 - **改名（row 16 / D16）已完成**，不再是「最后一步」；此后契约 id 与文档一律用新包名。
-- **工作树 / 分支 2026-10-11 改名**：`.worktrees/feature/skills-manager` @ `feature/skills-manager` → `.worktrees/feature/toolbox-ui` @ `feature/toolbox-ui`（git 的内部 admin 目录 `.git/worktrees/toolbox-ui` 一并改）。`web` 与 `skillsuitest` 两个 profile 的 `link:` 与 `node_modules` junction 已同步到新路径；旧路径留了一个 junction 桥，等跑过 `web` 的宿主重启一次之后即可删。
+- **改名 2026-10-11（一次改到位）**：分支 / 工作树 / git admin 目录 `.worktrees/feature/toolbox-ui` @ `feature/toolbox-ui`（原 `…/skills-manager`）；技能面文档 `docs/skills.md`（原 `docs/skills-manager.md`）；任务记录目录 `.tasks/toolbox-ui/`（原 `.tasks/skills-manager/`，它装的是**整条线**的记录，早就有 MCP 内容）。`web` 与 `skillsuitest` 两个 profile 的 `link:` 与 `node_modules` junction 已同步；旧路径留了一个 junction 桥，等跑过 `web` 的宿主重启一次之后即可删。
+- **改名顺带修掉两处「身份写错」**（此前一直没人看见，因为命名闸只扫一层目录）：`.github/release-notes/v1.6.0.md` 把旧包名当**主安装路径**（npm 上根本装不到这条线）→ 改成新包名并补上「包名变了、`update` 不跨包名」的迁移说明；`.github/workflows/release.yml` 把 Release 标题**写死**成旧包名 → 改成从 `package.json` 的 `name` 推导（同仓库两条产品线，写死必错一条）。
 - **本轮（R1）改动全部未提交**：13 个已跟踪文件改动 + `lib/skillhub.js` + 7 个新测试文件 + `prototype/unified-design.html`。**R1 的 row 17/18 是按这些未提交工作反推补上的行**（原计划只有 16 行，且 PROGRESS 曾写着「16/16 全部 DONE」——那与实际状态不符，已改回 `active`）。
 - **版本不用动**：`dsh-toolbox-ui` 在 npm 上仍是 404（2026-10-10 实测未发布），所以 R1（skillhub 源 + 面板对齐）直接并进尚未发布的 1.6.0，SPEC 约束 24 的连带面没有被触发。
 - **旧的过程日记去哪了**：SPEC/TODO/PROGRESS 在 commit `6d5a76b` 的版本里有逐行过程记录（含每次变异测试的细节）。本次按协议把它们压回「行级事实 + 跨行教训」，原文可用 `git show 6d5a76b:.tasks/toolbox-ui/TODO.csv` 取回。
@@ -31,3 +32,4 @@
 10. **替换锚点要包含被保留的部分**，只用目标行做锚点会把它一起吃掉（曾误删 `const h = React2.createElement`）。
 11. **引用一个「应该是既有」的东西前先确认它真的存在**：凭想象写 `readWorkspaces()` 会静默走错路径。
 12. **常驻的计数类断言用下界**（样式前缀 `> 500`），钉死数字会让每次加样式都要改测试。
+13. **闸的覆盖面本身也要被断言**：`package-rename` 的目录扫描首版只 `readdir` 一层，`.github/` 的子目录（release notes 与 workflows）整类无人看管——于是「v1.6.0 发布稿把旧包名当主安装路径」和「release.yml 把 Release 标题写死成旧包名」两处真错留了好几轮。改成递归之后又发现第二层问题：白名单按**行的形状**放行「`dsh plugin … add <旧包>`」= 把「叫用户装旧包」和「教用户从旧包迁过来」判成同一件事，前者正是缺陷形态。修法是让迁移说明靠**同行的措辞**（旧包 / 此前叫 / 迁移）放行，安装命令本身不再有豁免，并做变异验证（塞回旧命令 → 闸红且精确点名）。
