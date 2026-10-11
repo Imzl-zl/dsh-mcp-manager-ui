@@ -16,6 +16,19 @@
 
 An **MCP management panel** for DeepSeek Harness Web: click the floating button (bottom-right) or the sidebar **MCP** entry to inspect connection status, add servers, and edit configuration. The panel floats above the session — **it never interrupts an ongoing conversation**.
 
+> **This line has been merged into [`dsh-toolbox-ui`](https://www.npmjs.com/package/dsh-toolbox-ui) (MCP + skills).**
+> It combines this project's MCP panel with a skills face (including a skill market) in one panel, and is a
+> superset of it. Since **1.5.4**, `dsh-mcp-manager-ui` does exactly one thing — move existing installs over:
+>
+> ```bash
+> dsh plugin update        # pulls 1.5.4
+> # after restarting the host, the panel shows a "迁移" (migrate) button:
+> # one click installs dsh-toolbox-ui and removes this package
+> ```
+>
+> New users should install the successor directly:
+> `dsh plugin --profile web add dsh-toolbox-ui@^1.6.1`.
+
 > In-depth design notes (shared-connection model, connection-state semantics, known limits) are currently Chinese-only: [docs/design.md](docs/design.md).
 
 ## Screenshots

@@ -77,9 +77,19 @@ jobs:
       - name: Test
         run: npm test
 
+      # ⚠️ 已经发过的版本要**跳过**，而不是报错：本地补发过、或给已发布的版本补推 tag 时，
+      # 这一步必然撞上「版本已存在」。那不是错误——CI 该做的是校验版本、跑测试、建 Release。
+      # 先问一句 npm，已经在上面就跳过并打印一行（谁都能从日志里看出发生了什么）。
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
-        run: npm publish
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "${name}@${version} 已经在 npm 上——跳过 publish，继续建 Release"
+          else
+            npm publish
+          fi
 
       # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
       # 不放 docs/ —— docs 会随包发布到 npm。

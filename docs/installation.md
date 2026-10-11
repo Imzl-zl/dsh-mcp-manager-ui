@@ -12,6 +12,14 @@
 
 ## 安装
 
+> **这条线已并入 [`dsh-toolbox-ui`](https://www.npmjs.com/package/dsh-toolbox-ui)（MCP + 技能）。**
+> `dsh-mcp-manager-ui` 自 **1.5.4** 起只是**迁移版**：`dsh plugin update` 拿到 1.5.4 并重启宿主后，
+> 面板顶部会出现「迁移」按钮，点一下即装上后继包并卸掉本包。**新用户请直接装后继包**：
+>
+> ```sh
+> dsh plugin --profile web add dsh-toolbox-ui@^1.6.1
+> ```
+
 推荐用 npm 安装：包里的 `^1.x` 范围让后续 `dsh plugin update` 能自动升级小版本。
 
 ```sh

@@ -16,6 +16,17 @@
 
 DeepSeek Harness Web 的 **MCP 管理面板**：右下角悬浮按钮或侧栏「MCP」入口，点开就能看连接状态、加服务器、改配置——面板浮在会话之上，**不打断正在进行的对话**。
 
+> **这条线已并入 [`dsh-toolbox-ui`](https://www.npmjs.com/package/dsh-toolbox-ui)（MCP + 技能）。**
+> 它把本项目的 MCP 面板与技能面（含技能市场）合在同一个面板里，是超集。`dsh-mcp-manager-ui`
+> 自 **1.5.4** 起只做一件事——把已有安装送过去：
+>
+> ```bash
+> dsh plugin update        # 拿到 1.5.4
+> # 重启宿主后面板顶部出现「迁移」按钮：点一下即装 dsh-toolbox-ui 并卸掉本包
+> ```
+>
+> 新用户直接装后继包：`dsh plugin --profile web add dsh-toolbox-ui@^1.6.1`。
+
 ## 界面预览
 
 ### 全局管理面板
