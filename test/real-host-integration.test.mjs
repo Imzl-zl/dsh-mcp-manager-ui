@@ -115,6 +115,45 @@ process.stdin.on('data', (chunk) => {
 })
 `
 
+// 可指定工具名的夹具服务：让「全局同名条目」提供与项目条目**不同**的工具集。同名但不同实例
+// 要能被区分开，靠的正是工具集不同（否则两种行为在断言上不可分）。
+const fixtureServerWithTool = (tool) => `
+import { writeFileSync } from 'node:fs'
+const sentinel = process.argv[2]
+process.stdin.setEncoding('utf8')
+let buf = ''
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+process.stdin.on('end', () => process.exit(0))
+process.on('exit', () => { try { writeFileSync(sentinel, 'bye') } catch {} })
+process.stdin.on('data', (chunk) => {
+  buf += chunk
+  let index
+  while ((index = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, index)
+    buf = buf.slice(index + 1)
+    if (!line.trim()) continue
+    const message = JSON.parse(line)
+    if (message.method === 'initialize') {
+      send({ jsonrpc: '2.0', id: message.id, result: {
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: '${tool}', version: '1.0.0' },
+      } })
+    } else if (message.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id: message.id, result: { tools: [{
+        name: '${tool}',
+        description: '${tool}',
+        inputSchema: { type: 'object', properties: {} },
+      }] } })
+    } else if (message.method === 'tools/call') {
+      send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: '${tool}' }] } })
+    } else if (message.id !== undefined) {
+      send({ jsonrpc: '2.0', id: message.id, result: {} })
+    }
+  }
+})
+`
+
 async function waitFor(predicate, timeoutMs = WAIT_MS) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -129,9 +168,13 @@ async function waitFor(predicate, timeoutMs = WAIT_MS) {
  * 起一个真实宿主：真 Loader + 真 ToolRuntime + 真 scope，用最小替身只顶替 `agents`（官方契约是
  * `create/resume(options)`，由宿主调用 `options.setup(agentCtx, agent)`，agentCtx 是 loop scope ctx）。
  * @param wsRoot - 项目目录（含 .dsh/mcp.json）。
- * @returns 宿主句柄：ctx、tools、创建会话、以及清理。
+ * @param options.scopeModuleUrl - 用第二份 dsh-scope 实例加载（制造作用域身份失效）。
+ * @param options.globalServers - 以**全局条目**的形态挂载的 mcp-client 实例（生产里就是 profile
+ *   patch 里的 mcp 条目：它既在 `loader.entries()` 里，又有一条活在全局层的连接）。两者缺一都不是
+ *   生产形状，所以这里两件一起做——否则插件会以为自己没有同名全局条目。
+ * @returns 宿主句柄：ctx、tools、创建会话（可按工作区）、以及清理。
  */
-async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
+async function createRealHost(wsRoot, { scopeModuleUrl, globalServers = [] } = {}) {
   const ctx = new Context()
   ctx.baseUrl = new URL('../', import.meta.url).href
   await ctx.plugin(Loader)
@@ -155,9 +198,26 @@ async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
   const tools = ctx.get('tools')
   if (!tools) throw new Error('ToolRuntime 未激活')
 
+  // 全局条目：挂一份真 mcp-client 到根 ctx（= 全局层），并让它出现在 loader 的条目清单里——
+  // 这正是生产里 profile patch 中 mcp 条目的形状。
+  if (globalServers.length) {
+    const mcpClient = await ctx.loader.import('@deepseek-ai/dsh-mcp-client')
+    const fibers = globalServers.map((config) => ctx.plugin(
+      { apply: mcpClient.apply, inject: mcpClient.inject, name: mcpClient.name, Config: mcpClient.Config },
+      config,
+    ))
+    const entries = ctx.loader.entries.bind(ctx.loader)
+    ctx.loader.entries = () => [
+      ...entries(),
+      ...globalServers.map((config) => ({ options: { name: '@deepseek-ai/dsh-mcp-client', config } })),
+    ]
+    await Promise.all(fibers)
+  }
+
   const agentScopes = []
   const agents = {
     async create(options = {}) {
+      const cwd = options.cwd ?? wsRoot
       const created = {}
       const ready = new Promise((resolve) => { created.resolve = resolve })
       // 生产形状：agent scope 建在注入了 tools 的 fiber 下（dsh-agent-loop 的 AgentLoop.inject 同样含 tools），
@@ -172,7 +232,7 @@ async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
       // 真实宿主的创建事务（dsh-agent-loop 在 publish 之前）：先 await 调用方的 setup，再 await
       // `agent/created` 的**串行**监听器，全部跑完才把 agent 交还调用方。插件现在就挂在那上面，
       // 所以这个替身必须真的派发该事件 —— 否则用例会「绿着但什么都没挂」。
-      const agent = { session: { header: { cwd: wsRoot } }, ctx: created.scope.ctx }
+      const agent = { session: { header: { cwd } }, ctx: created.scope.ctx }
       const commit = await options.setup?.(created.scope.ctx, agent)
       commit?.commit?.()
       await ctx.serial(ctx, 'agent/created', { agent, source: 'startup' })
@@ -187,7 +247,7 @@ async function createRealHost(wsRoot, { scopeModuleUrl } = {}) {
     ctx,
     tools,
     agents,
-    async createAgent() { return ctx.get('agents').create({}) },
+    async createAgent(cwd = wsRoot) { return ctx.get('agents').create({ cwd }) },
     warnings() { return warnings.slice() },
     async cleanup() {
       for (const agentScope of agentScopes) await agentScope.dispose()
@@ -225,7 +285,7 @@ test('real host: tools landing in the global layer are reported as a scope failu
     const row = summarizeWorkspaceRow(host.ctx, wsRoot, { name: 'fixture', transport: 'stdio' }, undefined)
     assert.equal(row.scopeFailed, true)
     assert.equal(row.status, 'failed')
-    assert.match(row.lastError, /两份模块实例/)
+    assert.match(row.lastError, /有多份模块实例/)
     assert.notEqual(row.mountFailed, true)
 
     const scopeErrors = workspaceScopeErrorsView(wsRoot)
@@ -322,6 +382,137 @@ test('real host: one shared mcp-client per project, tools projected into each se
     assert.ok(
       await waitFor(async () => (await projectConnectionsView(host.ctx)).length === 0),
       '回收完成后必须从诊断视图消失',
+    )
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// 用户现场的形状（issue #4 评论：「同时开两个项目 mcp 会失败」）：两个工作区**同时**开着会话，
+// 各自配同一份 MCP 清单（用户正是用面板的「复制到…」把一份清单复制进另一个项目的），而且这些
+// serverName 与一条全局条目同名。这一条覆盖夹具层测不到的三件事：真实 mcp-client 的 serverName
+// 注册表按 `scopeOf(ctx)` 判重、真实 dsh-tools 的合并视图语义、以及同名时「工具归属」与「前缀」
+// 不是一回事。
+test('real host: two workspaces mounting the same server names at once stay isolated, each keeping its own tools', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-two-workspaces-'))
+  const wsA = join(root, 'ws-a')
+  const wsB = join(root, 'ws-b')
+  const projectServer = join(root, 'project-server.mjs')
+  const globalServer = join(root, 'global-server.mjs')
+  await mkdir(join(wsA, '.dsh'), { recursive: true })
+  await mkdir(join(wsB, '.dsh'), { recursive: true })
+  await writeFile(projectServer, fixtureServerWithTool('echo'))
+  await writeFile(globalServer, fixtureServerWithTool('globalOnly'))
+  const projectEntry = (sentinel) => ({ command: process.execPath, args: [projectServer, sentinel] })
+  // 两个项目配**完全同名**的两条 server：fixture 与 shared。ws-a 另外屏蔽同名的全局条目，
+  // 用来分辨「这个工具是我这条连接的」还是「全局那份的」。
+  await writeFile(join(wsA, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: projectEntry(join(root, 'a-fixture')), shared: projectEntry(join(root, 'a-shared')) },
+    exclude: ['shared'],
+  }, null, 2))
+  await writeFile(join(wsB, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: projectEntry(join(root, 'b-fixture')), shared: projectEntry(join(root, 'b-shared')) },
+  }, null, 2))
+
+  const host = await createRealHost(wsA, {
+    globalServers: [{ transport: 'stdio', serverName: 'shared', command: process.execPath, args: [globalServer, join(root, 'global-shared')] }],
+  })
+  try {
+    // 同一 app 里两个工作区同时开会话：这正是「同时开两个项目」。
+    const agentA = await host.createAgent(wsA)
+    const agentB = await host.createAgent(wsB)
+    const namesFor = (agent) => host.tools.schemas(agent.key).map((schema) => schema.name)
+
+    // 1. 一条都不许挂载失败 —— 跨项目的同名条目在 0.1.5 起的宿主上互不冲突。
+    assert.deepEqual(workspaceMountErrorsView(wsA), [], `ws-a 不应有挂载失败：${JSON.stringify(workspaceMountErrorsView(wsA))}`)
+    assert.deepEqual(workspaceMountErrorsView(wsB), [], `ws-b 不应有挂载失败：${JSON.stringify(workspaceMountErrorsView(wsB))}`)
+    // 同名条目存在时作用域身份也必须成立（两份 dsh-scope 才会让标签认不出来）。
+    assert.deepEqual(workspaceScopeErrorsView(wsA), [])
+    assert.deepEqual(workspaceScopeErrorsView(wsB), [])
+
+    // 2. 每个会话拿到**自己项目**那份连接的工具。
+    assert.ok(namesFor(agentA).includes('mcp__fixture__echo'), `ws-a 缺少自己项目的工具：${JSON.stringify(namesFor(agentA))}`)
+    assert.ok(namesFor(agentA).includes('mcp__shared__echo'), `ws-a 的同名项目条目必须挂上：${JSON.stringify(namesFor(agentA))}`)
+    assert.ok(namesFor(agentB).includes('mcp__fixture__echo'), `ws-b 缺少自己项目的工具：${JSON.stringify(namesFor(agentB))}`)
+    assert.ok(namesFor(agentB).includes('mcp__shared__echo'), `ws-b 的同名项目条目必须挂上：${JSON.stringify(namesFor(agentB))}`)
+
+    // 3. 全局同名条目的工具按 exclude 规则处理：ws-a 屏蔽了它 → 会话里不得出现；ws-b 没屏蔽 →
+    //    照常从全局层可见。若把全局那份的工具投射进会话自己的层（前缀相同就会），屏蔽会被绕过。
+    assert.ok(
+      await waitFor(() => namesFor(agentB).includes('mcp__shared__globalOnly')),
+      `未屏蔽的全局同名工具必须对 ws-b 可见：${JSON.stringify(namesFor(agentB))}`,
+    )
+    assert.equal(namesFor(agentA).includes('mcp__shared__globalOnly'), false,
+      `ws-a 屏蔽了全局 shared，其工具不得经项目条目绕回会话：${JSON.stringify(namesFor(agentA))}`)
+
+    // 4. 连接账目：每 (项目, serverName) 一条，一共四条；同名事实作为诊断带出而不是被当成冲突。
+    const connections = await projectConnectionsView(host.ctx)
+    assert.deepEqual(
+      connections.map((entry) => `${entry.serverName}@${entry.wsPath === wsA ? 'a' : 'b'}`).sort(),
+      ['fixture@a', 'fixture@b', 'shared@a', 'shared@b'],
+    )
+    // **四条都必须真的建成**：只断言"没有失败记录"会漏掉"连接其实没起来、错误又被后续投射清掉"
+    // 这种形状（同名条目下确实可能发生），fiber 状态才是用户看到的那两个事实。
+    assert.deepEqual(connections.map((entry) => entry.fiberState), [2, 2, 2, 2], '四条连接的 fiber 都必须 ACTIVE（apply 正常结束）')
+    assert.deepEqual(connections.map((entry) => entry.state), ['ready', 'ready', 'ready', 'ready'])
+    assert.deepEqual(connections.find((entry) => entry.wsPath === wsA && entry.serverName === 'shared').duplicateOwners, [wsB])
+  } finally {
+    await host.cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// 依赖树里 @deepseek-ai/dsh-scope 有两份实例时（宿主一份、插件一份 → 作用域标签互不相认），
+// 官方的 serverName 判重键会退化成 ctx.root。这一条钉住"那时也必须能用"：两个项目的同名条目
+// 照旧各自挂上，而不是第二个项目整批报 already in use（issue #4 评论的形状）。同一根因的另一面
+// ——工具确实落到了全局层——仍要如实报出来（那条作用域故障不能被沉默掉）。
+test('real host: two projects with the same server names still mount when dsh-scope is duplicated', { timeout: TEST_TIMEOUT_MS }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-two-workspaces-leak-'))
+  const wsA = join(root, 'ws-a')
+  const wsB = join(root, 'ws-b')
+  const server = join(root, 'fixture-server.mjs')
+  await mkdir(join(wsA, '.dsh'), { recursive: true })
+  await mkdir(join(wsB, '.dsh'), { recursive: true })
+  await writeFile(server, FIXTURE_SERVER)
+  const entry = (sentinel) => ({ command: process.execPath, args: [server, sentinel] })
+  // 两个项目共用同名条目 fixture；ws-a 另外有一条只有它自己用的 solo（用来钉住泄漏仍被报出）。
+  await writeFile(join(wsA, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: entry(join(root, 'a-fixture')), solo: entry(join(root, 'a-solo')) },
+  }, null, 2))
+  await writeFile(join(wsB, '.dsh', 'mcp.json'), JSON.stringify({
+    mcpServers: { fixture: entry(join(root, 'b-fixture')) },
+  }, null, 2))
+
+  const scopeEntry = createRequire(import.meta.url).resolve('@deepseek-ai/dsh-scope')
+  const host = await createRealHost(wsA, { scopeModuleUrl: `${pathToFileURL(scopeEntry).href}?two-workspaces-leak` })
+  try {
+    const agentA = await host.createAgent(wsA)
+    const agentB = await host.createAgent(wsB)
+    const namesFor = (agent) => host.tools.schemas(agent.key).map((schema) => schema.name)
+
+    // 1. 两边都不许有挂载失败：同名不再是"第二个项目整批起不来"。
+    assert.deepEqual(workspaceMountErrorsView(wsA), [], `ws-a 不应有挂载失败：${JSON.stringify(workspaceMountErrorsView(wsA))}`)
+    assert.deepEqual(workspaceMountErrorsView(wsB), [], `ws-b 不应有挂载失败：${JSON.stringify(workspaceMountErrorsView(wsB))}`)
+
+    // 2. 连接真的建成了（fiber ACTIVE 是面板"已连接"那半事实的真相源）。
+    const connections = await projectConnectionsView(host.ctx)
+    assert.deepEqual(connections.map((entry) => `${entry.serverName}@${entry.wsPath === wsA ? 'a' : 'b'}`).sort(),
+      ['fixture@a', 'fixture@b', 'solo@a'])
+    assert.deepEqual(connections.map((entry) => entry.fiberState), [2, 2, 2], '三条连接都必须 ACTIVE（同名也不许占用）')
+
+    // 3. 工具真的可用：标签认不出来时工具落在全局层，但会话必须看得到它们。
+    for (const [label, agent] of [['ws-a', agentA], ['ws-b', agentB]]) {
+      assert.ok(
+        await waitFor(() => namesFor(agent).includes('mcp__fixture__echo')),
+        `${label} 的会话必须能看到 fixture 的工具：${JSON.stringify(namesFor(agent))}`,
+      )
+    }
+
+    // 4. 泄漏（同一根因的另一面）仍要被报出来：solo 没有同名实例，所以判定可下。
+    assert.ok(
+      await waitFor(() => workspaceScopeErrorsView(wsA).some((entry) => entry.serverName === 'solo')),
+      `工具落到全局层必须如实报出：${JSON.stringify(workspaceScopeErrorsView(wsA))}`,
     )
   } finally {
     await host.cleanup()

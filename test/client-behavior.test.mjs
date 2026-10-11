@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyPlanKey, copyPlanReady, copyTargets, exportFileName, startVisibilityAwarePolling, wsSub };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyPlanKey, copyPlanReady, copyTargets, exportFileName, firstFailureReason, startVisibilityAwarePolling, wsSub };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -335,4 +335,16 @@ test('project row wording separates connection state from projection scope', () 
   for (const row of [base, { ...base, refs: 3 }, { status: 'failed' }, { status: 'stopped' }]) {
     assert.doesNotMatch(wsSub(row), /待会话挂载/)
   }
+})
+
+test('mount failure banner carries the reason instead of names only', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { firstFailureReason } = internals
+
+  // 原因来自 Host（官方 fiber 拒绝的原文 + 同名者 + 根因），面板只负责把它摆到横幅上：
+  // 用户拿着横幅提问时，最需要的恰恰是这句话——只列 serverName 等于把线索留给用户自己逐条点开。
+  assert.equal(firstFailureReason({ serverName: 'exa', error: 'mcp-client: serverName "exa" is already in use' }),
+    'mcp-client: serverName "exa" is already in use')
+  assert.equal(firstFailureReason({ serverName: 'exa', error: '  ' }), '（宿主没有给出原因）')
+  assert.equal(firstFailureReason(undefined), '（宿主没有给出原因）')
 })
