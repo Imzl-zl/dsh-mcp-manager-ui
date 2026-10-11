@@ -104,7 +104,7 @@ test('packed artifact resolves required DSH peers from the host fallback', async
     assert.ok(paths.includes('package/docs/installation.md'), 'docs/installation.md 应在包里')
     assert.ok(paths.includes('package/docs/json-import.md'), 'docs/json-import.md 应在包里')
     // 技能能力面的使用说明：装了插件的用户要能从包里读到它，而不是只能上网找。
-    assert.ok(paths.includes('package/docs/skills-manager.md'), 'docs/skills-manager.md 应在包里')
+    assert.ok(paths.includes('package/docs/skills.md'), 'docs/skills.md 应在包里')
     assert.ok(paths.includes('package/README.md') && paths.includes('package/README.en.md'), '两份 README 都应在包里')
     // scripts/ 与 test/ 是开发期的契约闸门（主题判据 + 令牌清单 + 全部用例），不随包发布：
     // 使用者装到的是预构建的 lib/，跑不到也用不上这些。反过来，plugin 的发布体积一旦混进

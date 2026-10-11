@@ -121,7 +121,7 @@ Retired-ids: D3, D4
 3. `node --test test/theme-contract.test.mjs`：`SKILLS_CSS` 被全部主题扫描器覆盖（不得假绿），且真实样式表 0 违规。
 4. `node --test test/client-lifecycle.test.mjs test/typert-manifest.test.mjs test/package-rename.test.mjs`：新增 RPC 两侧契约 deepEqual、过宿主 `validateTypertManifest`、身份耦合点全部落在新包名上。
 5. `node --test test/tasks-spec-integrity.test.mjs`：本 SPEC 的决策 id、约束编号、路径引用与三件套的协议字段可机械解析。
-6. `node .tasks/skills-manager/prototype/check-prototype.mjs`：设计原型自身过一遍主题契约（用仓库自己的扫描器，不另实现规则）。
+6. `node .tasks/toolbox-ui/prototype/check-prototype.mjs`：设计原型自身过一遍主题契约（用仓库自己的扫描器，不另实现规则）。
 7. 真机：在 desktop profile 挂载后，面板能在 MCP / 技能间切换；技能列表显示本机 `~/.agents/skills` 的技能及其真实作用域；启停一个技能后 DSH 的 watcher 生效（`skill` 工具目录随之变化）。改了 `lib/client.js` 就必须走这一步——客户端那半是替身测试，失败表现是「面板渲染不对」，没有任何用例会变红。
 8. 改名完成后：`npm pack` 产物可被 `dsh plugin add` 安装，且与旧包共存时新包让位（只有旧包入口）。
 

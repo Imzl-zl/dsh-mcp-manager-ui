@@ -9,7 +9,7 @@
 // （scripts/theme-spec.mjs，与主题测试同一份实现），所以结论是权威判据给的，
 // 而不是这里重新实现的一套规则。
 //
-//   node .tasks/skills-manager/prototype/check-prototype.mjs
+//   node .tasks/toolbox-ui/prototype/check-prototype.mjs
 import { readFileSync } from 'node:fs'
 import {
   unpairedFullRound,

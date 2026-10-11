@@ -18,7 +18,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TASK = join(ROOT, '.tasks', 'skills-manager')
+const TASK = join(ROOT, '.tasks', 'toolbox-ui')
 const SPEC_PATH = join(TASK, 'SPEC.md')
 const TODO_PATH = join(TASK, 'TODO.csv')
 const PROGRESS_PATH = join(TASK, 'PROGRESS.md')
@@ -241,5 +241,5 @@ test('PROGRESS 有协议六字段，且状态不与行状态矛盾', { skip: !PR
       `FinalizationStatus 是「${finalization}」却没有任何未完成的行——要么收口成 complete，要么状态写错了`)
   }
   const truth = /^- Truth: (.+)$/m.exec(progress)?.[1]
-  assert.ok(truth.includes('.tasks/skills-manager/TODO.csv'), 'Truth 必须指向本任务的 TODO.csv')
+  assert.ok(truth.includes('.tasks/toolbox-ui/TODO.csv'), 'Truth 必须指向本任务的 TODO.csv')
 })

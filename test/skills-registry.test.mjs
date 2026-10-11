@@ -3,7 +3,7 @@
 // 这一层是纯函数 + 薄封装，不碰文件系统、不写盘——所以用手搓 ctx 即可测（沿用
 // workspace-host.test.mjs 的 createHostFixture 手法），不需要真宿主。
 //
-// 关键设计约束（见 .tasks/skills-manager/SPEC.md 约束 12/13）：
+// 关键设计约束（见 .tasks/toolbox-ui/SPEC.md 约束 12/13）：
 //   - 不传 cwd 时宿主只给用户级/自定义/bundled 技能；项目技能必须显式传 cwd。
 //     故「列出全部作用域」必须对每个工作区各查一次再合并。
 //   - 宿主返回的 source 是唯一可靠的作用域依据（本机 ~/.dsh/skills 就不存在，

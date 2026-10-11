@@ -2,9 +2,9 @@
 
 - Shape: durable
 - FinalizationStatus: active
-- Truth: .tasks/skills-manager/TODO.csv
+- Truth: .tasks/toolbox-ui/TODO.csv
 - Current: 源码整改第 4 批已完成（解包上界 / 输入大小闸 / PAX 头 / withFileLock / 原子提交 / 树根链接检查）；剩余见 Next
-- Latest validation: `node --test` → **503 pass / 0 fail**（2026-10-11 实测，本分支首次全绿）。R1 记的 537 是「删除内置精选目录 / skills.sh」**之前**的数，那一轮（`1876605`）连应用例一起删了，所以基线据实重置为 503 而不是把它当覆盖率下降；四批整改累计 13 项变异验证（启用判据、让位判据、内置安装、载荷 root/writable、acknowledged、删除接线、诊断恒空、扫描根、detail 读错根、解压上界、PAX 头、输入大小闸、并发锁、树根链接），2026-10-11 另加 3 项（同名 MCP 判重键、只读根守卫、只读根被写入）；`node .tasks/skills-manager/prototype/check-prototype.mjs` → 全部通过
+- Latest validation: `node --test` → **503 pass / 0 fail**（2026-10-11 实测，本分支首次全绿）。R1 记的 537 是「删除内置精选目录 / skills.sh」**之前**的数，那一轮（`1876605`）连应用例一起删了，所以基线据实重置为 503 而不是把它当覆盖率下降；四批整改累计 13 项变异验证（启用判据、让位判据、内置安装、载荷 root/writable、acknowledged、删除接线、诊断恒空、扫描根、detail 读错根、解压上界、PAX 头、输入大小闸、并发锁、树根链接），2026-10-11 另加 3 项（同名 MCP 判重键、只读根守卫、只读根被写入）；`node .tasks/toolbox-ui/prototype/check-prototype.mjs` → 全部通过
 - Next: ① 整改第 5 批（TODO row 22）：`scanSources` 删、`searchRemote` 接线或删、`revision` 消费或删、剩余假绿、端到端用例 ② TODO row 21 非法条目诊断 ③ row 18 真机检查单 ④ row 17 外部源真机验收
 
 ## 恢复须知
@@ -15,7 +15,7 @@
 - **工作树 / 分支 2026-10-11 改名**：`.worktrees/feature/skills-manager` @ `feature/skills-manager` → `.worktrees/feature/toolbox-ui` @ `feature/toolbox-ui`（git 的内部 admin 目录 `.git/worktrees/toolbox-ui` 一并改）。`web` 与 `skillsuitest` 两个 profile 的 `link:` 与 `node_modules` junction 已同步到新路径；旧路径留了一个 junction 桥，等跑过 `web` 的宿主重启一次之后即可删。
 - **本轮（R1）改动全部未提交**：13 个已跟踪文件改动 + `lib/skillhub.js` + 7 个新测试文件 + `prototype/unified-design.html`。**R1 的 row 17/18 是按这些未提交工作反推补上的行**（原计划只有 16 行，且 PROGRESS 曾写着「16/16 全部 DONE」——那与实际状态不符，已改回 `active`）。
 - **版本不用动**：`dsh-toolbox-ui` 在 npm 上仍是 404（2026-10-10 实测未发布），所以 R1（skillhub 源 + 面板对齐）直接并进尚未发布的 1.6.0，SPEC 约束 24 的连带面没有被触发。
-- **旧的过程日记去哪了**：SPEC/TODO/PROGRESS 在 commit `6d5a76b` 的版本里有逐行过程记录（含每次变异测试的细节）。本次按协议把它们压回「行级事实 + 跨行教训」，原文可用 `git show 6d5a76b:.tasks/skills-manager/TODO.csv` 取回。
+- **旧的过程日记去哪了**：SPEC/TODO/PROGRESS 在 commit `6d5a76b` 的版本里有逐行过程记录（含每次变异测试的细节）。本次按协议把它们压回「行级事实 + 跨行教训」，原文可用 `git show 6d5a76b:.tasks/toolbox-ui/TODO.csv` 取回。
 
 ## 跨行教训（只记不变量级的；单行细节在 TODO.csv 的 notes）
 

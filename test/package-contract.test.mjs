@@ -128,18 +128,18 @@ test('the TOML parser used for Codex import stays a runtime dependency', () => {
 test('the skills capability is documented where users will look for it', async () => {
   // 技能能力面是本轮新增的**主要**用户可见功能。文档不是可选项：发布闸门（whats-new）
   // 只回答「变了什么」，回答不了「怎么用」。三条链路各自要能被找到：
-  //   · docs/skills-manager.md —— 专门的使用说明（随包发布，见 package-artifact）
+  //   · docs/skills.md —— 专门的使用说明（随包发布，见 package-artifact）
   //   · README —— 功能清单里要有它，否则读 README 的人不知道有这个能力面
   //   · docs/design.md —— 包结构变了（双能力面），设计文档必须跟着说
-  const skillsDoc = await readFile(new URL('../docs/skills-manager.md', import.meta.url), 'utf8')
-  assert.ok(skillsDoc.length > 500, 'docs/skills-manager.md 内容过少，疑似占位')
+  const skillsDoc = await readFile(new URL('../docs/skills.md', import.meta.url), 'utf8')
+  assert.ok(skillsDoc.length > 500, 'docs/skills.md 内容过少，疑似占位')
   // 说明必须覆盖三件用户一定会问的事。
   for (const [label, pattern] of [
     ['能力层入口（怎么打开技能面）', /技能/],
     ['作用域（装到哪）', /作用域|全局|项目/],
     ['许可门禁（为什么有的装不了）', /许可/],
   ]) {
-    assert.match(skillsDoc, pattern, `docs/skills-manager.md 缺少「${label}」的说明`)
+    assert.match(skillsDoc, pattern, `docs/skills.md 缺少「${label}」的说明`)
   }
   // README 的功能清单要提到技能能力面。
   assert.match(readme, /技能/, 'README 必须提到技能能力面')
