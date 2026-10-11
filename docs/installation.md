@@ -12,28 +12,20 @@
 
 ## 安装
 
-> **这条线已并入 [`dsh-toolbox-ui`](https://www.npmjs.com/package/dsh-toolbox-ui)（MCP + 技能）。**
-> `dsh-mcp-manager-ui` 自 **1.5.4** 起只是**迁移版**：`dsh plugin update` 拿到 1.5.5 并重启宿主后，
-> 面板顶部会出现「迁移」按钮，点一下即装上后继包并卸掉本包。**新用户请直接装后继包**：
->
-> ```sh
-> dsh plugin --profile web add dsh-toolbox-ui@^1.6.1
-> ```
-
 推荐用 npm 安装：包里的 `^1.x` 范围让后续 `dsh plugin update` 能自动升级小版本。
 
 ```sh
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.5
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.3
 ```
 
 也可以固定 GitHub release tag（适合需要锁定某个具体版本时）：
 
 ```sh
 # 固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.5
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.3
 
 # 或固定某个 commit
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#<commit>
 ```
 
 两种方式的**代码与运行行为完全相同**（包里带预构建的 `lib/`，不需要运行 `prepare`，也不需要配置 `allowBuilds`）；区别只在升级：`^1.x` 范围能被 `dsh plugin update` 自动推进，而 tag/commit 是不可变规格、`update` 只会重新解析同一个规格。
@@ -41,7 +33,7 @@ dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
 如果之前安装的是本地开发目录或另一种规格，先移除旧依赖：
 
 ```sh
-dsh plugin --profile web remove dsh-mcp-manager-ui
+dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
 安装完成后重启 Web Host：
@@ -62,7 +54,7 @@ dsh --profile web --dump-config
 
 ```yaml
 id: mcp-manager-ui
-name: dsh-mcp-manager-ui
+name: dsh-toolbox-ui
 ```
 
 打开 DSH Web 后，右下角应出现 MCP 管理按钮。面板能够读取当前 profile 中的 MCP，并对可管理条目执行启停、编辑、重连和删除。
@@ -72,7 +64,7 @@ name: dsh-mcp-manager-ui
 ## 升级
 
 ```sh
-dsh plugin --profile web update dsh-mcp-manager-ui
+dsh plugin --profile web update dsh-toolbox-ui
 ```
 
 升级后重启 `dsh web`。
@@ -81,19 +73,19 @@ dsh plugin --profile web update dsh-mcp-manager-ui
 
 | 安装规格 | `update` 的效果 | 怎么跨版本 |
 |---|---|---|
-| `dsh-mcp-manager-ui@^1.5.5`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
-| `github:...#v1.5.5`（tag） | 重新解析同一个 tag，**不会动** | 换成新 tag 重新 `add`：`... #<新 tag>` |
+| `dsh-toolbox-ui@^1.6.3`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
+| `github:...#v1.4.0`（tag） | 重新解析同一个 tag，**不会动** | 换成新 tag 重新 `add`：`... #<新 tag>` |
 | `github:...#<commit>` | 同上，固定在 commit | 用新 commit/tag 重新 `add` |
 | `github:...#main`（分支） | 拉取最新 main | 已是自动；但不推荐生产（无 release 门槛） |
 | `link:<本地目录>`（开发） | 不适用 | 在 checkout 里 `git pull` 后重启 `dsh web` |
 
 为什么 tag 不会自动跨版本：`dsh plugin` 是 `pnpm` 的薄转发器，`update` 就是「按 package.json 里的 spec 再解析一次」，而 git tag 是不可变规格、没有范围语义（`pnpm update --help`："Updates packages to their latest version **based on the specified range**"）。
 
-面板自带更新提示与一键升级（查 GitHub Releases，每天最多一次、可关闭、不会自己动；点「升级」才装）。npm 安装的用户也可以用命令行 `update` 升级，两者等价。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
+面板自带更新提示与一键升级（查 npm registry 上**本包的 latest**，每天最多一次、可关闭、不会自己动；点「升级」才装）。npm 安装的用户也可以用命令行 `update` 升级，两者等价。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
 
 ## 发布流程（维护者）
 
-npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，面板的更新提示查 GitHub Releases。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。这两件事现在由 `.github/workflows/release.yml` 在推 tag 时自动完成，并且会先校验「tag 与 package.json 版本一致」再跑测试。
+npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，而面板的更新提示问的正是 npm 上本包的 latest。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。这两件事现在由 `.github/workflows/release.yml` 在推 tag 时自动完成，并且会先校验「tag 与 package.json 版本一致」再跑测试。
 
 ### 一次性准备（只需做一次）
 
@@ -104,7 +96,8 @@ npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm �
    npm publish
    ```
 
-2. 在 npmjs.com 该包的 Settings → **Trusted Publisher** → GitHub Actions，填：organization/user `Imzl-zl`、repository `dsh-mcp-manager-ui`、workflow filename `release.yml`（可另填 environment）。
+2. 在 npmjs.com 该包的 Settings → **Trusted Publisher** → GitHub Actions，填：organization/user `Imzl-zl`、repository `dsh-toolbox-ui`、workflow filename `release.yml`（可另填 environment）。
+   ⚠️ 这里的 repository 是 **GitHub 仓库名**，它必须与仓库当前的 slug 一致——仓库此前叫 `dsh-mcp-manager-ui`，改名之后不同步改这一项，`npm publish` 会被拒（OIDC 凭据里带的就是仓库名）。失败是安全的：CI 那一步会红，不会建 Release。
 3. 之后可选但推荐：把包的 Publishing access 设为 **Require two-factor authentication and disallow tokens** —— trusted publishing 不受该限制影响（它用 OIDC，不是 token），而长期写凭据因此彻底用不上。
 
 ### 每次发布
@@ -120,23 +113,10 @@ dsh web    # 打开面板点一遍
 # 3) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
 git add -A && git commit -m "..."
 git push origin main
-git tag -a v1.5.5 -m "dsh-mcp-manager-ui v1.5.5" && git push origin v1.5.5
+git tag -a v1.6.3 -m "dsh-toolbox-ui 1.6.3" && git push origin v1.6.3
 ```
 
 推 tag 后 CI 依次做：校验版本 → `pnpm install --frozen-lockfile` → `npm test` → `npm publish`（trusted publishing，无需 token）→ `gh release create`。
-
-> ⚠️ **同一个仓库两条产品线共用一个 `releases/latest`**：老版本（≤1.5.3）面板的「升级」按钮读的就是它，
-> 而按钮下发的规格是**它自己那个包名**的新版本。所以**新线（`dsh-toolbox-ui`）的 Release 必须带
-> `--prerelease`**（`gh release create --prerelease …`）：GitHub 的 "latest release" 会跳过 pre-release，
-> 老线的面板因此会看到**旧线自己的最新版**（例如 1.5.5）——点一下就能升到中转版，再点「迁移」到新线。
-> 忘了加这个标志的后果是真机上验证过的：老用户点「升级」会去装一个不存在的版本，直接报错。
-> 新线自己的更新提示不依赖该 feed（它问的是自己包在 npm 上的 latest），所以标 pre-release 不影响它。
->
-> **这个标志是过渡手段，老线迁完就撤**（`TODO.csv` row 11）：只有 **≤1.5.3** 的构建会读仓库 feed，
-> 1.5.4 起已改成问后继包的 npm latest。判断依据是
-> `https://api.npmjs.org/versions/dsh-mcp-manager-ui/last-week` 里 **<1.5.4 的下载量趋近 0**。
-> 撤的时候三件一起做：本 workflow 去掉 `--prerelease`、`gh release edit <tag> --prerelease=false`
-> 把已标的那几个恢复、顺手 `npm deprecate` 整个旧包指向后继包。
 
 **第 2 步的真机检查什么时候必须做**：客户端那一半是替身测试——组件在 node 里渲染不起来（见[设计与限制](design.md#版本范围怎么定以及它管不到什么)），所以 CI 全绿也证明不了面板能显示。因此**只要本次改动碰了 `lib/client.js`、或推进了 DSH 基线，就必须做**：起 `dsh web`，确认侧栏入口能打开面板、悬浮按钮在位，然后导入 / 预览 / 启停各点一次。
 
@@ -152,7 +132,7 @@ git tag -a v1.5.5 -m "dsh-mcp-manager-ui v1.5.5" && git push origin v1.5.5
 
 ```sh
 npm publish          # 会弹 2FA 挑战；若用 bypass-2FA 的 granular token 则非交互
-gh release create v1.5.5 --title "dsh-mcp-manager-ui v1.5.5" --notes-file <notes>
+gh release create v1.6.3 --title "dsh-toolbox-ui v1.6.3" --notes-file <notes>
 ```
 
 `npm login` 的会话 token 只有 2 小时，超时需要重新登录；classic token 已被 npm 永久吊销，能非交互发布的只剩勾了 **Bypass 2FA** 的 granular access token——但它正在被 npm 收窄（已不能做账号/包管理类操作，且 2027-01 起将失去直接发布能力），所以长期方案是上面的 trusted publishing。
@@ -160,7 +140,7 @@ gh release create v1.5.5 --title "dsh-mcp-manager-ui v1.5.5" --notes-file <notes
 ## 卸载
 
 ```sh
-dsh plugin --profile web remove dsh-mcp-manager-ui
+dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
 卸载插件不会自动删除当前 profile 中已有的 `@deepseek-ai/dsh-mcp-client` 条目。

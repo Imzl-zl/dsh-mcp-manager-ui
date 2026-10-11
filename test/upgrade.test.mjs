@@ -12,7 +12,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, pnpmOutputTail, UPGRADE_OWN_PACKAGE, UPGRADE_TARGET_PACKAGE };`,
+  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, pnpmOutputTail, UPGRADE_PACKAGE };`,
 )
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
 
@@ -49,34 +49,25 @@ function loadUpgradeRule() {
   return client.__upgrade
 }
 
-const service = { installBundle() {}, removeBundle() {} }
+const service = { installBundle() {} }
 // updateAvailable 由宿主算成「latest > current」（lib/index.js 的 compareVersions），
 // 所以这里照它的口径造数据，不要单独造一个自相矛盾的组合。
-// `package` 是宿主回的**目标包名**：这条线自 1.5.4 起是迁移版，latest 属于后继包。
-const hint = (latest, current = '1.4.2') => ({ current, latest, package: 'dsh-toolbox-ui', updateAvailable: !!latest && latest !== current })
-const npmBundle = { name: 'dsh-mcp-manager-ui', source: '^1.4.2', installed: true, version: '1.4.2' }
+const hint = (latest, current = '1.4.2') => ({ current, latest, updateAvailable: !!latest && latest !== current })
+const npmBundle = { name: 'dsh-toolbox-ui', source: '^1.4.2', installed: true, version: '1.4.2' }
 
-test('a migration is offered whenever the host can do it — hint or not', () => {
+test('an upgrade is offered only when the host can do it and there is a newer version', () => {
   const { upgradePlan } = loadUpgradeRule()
-  // 正常情形：宿主有 pluginManager + 是 npm 装的 + 查到了最新版。
-  const ok = upgradePlan({ service, hint: hint('1.6.1'), bundle: npmBundle })
+  // 正常情形：宿主有 pluginManager + 是 npm 装的 + 有新版本。
+  const ok = upgradePlan({ service, hint: hint('1.5.0'), bundle: npmBundle })
   assert.equal(ok.supported, true)
-  // 目标**不是本包**：这条线已并入 dsh-toolbox-ui，所以规格装的是后继包。
-  assert.equal(ok.spec, 'dsh-toolbox-ui@^1.6.1', '装的是后继包；本包只负责把用户送过去')
-  assert.equal(ok.replaces, 'dsh-mcp-manager-ui', '装完要卸掉本包，否则 profile 里永远留着它')
-
-  // ⚠️ 1.5.5 的关键行为：**查不到最新版也要能迁**。离线、公司网络拦 registry、限流都会走到
-  // 这里；那时如果判定成"没有目标"，提示条上的按钮就会点了没反应（用户连"该走了"都看不到）。
-  const offline = upgradePlan({ service, hint: null, bundle: npmBundle, fallbackSpec: 'dsh-toolbox-ui@^1.6.1' })
-  assert.equal(offline.supported, true, '离线时也必须能迁移')
-  assert.equal(offline.spec, 'dsh-toolbox-ui@^1.6.1', '用写死的那份规格')
-  assert.equal(offline.version, '1.6.1', '版本要从写死的规格里解出来（横幅要用它说话）')
-  // 既没有 hint 也没有 fallback，才算没有目标。
-  assert.equal(upgradePlan({ service, hint: null, bundle: npmBundle }).reason, 'no-target')
+  assert.equal(ok.spec, 'dsh-toolbox-ui@^1.5.0', '用 caret 请求，与 profile 里的前缀风格一致')
 
   // 宿主没提供这个 namespace（老宿主 / 非 web 形态）：不能给按钮，否则点了没反应。
-  assert.equal(upgradePlan({ service: null, hint: hint('1.6.1'), bundle: npmBundle }).reason, 'no-service')
-  assert.equal(upgradePlan({ service: {}, hint: hint('1.6.1'), bundle: npmBundle }).reason, 'no-service')
+  assert.equal(upgradePlan({ service: null, hint: hint('1.5.0'), bundle: npmBundle }).reason, 'no-service')
+  assert.equal(upgradePlan({ service: {}, hint: hint('1.5.0'), bundle: npmBundle }).reason, 'no-service')
+  // 已是最新：不显示按钮。
+  assert.equal(upgradePlan({ service, hint: hint(null), bundle: npmBundle }).reason, 'up-to-date')
+  assert.equal(upgradePlan({ service, hint: hint('1.4.2', '1.4.2'), bundle: npmBundle }).supported, false)
 })
 
 test('a locally linked install is never upgraded into an npm package', () => {
@@ -119,10 +110,10 @@ test('upgrade failures say what happened instead of just "failed"', () => {
   assert.ok(upgradeFailureText(null, null).length > 0)
 })
 
-test('an unknown migration failure carries pnpm own words, cleaned up', () => {
+test('an unknown failure carries pnpm own words, cleaned up', () => {
   const { upgradeFailureText, pnpmOutputTail } = loadUpgradeRule()
-  // 真机实测过的那次失败（1.5.3 面板的按钮）：面板只显示一个 Windows 崩溃码，而 pnpm 原文
-  // 说得很清楚。官方把整段输出放在 packageResult.output 里，所以要把它接上——但要挑干净。
+  // 真机实测过的那次失败：面板只显示一个 Windows 崩溃码，而 pnpm 原文说得很清楚。
+  // 官方把整段输出放在 packageResult.output 里，所以要把它接上——但要挑干净。
   const output = [
     'Progress: resolved 4, reused 3, downloaded 0, added 3',
     'npm notice',
@@ -135,13 +126,14 @@ test('an unknown migration failure carries pnpm own words, cleaned up', () => {
   assert.match(text, /ERR_PNPM_NO_MATCHING_VERSION/, '必须把 pnpm 的原句带出来，否则只有崩溃码')
   assert.match(text, /The latest release/, 'pnpm 的结论行更该出现（它直接告诉用户"最新是什么"）')
   assert.match(text, /operation-error/)
+  // 噪声与 ANSI 颜色码不该出现：横幅是给人看的，不是把日志贴上去。
   assert.doesNotMatch(text, /Progress:|npm notice|package size/)
   assert.doesNotMatch(text, /\u001b\[/, 'ANSI 颜色码要剥掉')
   // 已知码的解释优先：它已经把原因和下一步说清了，不该再被 pnpm 输出淹没。
   assert.equal(upgradeFailureText({ code: 'stop-profile' }, 1, output), '宿主正在停止，未升级；请重启后再试。')
   // 没有 output 时行为与改动前逐字一致（老宿主/老官方版本不带这个字段）。
-  assert.equal(upgradeFailureText({ code: 'brand-new-code' }, 7), '迁移失败（错误码 brand-new-code，pnpm 退出码 7）。')
-  // 挑行：没有报错行时取末尾三行；有报错行时从它开始带（结论就在它后面一行）。
+  assert.equal(upgradeFailureText({ code: 'brand-new-code' }, 7), '升级失败（错误码 brand-new-code，pnpm 退出码 7）。')
+  // 挑行本身：没有报错行时取末尾三行；有报错行时从它开始带（结论就在它后面一行）。
   assert.equal(pnpmOutputTail(''), '')
   assert.equal(pnpmOutputTail('a\nb\nc\nd\ne'), 'c d e')
   assert.equal(pnpmOutputTail('one\nERR_PNPM_X boom\n因为原因在这里\n还有一句'), 'ERR_PNPM_X boom 因为原因在这里 还有一句')
@@ -154,42 +146,22 @@ test('the post-upgrade banner survives the hint going away', () => {
   // 结果「点完就消失」，用户永远看不到那句「重启宿主后生效」。而宿主代码在进程内执行，
   // 不重启等于没升级，这句话是整个功能的必要闭环。
   //
-  // 所以横幅的存活条件必须把 done 也算进去；1.5.5 起更进一步：**除非用户主动关掉，它一直在**
-  // （这条线已经结束，"该走去哪"不能取决于 registry 查询成功与否）。
+  // 所以横幅的存活条件必须把 done 也算进去。
   assert.match(
     clientSource,
-    /\(!bannerClosed \|\| upgradeState\.phase !== 'idle'\)/,
-    '横幅不能挂在 updateHint 上：离线时也要看得见"该走了"，进行中/完成/失败更要看得见',
+    /\(updateHint \|\| upgradeState\.phase === 'done'\)/,
+    '升级完成后 updateHint 已是 null，横幅必须靠 done 状态存活',
   )
-  // 关闭状态按目标版本记（关掉之后本版本不再提示，目标更新了会再提示）。
-  assert.match(clientSource, /dismissed === bannerVersion/, '关闭要按目标版本记忆')
-  assert.match(clientSource, /localStorage\.setItem\(UPDATE_HINT_DISMISS_KEY, bannerVersion\)/, '关闭时写入的是目标版本')
   // done 分支不能再去读 updateHint 的字段（那时它是 null，会直接崩）。
-  const doneBranch = clientSource.match(/phase === 'done'\s*\?\s*\(upgradeState\.leftover[\s\S]{0,400}?\+ upgradeState\.version \+/)
+  const doneBranch = clientSource.match(/phase === 'done' \? '已升级到 v' \+ ([^+]+)\+ /)
   assert.ok(doneBranch, '找不到 done 分支的文案')
-  assert.match(doneBranch[0], /upgradeState\.version/, 'done 文案只能用升级时记下的版本，不能读 updateHint')
+  assert.match(doneBranch[1], /upgradeState\.version/, 'done 文案只能用升级时记下的版本，不能读 updateHint')
   // running 阶段就要把版本记下来，否则 done 时没有版本可显示（updateHint 已刷新成「已是最新」）。
   // 记的来源是 plan.version——目标版本随判定一起出来，不依赖之后可能变空的 hint。
   assert.match(clientSource, /phase: 'running', version: plan\.version/, 'running 阶段要记住目标版本')
   assert.match(clientSource, /phase: 'done', version: plan\.version/, 'done 也要用同一个来源，不能读 hint')
   // 关闭按钮必须也能收掉 done 横幅，否则按了没反应。
   assert.match(clientSource, /current\.phase === 'done' \? \{ phase: 'idle' \}/, '关闭要能收掉 done 状态')
-})
-
-test('the migration installs the successor FIRST and only then removes itself', () => {
-  // 顺序是这个功能的安全边界：装完后继它就已经顶替了本包（两个包共用 patch id
-  // `mcp-manager-ui`，composer 按 id 取**后列的那个**；真机实测：两个都装着时应用照常启动、
-  // 只注册一个面板，注册的是后继包）。所以"先装后卸"即使第二步失败，用户手里仍是一个能用的
-  // 面板；反过来先卸自己会把面板弄没，那时只能靠 CLI 救回来。
-  const installAt = clientSource.indexOf('svc[UPGRADE_METHOD](plan.spec')
-  const removeAt = clientSource.indexOf('svc[UPGRADE_REMOVE_METHOD](plan.replaces)')
-  assert.ok(installAt > 0, '找不到 installBundle 的调用点')
-  assert.ok(removeAt > 0, '找不到 removeBundle 的调用点')
-  assert.ok(installAt < removeAt, '必须先装后继、再卸本包（顺序反了会把用户的面板弄没）')
-  // 卸自己这一步只在 replaces 有值、且宿主确实提供该方法时才发。
-  assert.match(clientSource, /if \(plan\.replaces && typeof svc\[UPGRADE_REMOVE_METHOD\] === 'function'\)/)
-  // 移除失败不能假装成功：横幅要说清"还剩一步"（旧包还在 profile 里）。
-  assert.match(clientSource, /leftover: plan\.replaces/, '旧的没卸掉时要在横幅里说清')
 })
 
 test('the upgrade path calls the official remote with the arguments it requires', () => {
@@ -203,6 +175,8 @@ test('the upgrade path calls the official remote with the arguments it requires'
   assert.match(call[1], /,\s*\{\}/, '第二个参数必须显式传（wire 要求两个参数）')
   // 结果分流：官方用 application 表达失败与「装上了但要重启」，不能只看 ok。
   assert.match(clientSource, /r\.application === 'failed'/)
-  // 装完必须提示重启：宿主代码在进程内执行，不重启等于没迁。这句文案就是整条链路的闭环。
-  assert.match(clientSource, /已迁移到 ' \+ UPGRADE_TARGET_PACKAGE \+ ' v' \+ upgradeState\.version \+ '，重启宿主后生效/)
+  // 升级已存在的包时官方**无条件**返回 restart-required（installBundle 里的
+  // `if (Object.hasOwn(before, name)) return 'restart-required'`），所以成功分支必须提示重启——
+  // 宿主代码在进程内执行，不重启等于没升。这句文案就是整条链路的闭环。
+  assert.match(clientSource, /已升级到 v' \+ upgradeState\.version \+ '，重启宿主后生效/)
 })

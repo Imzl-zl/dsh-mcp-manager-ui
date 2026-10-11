@@ -257,7 +257,7 @@ peer 怎么被解析到也很关键：官方 profile 的 `pnpm-workspace.yaml` �
 
 ## 设计约束
 
-`dsh-mcp-manager-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
+`dsh-toolbox-ui` 是 Web Host 单实例插件。固定的 Remote namespace 和 UI slot id 是有意设计；重复加载属于配置错误，插件会明确失败，而不是静默忽略。多个 MCP server 则由 `@deepseek-ai/dsh-mcp-client` 的不同 `serverName` 实例管理。
 
 ## 面板样式：为什么没有任何自选配色
 
@@ -332,6 +332,78 @@ document.head.appendChild(tag)
 
 `test/theme-contract.test.mjs` 两头都钉：违规样本必须被抓到，且快照本身要有规模与关键成员（否则清单退化成空表时，存在性检查会反过来变成"任何令牌都不存在"而让另一侧的断言失去意义）。
 
+## 技能能力面：为什么与 MCP 面并列而不是合并
+
+面板有**两个能力层**（MCP / 技能），由顶部枚举切换，共享同一个悬浮窗与侧栏入口。它们必须是两个独立的宿主服务：
+
+- **`skills` 不能进 MCP gateway 的 `static inject`**。Cordis 的 `inject` 是**依赖声明**——服务缺失时
+  fiber 只是保持不激活并等待，**不报错**。而宿主的内置插件 `dsh-skill` 是可被用户禁用的，
+  一旦把 `skills` 加进现有 gateway 的 inject，那些 profile 会连 **MCP 面板一起静默失效**。
+  所以 `SkillsManagerGateway` 是独立子插件、自带 `inject = ["skills"]`，未满足时只影响技能面。
+- **两个服务必须在同一个 patch 条目内挂载**：`cordis.patch.yml` 只有一条，且
+  `package-contract` 断言该 id 与 name 各出现恰好 1 次，所以子插件由现有插件的构造函数
+  `ctx.plugin()` 挂载。
+- **契约必须并进同一个 `MCP_CONTRIBUTION`**：`typert.remotes.register()` 按 `contribution.package`
+  去重，第二次 `$mount` 会抛 `Remote package "…" is already registered`，插件在 mount 阶段
+  激活失败、**面板整体消失**。descriptor 只按 endpoint（namespace/method）与 id 去重，
+  一个 contribution 天然支持多 namespace。同理 `SKILLS_CSS` 必须与 `MCP_CSS` **合并成一次**
+  `__injectCss` 调用（那个函数的 id 写死，二次调用会覆写同一 `<style>`）。
+
+### 技能的「根目录」从哪来
+
+`ctx.skills` **不暴露 `roots()`**（公开面只有 list/get/snapshot/collect/register），而启停与删除
+必须按 `(name, scope, root)` 精确定位。所以根目录从 summary 的 `resourceBase` 反推，判别式是
+**`path` 是否恰为 `<base>/SKILL.md`**（目录捆绑）还是 `dirname(path) === base`（扁平文件）。
+推不出来就**不填**——猜错会让启停/删除作用在错误的目录上，是本层最危险的失败模式。
+
+### 禁用为什么是改名
+
+DSH 的技能没有 `disabled` 字段（MCP 有、技能没有），所以停用只能把 `SKILL.md` 改名为
+`SKILL.md.disabled`。代价是技能从宿主目录里**消失**（宿主按固定路径读取，读不到就跳过），
+因此「已禁用」必须由本插件**自己扫描** `.disabled` 才能展示与恢复。
+
+### 许可门禁为什么逐技能判定（2026-10-10 已下线）
+
+这一节是决策记录：**逐技能许可门禁已随内置精选目录一起下线**，本节保留当年的推理。
+
+当年判定的是本插件自维护的内置精选目录。同一个仓库里既有 Apache-2.0 的技能，也有禁止
+「在服务之外保留副本」的专有许可技能（`anthropics/skills` 的文档技能就是后者）。按仓库聚合
+两个方向都会错：要么把能装的毙掉，要么把不能装的放进来。所以目录里记录的是**事实**（许可是
+什么、证据在哪个文件），「能不能装」由 `classifyLicense()` 在生成目录时算出——门禁只有一处实现。
+
+2026-10-10 下线，两条理由：
+
+- **没有可判定的对象**：目录不再自维护、生成物被删，判定链路上的东西一起没了；
+- **上游不给许可信息**：今天唯一的来源（skillhub.cn）条目里**没有 license 字段**，无从查证，
+  也不编一个出来。
+
+所以今天的安全边界不是那条硬闸门，而是「外部源不做许可判定 + 披露 + 一次显式确认」。
+「逐技能而非按仓库聚合」这条推理本身仍然成立——将来任何引入第三方目录的方案都要面对它。
+
+### 为什么直连 skillhub.cn 上游，而不是复用第三方插件的路由
+
+DSH 已经有一个接 skillhub 的第三方插件（`@cocofhu/skillhub`），它暴露的是自己注册的同源路由
+`/skillhub`。我们没有复用它，两个理由：
+
+- 那是它的**私有协议**，不是宿主契约：它换版本或被卸载，这条路就断了；而且那个插件同时握着
+  装/重启 DSH 插件的权限，把它当数据源等于把市场绑死在它身上。
+- 上游本身**公开且无鉴权**：`GET /api/skills`（搜索/列表）、`/api/v1/skills/<slug>`（详情）、
+  `/api/v1/download?slug=`（302 跳 zip）、`/api/v1/categories`；基址可用 `DSH_SKILLHUB_BASE`
+  指到镜像。直连还换来一条实质好处：**落点由面板选**（复用同一套「安装到」＝全局/项目 ×
+  `.dsh`/`.agents`），而不是由上游替用户决定。
+
+请求全在**宿主侧**发出，面板本身不联网——既避开浏览器 CORS（那多半正是第三方插件要服务端代理的
+原因），也让「面板不开新网络依赖」这条约束继续成立。
+
+上游条目**没有许可字段**，所以外部源只做披露 + 显式确认（发布方企业认证、腾讯 keen/sanbu
+扫描结论、是否需 API Key）。确认由**服务端**校验：`acknowledged` 必须上 wire，UI 的勾选框
+只是它的界面。下载只落到临时 zip，安装仍交给既有的 `importSkill`——外部源与「从本机导入」
+因此走**同一条写入路径**，大小上限、zip slip、符号链接这些守卫只有一处实现。
+
+一个易错点：新版面板跑在**老宿主进程**上时 `skillHubSearch` 这个 endpoint 根本不存在（wire 404）。
+把它显示成「连接 skillhub.cn 失败」是误报——上游一次都没被访问过。所以面板对这两种情况给的是
+不同的话：宿主进程是旧的 → 提示重启宿主；上游真挂了 → 在结果区给告警 + 重试。
+
 ## 包结构
 
 - `package.json`：声明 `dsh.bundle` 和 Web `dsh.client`
@@ -346,6 +418,10 @@ document.head.appendChild(tag)
 - `lib/env-expression.js`：受限 `!!js` 表达式的唯一实现（生成 / 校验 / 抽取 / 反转 / 求值）
 - `lib/import-admission.js`：导入结果的写盘前准入（同作用域 `serverName` 唯一、环境变量引用归一为总值形式）
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
+- `lib/skills-registry.js`：宿主 `ctx.skills` 的投影（source/作用域/根目录推导）与目录指纹
+- `lib/skills-file-ops.js`：技能文件动作（启停 = 改名 `SKILL.md` ↔ `SKILL.md.disabled`、删除、导入、扫描已禁用），按 `(name, scope, root)` 精确定位、找不到即报错不回退
+- `lib/skills-archive.js`：压缩包安全解包（防 zip slip、拒符号链接、按**实际解出字节**卡限额）
+- `lib/skills-frontmatter.js`：frontmatter 校验与逐条诊断（判定逐字照抄宿主，宿主只 warn+skip，用户看不到）
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理
 - `lib/typert.js`：Remote 契约描述
 - `scripts/theme-spec.mjs`：面板样式对 DSH 主题契约的判据（全圆角配对、圆角刻度、抬升表面、字面色值、等宽字体、别名宿主、别名令牌存在性），由 `test/theme-contract.test.mjs` 断言

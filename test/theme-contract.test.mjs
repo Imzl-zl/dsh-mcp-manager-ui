@@ -177,22 +177,69 @@ test('the scanner reads rules out of minified css and nested at-rules', () => {
   assert.deepEqual(parseRules('/* } */ .a{color:red}').map((rule) => rule.selectors), [['.a']])
 })
 
-test('every dsh-mcp-* class the bundle renders has a style', () => {
+test('every panel class the bundle renders has a style', () => {
   // 拼错一个类名 / 忘了写样式，表现是「这块没排版」——不像报错那样显眼，jsdom 也看不出来。
   // 写市场 UI 时就漏过一次（筛选条右侧的「全选当前 N 个」引用了没定义的类）。
-  // 只查 dsh-mcp-* 前缀：其它类（dsh-mcp-btn 的组合类、状态类）由各自的规则覆盖。
+  // ⚠️ 前缀必须同时覆盖 dsh-mcp- 与 dsh-skills-：这里原先只扫 dsh-mcp-，注释写着
+  //   「其它类由各自的规则覆盖」——那个假设在 SKILLS_CSS 出现后就过期了。实际漏掉的代价
+  //   是安装弹窗里整块作用域单选（dsh-skills-list/-row）被当死 CSS 删掉后无人报警，
+  //   12 条主题测试全绿而那块没有排版。
   const stylesheet = parseRules(css);
   const defined = new Set(stylesheet.flatMap((rule) => rule.selectors
-    .flatMap((selector) => [...selector.matchAll(/\.(dsh-mcp-[a-z0-9-]+)/g)].map((m) => m[1]))));
+    .flatMap((selector) => [...selector.matchAll(/\.(dsh-(?:mcp|skills)-[a-z0-9-]+)/g)].map((m) => m[1]))));
   // 从 className 字符串里取 token，含 'a' + (x ? ' b' : '') 这种拼接的两侧。
   const rendered = new Set([...client.matchAll(/className:\s*'([^']*)'/g)]
     .flatMap((m) => m[1].split(/[^a-z0-9-]+/))
-    .filter((token) => token.startsWith('dsh-mcp-')));
+    .filter((token) => token.startsWith('dsh-mcp-') || token.startsWith('dsh-skills-')));
   const missing = [...rendered].filter((name) => !defined.has(name)).sort();
   assert.deepEqual(missing, [], '这些类被渲染但没有样式：' + missing.join(', '));
   // 反向也留个下限，避免上面两处一起退化成空集合而假通过。
   assert.ok(rendered.size > 40, `只扫到 ${rendered.size} 个类，疑似正则失效`);
   assert.ok(defined.size > 40, `样式表只解析出 ${defined.size} 个类，疑似解析失效`);
+  // 覆盖面本身要有下限：只扫到 dsh-mcp- 一个前缀，就说明技能面那套又脱离了检查。
+  assert.ok([...rendered].some((name) => name.startsWith('dsh-skills-')),
+    '扫描必须覆盖 dsh-skills-* 类，否则技能面板的悬空类无人报警');
+})
+
+test('the extractor collects every stylesheet constant, not just MCP_CSS', () => {
+  // 面板的样式常量不止一份时（新增 Skills 面板就会出现第二份），提取器若只认 MCP_CSS，
+  // 上面 11 个扫描器会**全部扫不到新样式**——12 条主题测试全绿，但一条都没查过新代码。
+  // 这是最危险的失败形态：绿而无效。所以提取范围本身要有测试守着。
+  const synthetic = [
+    'const MCP_CSS = `.a{color:red}`;',
+    'const SKILLS_CSS = `.b{color:blue}`;',
+  ].join('\n')
+  const extracted = extractPanelCss(synthetic)
+  assert.match(extracted, /\.a\{color:red\}/)
+  assert.match(extracted, /\.b\{color:blue\}/, '第二份样式常量必须一并纳入扫描范围')
+})
+
+test('the real bundle now ships two stylesheet constants and both are scanned', () => {
+  // 上一条用合成输入证明提取器「具备」多常量能力；这条证明**真实产物里确实有两份**，
+  // 且第二份真的被扫到了。少任何一半，11 个扫描器都可能只覆盖了一半代码而全绿。
+  const names = [...client.matchAll(/const ([A-Z][A-Z0-9_]*_CSS) = `/g)].map((match) => match[1])
+  assert.deepEqual(names, ['MCP_CSS', 'SKILLS_CSS'], `实际样式常量：${names.join(', ')}`)
+  // 两份内容都在提取结果里（抽查各自的特征选择器）。
+  assert.match(css, /\.dsh-mcp-/, 'MCP 样式应被提取')
+  assert.match(css, /\.dsh-skills-/, 'SKILLS_CSS 应被提取（否则扫描器全都没查过它）')
+})
+
+test('the skills stylesheet declares no second alias layer', () => {
+  // 别名层（--mcp-* 指向 --dsw-*）的唯一宿主是 body：自定义属性在**声明处**完成替换，
+  // 所以第二处 body 声明会把第一处整体覆盖（顺序靠后者胜），一半界面取到空值。
+  // SKILLS_CSS 只允许消费已声明的别名，不得再声明一次。
+  const hosts = [...css.matchAll(/(^|[};])\s*body\s*\{/g)].length
+  assert.equal(hosts, 1, `别名层的 body 宿主应恰好一处，实际 ${hosts} 处`)
+  // 别名**声明**（--mcp-*: …）也只能出现在那一处。
+  const skillsStart = client.indexOf('const SKILLS_CSS = ')
+  const skillsCss = client.slice(skillsStart)
+  assert.doesNotMatch(skillsCss.slice(0, skillsCss.indexOf('`;')), /--mcp-[a-z0-9-]+:/,
+    'SKILLS_CSS 不得重复声明 --mcp-* 别名（别名层唯一宿主是 body）')
+})
+
+test('the extractor still fails loudly when no stylesheet constant exists', () => {
+  // 容忍多份不等于容忍没有：提取不到必须抛，否则扫描器会拿空表当"干净"。
+  assert.throws(() => extractPanelCss('const NOT_CSS = 1;'), /找不到 .* 模板字面量/)
 })
 
 test('the token snapshot is real, so the existence checks cannot pass vacuously', () => {  // aliasContract 的存在性校验完全依赖这份清单。清单若退化成空表或残缺，上面那条

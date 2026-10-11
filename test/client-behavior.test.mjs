@@ -7,7 +7,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyPlanKey, copyPlanReady, copyTargets, exportFileName, firstFailureReason, startVisibilityAwarePolling, wsSub };`,
+  `${exportMarker}\nexports.__test = { MCP_CSS, MCP_PRESETS, ToolRow, WorkspaceCopyModal, clearRevealState, consumeRevision, copyText, copyPlanText, copyPlanKey, copyPlanReady, copyTargets, exportFileName, firstFailureReason, selectedSkillRow, skillIdentity, startVisibilityAwarePolling, wsSub };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -347,4 +347,35 @@ test('mount failure banner carries the reason instead of names only', () => {
     'mcp-client: serverName "exa" is already in use')
   assert.equal(firstFailureReason({ serverName: 'exa', error: '  ' }), '（宿主没有给出原因）')
   assert.equal(firstFailureReason(undefined), '（宿主没有给出原因）')
+})
+
+test('the skill row key is the identity the host dedupes by', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { skillIdentity } = internals
+
+  // 行 key = `source \0 cwd \0 name`，宿主侧（lib/skills-registry.js 的 skillRowKey）用**同一个
+  // 元组**保证「一个身份一行」。两边一旦漂移，去重就失效、重复 key 回归——而 React 在**生产版
+  // 不报警告**，表现只是那一行被重复渲染、徽章挂错行（2026-10-11 真机踩过）。
+  // 所以两边各钉一条**同一字面量**的用例：改一边就红。
+  assert.equal(skillIdentity({ source: 'user-agents', name: 'zhanggui' }), 'user-agents\u0000\u0000zhanggui',
+    '元组变了就要同时改宿主侧的 skillRowKey')
+  assert.equal(skillIdentity({ source: 'project-agents', cwd: 'D:/ws', name: 'proj-a' }), 'project-agents\u0000D:/ws\u0000proj-a')
+})
+
+test('the selected skill row is derived from the current rows, never held', () => {
+  const { internals } = loadClientInternals(() => true)
+  const { selectedSkillRow } = internals
+
+  // 真机缺陷（2026-10-11）：选中存的是**行对象**，列表重新取数后详情仍渲染那个旧对象——
+  // 刚在面板里停用一个技能时，详情还写「已启用」（磁盘上已是 SKILL.md.disabled），
+  // 点「刷新」也不变，只有重新选中那一行才对。派生之后没有旧对象可留。
+  const key = 'user-dsh\u0000\u0000dsh-only'
+  const stale = { key, name: 'dsh-only', enabled: true }
+  const fresh = { key, name: 'dsh-only', enabled: false }
+  assert.equal(selectedSkillRow([fresh], key), fresh, '同一身份必须拿到当前那一行（refresh 不是重新选中）')
+  assert.equal(selectedSkillRow([fresh], key).enabled, false, '状态要跟着列表走')
+  assert.notEqual(selectedSkillRow([fresh], key), stale)
+  // 选中项从列表里消失（被删掉 / 换了作用域）→ null，详情回空态而不是继续渲染旧行。
+  assert.equal(selectedSkillRow([], key), null)
+  assert.equal(selectedSkillRow(null, key), null)
 })

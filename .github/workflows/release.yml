@@ -8,8 +8,9 @@ name: release
 # 一次性准备（只需做一次）：
 #   1. 包必须已存在：首次发布要在本地交互式 `npm publish`（npm 要求 2FA 挑战）。
 #   2. npmjs.com -> 该包 -> Settings -> Trusted Publisher ->
-#      GitHub Actions: organization/user = Imzl-zl, repository = dsh-mcp-manager-ui,
+#      GitHub Actions: organization/user = Imzl-zl, repository = dsh-toolbox-ui,
 #      workflow filename = release.yml（可另填 environment）。
+#      ⚠️ 这一项是 **GitHub 仓库名**，必须与仓库当前 slug 一致；改名后不同步改它，publish 会被拒。
 #   3. 之后每次发布只需要：改 version、提交、`git push origin main`、`git push origin vX.Y.Z`。
 #
 # 想先确认流水线本身健康（不改任何版本、不发布），手动跑一次：
@@ -77,34 +78,51 @@ jobs:
       - name: Test
         run: npm test
 
-      # ⚠️ 已经发过的版本要**跳过**，而不是报错：本地补发过、或给已发布的版本补推 tag 时，
-      # 这一步必然撞上「版本已存在」。那不是错误——CI 该做的是校验版本、跑测试、建 Release。
-      # 先问一句 npm，已经在上面就跳过并打印一行（谁都能从日志里看出发生了什么）。
+      # ⚠️ 已经发过的版本要**跳过**，而不是报错：
+      # 一个新包名的**首个版本**必须先由维护者本地交互式发布（npm 要求包先存在，才能配置
+      # trusted publisher —— 见 docs/installation.md 的一次性准备），之后为同一版本推 tag
+      # 时这一步必然撞上「版本已存在」。那不是错误：CI 该做的是校验版本、跑测试、建 Release。
+      # 所以先问一句 npm，已经在上面就跳过并打印一行（谁都能从日志里看出发生了什么）。
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
         run: |
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           if npm view "${name}@${version}" version >/dev/null 2>&1; then
-            echo "${name}@${version} 已经在 npm 上——跳过 publish，继续建 Release"
+            echo "${name}@${version} 已经在 npm 上（首个版本由维护者本地发布）——跳过 publish，继续建 Release"
           else
             npm publish
           fi
 
       # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
       # 不放 docs/ —— docs 会随包发布到 npm。
+      #
+      # ⚠️ 标题里的包名**从 package.json 取，不写死**：这个仓库里先后有两条产品线
+      # （旧包 dsh-mcp-manager-ui 已冻结在 1.5.5，现在是 dsh-toolbox-ui），写死会让其中一条
+      # 的 Release 标题挂上另一条的包名（v1.6.0 的稿子当初就是这么错的）。
+      #
+      # ⚠️⚠️ **必须带 `--prerelease`**：两条线共用一个 `releases/latest`，而老线（≤1.5.3）面板的
+      # 「升级」按钮读的就是它、下发的却是**旧包名**的新版本。本线的 Release 一旦成为
+      # "latest release"，老用户点「升级」就会去装「旧包名@^<本线版本>」——那个版本永远不存在，
+      # 必然报错（真机验证过）。标成 pre-release 后 GitHub 的 "latest release" 会跳过它，老线的
+      # 面板因此看到**旧线自己的最新版**（如 v1.5.5），点一下升到中转版、再点「迁移」过来。
+      #
+      # 本线自己的更新提示因此**必须**问自己包在 npm 上的 latest（lib/index.js 的 updateLatestUrl）：
+      # 它曾经问的是这个 feed，于是被 pre-release 规则永远挡在旧线版本上——提示恒为「已是最新」，
+      # v1.6.2 发出去 1.6.1 的用户什么也看不到（有专门用例钉住数据源）。别把这条改回去。
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          name="$(node -p "require('./package.json').name")"
           notes=".github/release-notes/${GITHUB_REF_NAME}.md"
           if [ -f "$notes" ]; then
             gh release create "$GITHUB_REF_NAME" \
-              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
-              --notes-file "$notes" --verify-tag
+              --title "${name} ${GITHUB_REF_NAME}" \
+              --notes-file "$notes" --verify-tag --prerelease
           else
             gh release create "$GITHUB_REF_NAME" \
-              --title "dsh-mcp-manager-ui ${GITHUB_REF_NAME}" \
-              --generate-notes --verify-tag
+              --title "${name} ${GITHUB_REF_NAME}" \
+              --generate-notes --verify-tag --prerelease
           fi

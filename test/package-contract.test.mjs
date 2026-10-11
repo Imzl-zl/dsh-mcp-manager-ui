@@ -20,6 +20,7 @@ const dshHostPackages = [
   '@deepseek-ai/dsh-atomic-write',
   '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-scope',
+  '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ]
@@ -38,7 +39,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.5.5')
+  assert.equal(packageJson.version, '1.6.3')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -55,9 +56,10 @@ test('package exposes one Web bundle entry', () => {
     false,
     'docs 目录或截图不得整目录随包发布',
   )
-  assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
+  assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-toolbox-ui.git')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
-  assert.equal((patch.match(/name: dsh-mcp-manager-ui/g) ?? []).length, 1)
+  // 挂载名必须等于包名（改名后一起变）——不写字面量，从 package.json 推导。
+  assert.equal((patch.match(new RegExp('name: ' + packageJson.name, 'g')) ?? []).length, 1)
 })
 
 test('package declares the DSH compatibility window and pins development to a verified RC', () => {
@@ -123,6 +125,29 @@ test('the TOML parser used for Codex import stays a runtime dependency', () => {
   assert.equal(packageJson.devDependencies?.['smol-toml'], undefined)
 })
 
+test('the skills capability is documented where users will look for it', async () => {
+  // 技能能力面是本轮新增的**主要**用户可见功能。文档不是可选项：发布闸门（whats-new）
+  // 只回答「变了什么」，回答不了「怎么用」。三条链路各自要能被找到：
+  //   · docs/skills.md —— 专门的使用说明（随包发布，见 package-artifact）
+  //   · README —— 功能清单里要有它，否则读 README 的人不知道有这个能力面
+  //   · docs/design.md —— 包结构变了（双能力面），设计文档必须跟着说
+  const skillsDoc = await readFile(new URL('../docs/skills.md', import.meta.url), 'utf8')
+  assert.ok(skillsDoc.length > 500, 'docs/skills.md 内容过少，疑似占位')
+  // 说明必须覆盖三件用户一定会问的事。
+  for (const [label, pattern] of [
+    ['能力层入口（怎么打开技能面）', /技能/],
+    ['作用域（装到哪）', /作用域|全局|项目/],
+    ['许可门禁（为什么有的装不了）', /许可/],
+  ]) {
+    assert.match(skillsDoc, pattern, `docs/skills.md 缺少「${label}」的说明`)
+  }
+  // README 的功能清单要提到技能能力面。
+  assert.match(readme, /技能/, 'README 必须提到技能能力面')
+  assert.match(readmeEn, /[Ss]kill/, 'README.en 必须提到技能能力面')
+  // 设计文档要说明现在是双能力面（包结构变了）。
+  assert.match(designDoc, /技能/, 'docs/design.md 必须说明技能能力面')
+})
+
 test('the current release has a hand-written GitHub Release note', async () => {
   // 发布闸门（与 whats-new 同一条理由，只是对象换成 Release 页面）：本仓库的发布全部直接提交
   // 到 main、没有 PR，所以 `gh release create --generate-notes` 几乎生成不出内容——v1.3.0 及
@@ -152,10 +177,15 @@ test('documentation targets the verified DSH and plugin releases', () => {
     // 版本从 package.json 推导，别硬编码：这两个断言原本写死 v1\.4\.0，于是 bump 版本时
     // 又多了两个真源（旁边 DEV_BASELINE 那条注释记的是同一类坑）。
     const escapedVersion = packageJson.version.replace(/\./g, '\\.')
-    assert.match(document, new RegExp(`dsh plugin --profile web add github:Imzl-zl\\/dsh-mcp-manager-ui#v${escapedVersion}`))
+    // ⚠️ 这里是**仓库** slug（GitHub 上的名字）：1.6.3 起仓库已改名成 dsh-toolbox-ui，
+    // 与包名一致；旧包 dsh-mcp-manager-ui 那条线冻结在 1.5.5，只留在历史 tag 与 npm 上。
+    // 从 repository.url 推导，避免再把两者混为一谈（首版就是这么错的，改名后必红）。
+    const repoSlug = /github\.com\/([^/]+\/[^/.]+)/.exec(packageJson.repository.url)[1]
+    assert.match(document, new RegExp('dsh plugin --profile web add github:' + repoSlug + '#v' + escapedVersion))
     // npm 是主安装路径（它让 `dsh plugin update` 能在 ^1.x 内自动升级），必须写进两份文档。
-    assert.match(document, new RegExp(`dsh plugin --profile web add dsh-mcp-manager-ui@\\^${escapedVersion}`))
-    assert.match(document, /dsh plugin --profile web update dsh-mcp-manager-ui/)
+    assert.match(document, new RegExp('dsh plugin --profile web add ' + packageJson.name + '@\\^' + escapedVersion))
+    // 升级命令同样跟着包名走（从 package.json 推导，改名只发生在一个地方）。
+    assert.match(document, new RegExp('dsh plugin --profile web update ' + packageJson.name))
   }
 })
 
@@ -370,10 +400,30 @@ test('the three contract faces list the same methods in the same order', async (
   // **顺序也是契约**，所以比较不排序：三份清单是同一件事的三面，位置一致才可能一眼对照。
   // 曾经这里排过序，于是 scanImportSources 一组在 index.js 里被追加到末尾而没人发现。
   // 新增方法时，请在同样的位置插入三份清单。
+  // 本包有**两个** Remote 命名空间（mcpManager / skillsManager），所以三边清单都是
+  // 「MCP 段 + 技能段」的同序拼接：host 是两个 gateway 类各自的 @Remote，typert 是
+  // mv() / mvs() 两个工厂产出的 invocations，client 是字面 descriptor 加 sk() 调用。
+  // 拼接按**文件里的出现位置**排，不是按「先 MCP 再技能」硬写：这样两个面在文件里交错
+  // 也会被抓到（交错本身没有意义，但静默通过比报错更糟）。
+  const byPosition = (source, patterns) => patterns
+    .flatMap((pattern) => [...source.matchAll(pattern)].map((match) => ({ at: match.index, method: match[1] })))
+    .sort((left, right) => left.at - right.at)
+    .map((entry) => entry.method)
   const declared = [...hostIndex.matchAll(/Remote\("([A-Za-z0-9_]+)"\)/g)].map((match) => match[1])
   const contract = TYPERT.invocations.map((entry) => entry.method)
-  const descriptors = [...client.matchAll(/id: 'dsh-mcp-manager-ui#mcpManager\/([A-Za-z0-9_]+)'/g)].map((match) => match[1])
+  // 包名不写第二遍：从 package.json 推导。写死字面量时，改包名会让这条正则一条都匹配不到，
+  // 于是 descriptors 变成空数组——它照样会红，但理由是「顺序不对」，指向完全错误的地方。
+  const escapedName = packageJson.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const mcpPattern = new RegExp(`id: '${escapedName}#mcpManager/([A-Za-z0-9_]+)'`, 'g')
+  const skillPattern = /^\s+sk\('([A-Za-z0-9_]+)'/gm
+  const mcpDescriptors = byPosition(client, [mcpPattern])
+  const skillDescriptors = byPosition(client, [skillPattern])
+  const descriptors = byPosition(client, [mcpPattern, skillPattern])
   assert.ok(declared.length >= 30, `从 index.js 读到的 Remote 数量异常（${declared.length}）`)
+  // 两个面分别先验「读到了」：只匹配到一个面时 deepEqual 会以「少一半」失败，
+  // 而那句话读起来像顺序问题，所以这里先把「哪一面空了」说清楚。
+  assert.ok(mcpDescriptors.length >= 30, `client 的 mcpManager descriptor 只读到 ${mcpDescriptors.length} 条`)
+  assert.ok(skillDescriptors.length >= 9, `client 的 skillsManager descriptor 只读到 ${skillDescriptors.length} 条`)
   assert.deepEqual(contract, declared, 'lib/typert.js 的 invocation 必须与 Host 的 Remote 同序')
   assert.deepEqual(descriptors, declared, 'lib/client.js 的 descriptor 必须与它们同序')
 })
@@ -418,25 +468,35 @@ test('importing from other MCP clients goes through the Host, with no client-sup
 })
 
 test('client places an explicit selectable builtin installer before manual add', () => {
-  assert.match(client, /BuiltinInstallModal/)
+  assert.match(client, /McpMarketView/)
   assert.match(client, /call\('builtins'\)/)
   assert.match(client, /call\('installBuiltins'/)
-  assert.match(client, /type: 'checkbox'/)
-  assert.match(client, /安装选中/)
+  assert.match(client, /安装/)
   // 市场形态：搜索是主操作、分类 chips、卡片网格、逐条安装、以及「已配置」时可移除。
   // 这几条一起把「市场」与旧的「勾选列表」区分开——少任何一条都会退回列表框。
-  assert.match(client, /h\(Dialog, \{ label: 'MCP 市场', cls: 'dsh-mcp-market', onClose: dismiss \}/)
-  assert.match(client, /\.dsh-mcp-market-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
-  assert.match(client, /\.dsh-mcp-market-chips\{[^}]*overflow-x:auto/)
+  //
+  // ⚠️ 2025 改版：市场从**浮层**（.dsh-mcp-modal.dsh-mcp-market）改成**内联视图**
+  // （第二行的「发现市场」模式），与技能面共用 .dsh-mcp-grid / .dsh-mcp-mcard。
+  // 所以这里钉的是新契约：内联容器存在、且**不再**是 overlay/modal 的形态。
+  assert.match(client, /className: 'dsh-mcp-market-view'/)
+  assert.doesNotMatch(client, /dsh-mcp-modal dsh-mcp-market/, '市场不得再回退成浮层形态')
+  assert.match(client, /\.dsh-mcp-grid\{[^}]*display:grid[^}]*grid-template-columns:repeat\(auto-fill/)
+  // 分类药丸：**换行**而不是横滚（横滚 + 隐藏滚动条会把最后一个药丸切在右边缘，
+  // 真机上就是「文件与…」被裁一半）。判别断言放在 panel-chrome 那条，这里只钉它存在。
+  assert.match(client, /\.dsh-mcp-chips\{[^}]*flex-wrap:wrap/)
   assert.match(client, /className: 'dsh-mcp-chip'/)
   assert.match(client, /placeholder: '搜索服务、用途或提供方…'/)
   assert.match(client, /install\(\[item\.id\]\)/)
   assert.match(client, /call\('removeServer'|call\('removeWorkspaceServer'/)
   assert.match(client, /call\('removeWorkspaceServer', \{ wsPath: scope, name \}\)/)
+  // 头部顺序：导入在「添加」之前，两者都在标题栏那一列里。市场不再是这里的一个按钮
+  // ——它升格成第二行的模式分段（与技能面同一个控件），所以「市场」不再参与这段排序。
   const importPosition = client.indexOf("children: '导入 MCP")
-  const marketPosition = client.indexOf("children: '市场'")
   const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
-  assert.ok(importPosition >= 0 && importPosition < marketPosition && marketPosition < addPosition)
+  assert.ok(importPosition >= 0 && importPosition < addPosition, '导入要排在「添加 MCP」之前')
+  // 模式层是**两个能力面共用**的那一个：只有一处定义、且两处都读它。
+  assert.equal((client.match(/const SKILL_MODES = \[/g) ?? []).length, 1, '模式层只能定义一次')
+  assert.match(client, /seg\(SKILL_MODES, mode, setMode, '模式'\)/)
 })
 
 test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {

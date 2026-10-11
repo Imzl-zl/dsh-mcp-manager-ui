@@ -87,12 +87,23 @@ const LITERAL_COLOR = /(#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\()/
 const MONO_STACK = /ui-monospace|SFMono|Menlo|Consolas/
 const LABEL_COLOR = 'var(--dsw-alias-label-primary)'
 
-/** 从 lib/client.js 源码里取出 MCP_CSS 模板字面量。 */
+/**
+ * 从 lib/client.js 源码里取出全部样式表常量（模板字面量）并拼接。
+ *
+ * 为什么是「全部」而不是只取 MCP_CSS：面板的样式常量会随功能增加（Skills 面板即第二份）。
+ * 只认一个名字时，新增常量的样式**不会被任何扫描器看到**——12 条主题测试会全绿，
+ * 但一条都没查过新代码。绿而无效比红更难发现，所以提取范围必须与常量数量无关。
+ *
+ * @param {string} clientSource - lib/client.js 的源码文本。
+ * @returns {string} 所有 `<NAME>_CSS = \`...\`` 常量的内容，按出现顺序拼接。
+ */
 export function extractPanelCss(clientSource) {
-  // 容忍 CRLF：结尾是 `` `; `` 加换行。
-  const match = /const MCP_CSS = `([\s\S]*?)`;\s*\n/.exec(clientSource)
-  if (!match) throw new Error('lib/client.js: 找不到 MCP_CSS 模板字面量')
-  return match[1]
+  // 容忍 CRLF；结尾是 `` `; `` 后跟换行或文件末尾（常量可能正好是最后一个语句，
+  // 要求"必须有换行"会让最后一份样式在文件末尾时静默漏掉——正是这条修复要防的失败形态）。
+  const pattern = /const ([A-Z][A-Z0-9_]*_CSS) = `([\s\S]*?)`;(?=\s*\n|$)/g
+  const sheets = [...clientSource.matchAll(pattern)].map((match) => match[2])
+  if (sheets.length === 0) throw new Error('lib/client.js: 找不到 *_CSS 模板字面量')
+  return sheets.join('\n')
 }
 
 /**

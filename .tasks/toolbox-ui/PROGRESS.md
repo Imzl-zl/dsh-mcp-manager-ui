@@ -1,0 +1,44 @@
+# Progress
+
+- Shape: durable
+- FinalizationStatus: active
+- Truth: .tasks/toolbox-ui/TODO.csv
+- Current: v1.6.3 门面改版（README×2 重写 / 新图标 / 两张关键截图）与仓库改名（dsh-mcp-manager-ui → dsh-toolbox-ui）已完成并全量绿；工具箱线并回 main（merge --no-ff）已做；**v1.6.3 待发布**（需要维护者先把 npm 的 Trusted Publisher repository 改成新仓库名，否则 publish 会被拒）。剩余见 Next
+- Latest validation: `node --test` → **536 pass / 0 fail**（2026-10-11 实测；1.6.2 本轮 507 → +25 条，发布前独立审查再 +4 条）。本轮另做 6 项变异验证，全部被抓到且命中的是**预期那条**用例：① 调用权限改回取自宿主 summary → skills-host 红；② 契约删掉 `setModelInvocable` → typert-manifest 红；③ 关闭开关时写 `false` 而不是删行 → 往返用例红；④ 删掉多行值（续行）守卫 → 拒绝用例红；⑤ 客户端不接 `onModelInvocable` → 接线用例红；⑥ 列表的停用行不再报权限 → skills-host 红。真机验收：`dsh --profile skillsuitest --port 19687`（该 profile 用 `link:` 指向本工作树），面板无白屏、技能 27 条、1.6.2 更新卡片正常；夹具技能 `~/.dsh/skills/dsh-toggle-fixture`（验完已删、目录恢复原样）点关 → 文件 608→639 字节（只多一行 `disable-model-invocation: true`，追加在 frontmatter 末尾），点开 → 回到 608 字节且 SHA256 与操作前**逐字节一致**；开关关闭期间该技能从**模型可见目录**里消失、重开后回来；内置（只读）技能开关禁用并显示「未知」
+- Next: ① **发布 v1.6.2**（维护者：`npm test` 已绿、真机已过；提交 → `git push origin feature/toolbox-ui`（或按既定流程并到 main 发布）→ `git tag -a v1.6.2 && git push origin v1.6.2`；新线 Release 必须带 `--prerelease`），发布后提醒 1.6.1 及更早的用户手动 `dsh plugin update dsh-toolbox-ui` 一次（他们的面板读的还是旧 feed，不会主动提示）② row 26：内置（只读）技能定位不到根 → 正文与权限都读不出来（先拿 bundled provider 的真实 path/resourceBase 形状，别猜根）③ 整改第 5 批（row 22 剩余：剩余假绿、端到端用例）④ row 21 非法条目诊断（与 row 26 同源：都需要「按根扫描全部技能文件」那张表）⑤ row 19 面板的本地导入入口 ⑥ row 18 剩余真机项
+- **2026-10-11 全功能验收发现并修掉的缺陷（技能面启停后列表错乱）**：真机在面板里停用一个技能后，列表把那一行**重复渲染 3 份**、并把「被遮蔽」徽章挂到邻居身上，详情状态停在旧值。根因：宿主发现缓存仍把改名前的技能报成「已启用」，而面板自己扫到了它的 `.disabled`，于是**同一身份**（`source \0 cwd \0 name`）在 `{skills, disabled}` 里各出现一次 → 客户端行 key 相同 → React **重复 key**（生产版不报警告，所以静默）。修法：在这两个数组的**产出处**（`SkillsManagerGateway.list`）保证互斥，停用件优先；身份元组由 `lib/skills-registry.js` 的 `skillRowKey` 与客户端 `skillIdentity` 两处用例钉同一个字面量。撤掉去重即变红（已验）。
+- **2026-10-11 门面改版 + 仓库改名（row 28）**：README 是用户看到的第一件东西，而它当时 200+ 行、四张同角度的 MCP 截图、仓库名与包名还错位。① 两份 README 重写：logo + 两张关键截图（MCP 市场 / 技能面板）、特性分组、升级提示前置、FAQ 只留四条，友链保留为文末「友情链接」（保留 LINUX DO 的 logo 与链接）。② 新图标照 **DSH 官方图标**的观感做：近白圆角块 `#F9FAFA` + 深墨剪影 `#2C3038`，圆角半径 157/960、外留白 32、图形占比都按 `resources/icon.png` 实测比例；无渐变、无彩色，24px 到 512px 都清楚，深浅主题都能用。③ 截图在**隔离 profile**（`skillsuitest@19687`）拍，演示技能 `pdf-report`/`commit-hygiene`/`api-smoke` 拍完即删——不碰真实技能，也不把工作区名带进图里。④ 仓库改名成 `dsh-toolbox-ui`（旧地址 GitHub 自动 301），同步了 package.json 三个字段、两份 README、docs/installation、`lib/index.js` 的 releasePageOf、`lib/client.js` 的兜底链接、三个测试与 release.yml 注释。⑤ 版本 1.6.3：**没有行为改动**，只换门面与资产。⚠️ 两个必须记住的运维事实：**npm 的 Trusted Publisher repository 必须同步改成新仓库名**（OIDC 凭据里带的是仓库名，不同步 publish 会被拒）；**npm 渲染 README 的相对图片时会改写成 `raw.githubusercontent.com/<repo>/HEAD/...`**（实测），HEAD = 默认分支——所以新截图必须先上 main，否则 npm 页面上是裂图。
+- **2026-10-11 发布前独立审查发现并修掉的缺陷（d07fd78..7c13581，见 row 27）**：①【Important，会改坏用户文件】`setFrontmatterBoolean` 的追加分支只认行扫描结果：引号键（`"disable-model-invocation": true`）与流式映射（`{...}`）解析器都认得、宿主读得到，`isTopLevelKey` 却匹配不上那一行，于是按「键不存在」追加 → 写出**第二个**同名键 → YAML 重复键让整份 frontmatter 报废（宿主随即跳过整条技能），而且追加的值写死 `true`（用户点的可能是「关」）。修法：追加前用 `Object.hasOwn(parsed.data, key)` 判「键**真的**不在」，两套判据分叉就拒绝；顺带把「值带 YAML 锚点」（删改会让别处的 `*alias` 悬空）一并纳入拒绝。②【Important，文档承诺未兑现】改写规则拒绝时那句原因（「值跨了多行，请手工修改」）在客户端被 `call` 的结果对象吞掉——开关只是弹回原位，用户看到的是「点了没反应」，而 docs/skills.md 与发布稿承诺的正是「拒绝并说明原因」。修法：技能面的行动作统一走 `act`（与 MCP 面同一条纪律：失败 flash 宿主原话），启停/删除/安装一并接上；失败不再清选中、不再关弹窗。③【Nit】5 处仍写「只查 GitHub Releases」的文档与注释（README×2、docs/installation.md×2、lib/client.js）＋命名闸里一条永不命中的 `api.github.com` 豁免（理由已假）。④【Nit】「内置技能只读、**没有**这个开关」与实现（照常渲染、只是禁用）不符。⑤【Nit】whats-new 的补救命令 `dsh plugin update …` 缺必需的 `--profile web`（`dsh plugin --help` 实测报 required option）。证据：4 条新用例先跑红（引号键/流式映射、锚点、拒绝后文件逐字节不变、失败必须说出来），修完 536 pass / 0 fail；变异验证 5 项在修复后的树上实跑且命中的都是预期用例（权限改回读 summary / 关闭写 false / 拿掉只读根守卫 / 不接 `onModelInvocable` / 吞掉改写拒绝），另 2 项（拿掉引号键守卫、act 不 flash）因还原脚本回退了未提交改动而未生效，其红色证据取自修复前的红跑。另有 1 条既有用例暴露了脆弱：`test/panel-chrome.test.mjs` 用源码文本钉 `await call('skillHubInstall'`，写动作统一走 `act` 后改成不钉助手名的写法。⚠️ 本轮仅本地提交，未 push、未打 tag。
+
+## 恢复须知
+
+- **恢复入口**：本文件 → `TODO.csv` 的 `status` / `notes`。设计真值＝`SPEC.md`；界面设计真值＝`prototype/unified-design.html`。
+- **双包关系（2026-10-11 起已收口）**：`main` 就是工具箱线（`dsh-toolbox-ui` 1.6.x）；旧线 `dsh-mcp-manager-ui` 冻结在 1.5.5，只留在历史 tag 与 npm 上（源码由 `v1.5.5` tag 保住）。仓库已改名 `dsh-toolbox-ui`，`feature/toolbox-ui` 分支的内容与 main 一致。
+- **改名（row 16 / D16）已完成**，不再是「最后一步」；此后契约 id 与文档一律用新包名。
+- **改名 2026-10-11（一次改到位）**：分支 / 工作树 / git admin 目录 `.worktrees/feature/toolbox-ui` @ `feature/toolbox-ui`（原 `…/skills-manager`）；技能面文档 `docs/skills.md`（原 `docs/skills-manager.md`）；任务记录目录 `.tasks/toolbox-ui/`（原 `.tasks/skills-manager/`，它装的是**整条线**的记录，早就有 MCP 内容）。`web` 与 `skillsuitest` 两个 profile 的 `link:` 与 `node_modules` junction 已同步；旧路径留了一个 junction 桥，等跑过 `web` 的宿主重启一次之后即可删。
+- **改名顺带修掉两处「身份写错」**（此前一直没人看见，因为命名闸只扫一层目录）：`.github/release-notes/v1.6.0.md` 把旧包名当**主安装路径**（npm 上根本装不到这条线）→ 改成新包名并补上「包名变了、`update` 不跨包名」的迁移说明；`.github/workflows/release.yml` 把 Release 标题**写死**成旧包名 → 改成从 `package.json` 的 `name` 推导（同仓库两条产品线，写死必错一条）。
+- **发布前验收（2026-10-11，隔离 DSH_HOME，用户自己的 profile / 实例一个字节没动；验完隔离目录连凭据一起删）**：
+  1. **迁移路径**（用户的原话：装了 MCP 的要卸载再装）走官方命令跑通：`dsh plugin add` 旧包（`link:` 仓库根 = main）→ 旧面板只有 MCP 面、没有技能页签；`dsh plugin remove dsh-mcp-manager-ui` → `dependencies` 与 `dsh.profile.bundles` **双清**；`dsh plugin add <toolbox-ui 工作树>` → 重启后面板 MCP + 技能两个页签都在，无 `already registered` / 无未激活条目。**一处无害残留**：`remove` 之后 pnpm 会把 `node_modules/<旧包名>` 那个 junction 留在原地，`pnpm install` 与 `pnpm install --frozen-lockfile` 都不会清（lockfile 本身是干净的——里面出现的旧包名只是新包 link 路径里的**仓库名**）。它不影响加载（bundles / dependencies 都不引用它，loader 也不扫 node_modules），只是看着像旧包还装着；v1.6.0 的迁移说明可以考虑加一句「想干净就删掉它」。
+  2. **真会话 + 真模型**：两个工作区各 `create` 一个会话 → 两侧都 `已连接 · 1 个会话在用 · 1 工具`、无失败横幅，详情页工具列分别是各自那份连接的 `mcp__fixture__a_echo` / `mcp__fixture__b_echo`；用阶跃 `step-5-preview` 发真实指令，模型**真的调用**了项目 MCP 工具并原样贴回 `b_echo: 阶跃验收`（1 轮 2 步 / 3 秒）。
+  3. **缺陷本身在最终构建上复跑**（临时把 `loadScopeModule` 指向第二份 dsh-scope，验完已还原、grep `probe-leak` = 0）：两个项目**都没有**「未能挂载到会话」（issue #4 那个形状确实被结构挡掉了），同一根因的另一面如实报出——横幅 = 后果 + 原因 + 修法 + 首个原因全文。
+  4. **自建 profile 会踩的坑**（不是本插件的问题，但用户加 provider 时会遇到）：patch 层必须**覆盖 bundle 里同 id 的** `llm-pi-ai`；新起一个 id（如 `llm-stepfun`）会挂出**第二份**实例，运行期报 `no adapter registered for provider "xxx"`（`NO_ADAPTER`）。
+- **全功能验收 · 第二轮（2026-10-11，同一个隔离环境；逐项核对了磁盘而不是只看界面）**：把上一轮欠的项补齐——MCP：编辑（改超时落盘，参数显示「保留原值」且**逐字未变**）、删除（带 confirm）、重连（失败连接带出官方原文 `mcp-client(bad): connection attempt failed: SdkError: Connection closed`）、全局作用域添加（写进 profile 的 `cordis.patch.yml`）、屏蔽（ws-a 落 `exclude: ["glob"]`，面板 `0/1 对本项目可见`）、导入 JSON（预览 `新增：imported` → 确认 → 落盘）、市场**真装 + 移除**（`deepwiki-fetch` 写入 ws-b、移除后消失）；skills：删除（目录捆绑**连目录一起删**，父根保留）、市场**真装**（`dev-expert` 落进隔离的全局根，弹层披露"上游未提供清单、本插件未核验"与包内实际带 `hooks/`+`scripts/` 一致）、启停（上一轮已验）。**唯一没能测的**：skills 的**本机导入**（.md／目录／压缩包）——面板**没有入口**（TODO row 19 记的就是"缺的是面板入口与接线"；宿主 `importSkill` 本身有用例）。顺带把 whats-new 里「与『从本机导入』同一条 `importSkill`」改成「宿主那条 `importSkill`」——原文暗示了一个并不存在的入口。
+- **本轮（R1）改动全部未提交**：13 个已跟踪文件改动 + `lib/skillhub.js` + 7 个新测试文件 + `prototype/unified-design.html`。**R1 的 row 17/18 是按这些未提交工作反推补上的行**（原计划只有 16 行，且 PROGRESS 曾写着「16/16 全部 DONE」——那与实际状态不符，已改回 `active`）。
+- **版本不用动**：`dsh-toolbox-ui` 在 npm 上仍是 404（2026-10-10 实测未发布），所以 R1（skillhub 源 + 面板对齐）直接并进尚未发布的 1.6.0，SPEC 约束 24 的连带面没有被触发。
+- **旧的过程日记去哪了**：SPEC/TODO/PROGRESS 在 commit `6d5a76b` 的版本里有逐行过程记录（含每次变异测试的细节）。本次按协议把它们压回「行级事实 + 跨行教训」，原文可用 `git show 6d5a76b:.tasks/toolbox-ui/TODO.csv` 取回。
+
+## 跨行教训（只记不变量级的；单行细节在 TODO.csv 的 notes）
+
+1. **「看到红」不等于「测到了」**：夹具在 setup 阶段报错也会红，断言根本没执行（本机缺符号链接权限，只有目录 junction 能建）。**第二个实例（2026-10-11）**：`test/skills-host.test.mjs` 那条「导入落点」用例自 `8367f62` 起一直红在两个缺失导入（`existsSync`、`readdir`）上，补完导入才露出夹具漏建只读根 `bundled`——三条断言里最后那条（「内置根不得被写入」）从来没执行过。同一个 `ReferenceError` 被当作「既有失败」带过了好几轮；看到红的第一件事是确认断言到底跑没跑到，而不是先记成环境问题。
+2. **变异存活时先怀疑变异，再怀疑测试**：一个「不可能失败」的变异和一条「永远通过」的用例是同一类错误（删掉断言自己就是同义反复）。
+3. **别用自己改写的「代表性文本」当夹具**：那测的是想象而不是真实世界。许可判定必须用逐字原文，并同时用 MIT/BSD/Apache 原文测「不得误杀」。
+4. **同一件事只能有一处判据**：两处判据会在改名/重构后分叉，而静默失效的那一处往往正是闸门（让位检测的自身排除）。
+5. **定义基准的测试不能参与被测的那次改动**：旧名常量必须显式写死，否则改名脚本会顺手改掉判据。
+6. **要测「必须同时满足」，只能用只满足一半的输入**。
+7. **有缓存的被测对象，用例之间必须显式清缓存**，否则「测第二条」其实在测第一条（远端搜索的 5 分钟缓存）。
+8. **手抄的清单会漂**：契约完整性要由 `@Remote` 标记机器推导；`remoteMethods()` 要**活实例**、不是 prototype（传 prototype 得到空数组，`deepEqual([], [])` 照样通过）。
+9. **「无悬空引用」这类承诺必须是闸，不是散文**：现由 `test/tasks-spec-integrity.test.mjs` 守着。
+10. **替换锚点要包含被保留的部分**，只用目标行做锚点会把它一起吃掉（曾误删 `const h = React2.createElement`）。
+11. **引用一个「应该是既有」的东西前先确认它真的存在**：凭想象写 `readWorkspaces()` 会静默走错路径。
+12. **常驻的计数类断言用下界**（样式前缀 `> 500`），钉死数字会让每次加样式都要改测试。
+13. **闸的覆盖面本身也要被断言**：`package-rename` 的目录扫描首版只 `readdir` 一层，`.github/` 的子目录（release notes 与 workflows）整类无人看管——于是「v1.6.0 发布稿把旧包名当主安装路径」和「release.yml 把 Release 标题写死成旧包名」两处真错留了好几轮。改成递归之后又发现第二层问题：白名单按**行的形状**放行「`dsh plugin … add <旧包>`」= 把「叫用户装旧包」和「教用户从旧包迁过来」判成同一件事，前者正是缺陷形态。修法是让迁移说明靠**同行的措辞**（旧包 / 此前叫 / 迁移）放行，安装命令本身不再有豁免，并做变异验证（塞回旧命令 → 闸红且精确点名）。

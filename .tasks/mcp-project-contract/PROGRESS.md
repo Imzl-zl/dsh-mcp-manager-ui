@@ -1,46 +1,12 @@
 # Progress
 
 - Shape: durable
-- FinalizationStatus: **delivered**（v1.5.3 与 v1.5.4 均已发布：npm + GitHub Release）
+- FinalizationStatus: **delivered**（v1.5.2 已发布：npm + GitHub Release）
 - Truth: .tasks/mcp-project-contract/TODO.csv（row 1-7、9、10 DONE；row 8 的验收已由第三轮真机复核替代完成，见下）
 - Workspace: 已并入 `main`（`fbcf22d`）；worktree 保留在 D:\sudy\github\dsh-mcp-manager-ui\.worktrees\feature\project-mcp-contract
-- Commits: 主体链见 `git log`；最近两轮为 **v1.5.3（issue #4 同名项目挂不上 + 失败提示给出原因）** 与 **v1.5.4 迁移版（把用户送到后继包 `dsh-toolbox-ui`）**
-- Latest validation: `main` 上 `node --test` = **309 tests / 309 pass / 0 fail**（v1.5.3 基线 308；迁移版 +1：先装后继再卸自己的顺序用例）
-- Next: **这条线已冻结**——`dsh-mcp-manager-ui` 自 1.5.4 起只做一件事：把用户迁到后继包 `dsh-toolbox-ui`（MCP + 技能面）。功能改动一律去那边；本线如需修补仍从 `main` 开分支
-
-## v1.5.4 迁移版：把这条线接到 dsh-toolbox-ui（2026-10-11）
-
-**为什么需要这一版**：这条线（只有 MCP 面板）已并入后继包 `dsh-toolbox-ui`（MCP + 技能面，是它的超集）。但 1.5.3 的一键升级**必然失败**：它下发的规格是 `dsh-mcp-manager-ui@^1.6.0`，而这条线的版本号停在 1.5.x，npm 上根本没有那个版本——用户只会看到「新版本 v1.6.0 可用」，点下去报错。
-
-**三处改动**：
-
-1. **版本真源改成后继包在 npm 上的 latest**（`registry.npmjs.org/dsh-toolbox-ui/latest`），不再问本仓库的 `/releases/latest`：仓库级 latest 是两条线**共用**的、谁先发谁赢，拿它当"我的最新版"结构上就是错的。结果里多回一个 `package`，面板据此把提示说成"迁移"而不是"本包有新版本"。
-2. **规格指向后继包**（`dsh-toolbox-ui@^<latest>`）并带上 `replaces`（本包名）；`not-npm` 那道守卫照旧按**本包**的 source 判（link/file/github 装的不给按钮）。
-3. **动作两步：先装后继、再卸自己**。顺序是安全边界——两个包的 `cordis.patch.yml` 共用 id `mcp-manager-ui`，composer 按 id 取**后列的那个**；真机实测两个都装着时应用照常启动、只注册一个面板、注册的是后继包，所以即便第二步失败，用户手里仍是一个能用的面板（反过来先卸自己会把面板弄没）。第二步失败不假装成功：横幅明说"旧的没卸掉、可手动 `dsh plugin remove`"。
-
-**真机验证**（隔离 `DSH_HOME`，用本地 tarball 当后继包；两处临时探针——假装 registry 上有 1.6.0、规格换成那个 tarball——**验完已还原，grep `TEMP-PROBE` = 0**）：横幅「这条线已并入 dsh-toolbox-ui（MCP + 技能）：v1.6.0 可用」+「迁移」按钮 → 点一下 4 秒 →「已迁移到 dsh-toolbox-ui v1.6.0，重启宿主后生效」→ `dsh.profile.bundles` 与 `dependencies` 里新包已登记、旧包已移除 → 重启后集合版在跑（面板有"技能"页签）、无失败。
-
-**发布顺序（有依赖，不能反）**：先发集合版 `dsh-toolbox-ui@1.6.0`（新包名的**首个版本必须由维护者本地交互式发布**——npm 要求包先存在才能配 trusted publisher），再发本版 `dsh-mcp-manager-ui@1.5.4`（推 tag → CI）。`release.yml` 顺带补了一条：**已经存在于 npm 的版本跳过 publish**——否则新包名首个版本本地发完、再推同一个 tag 时 CI 会撞「版本已存在」而失败，连 Release 都建不出来。
-
-## issue #4「同时开两个项目 MCP 会失败」与 v1.5.3 发布（2026-10-11）
-
-**报告**：issue #4 评论（2026-10-11 07:51）「同时开两个项目 mcp 会失败 / 8 个项目 MCP 未能挂载到会话」。
-
-**先按报告的形状做了真机复现，结论分两层**：
-
-1. **健康安装上复现不出来**：隔离 `DSH_HOME` + 真 Web 实例（阶跃 `step-5-preview` 真会话、真 stdio 子进程）跑「两个工作区同时开 + 两边同一份 8 条同名项目 MCP + 与全局条目同名」→ 16 条连接全部 ready、零挂载失败、各会话只看到自己项目的工具。这一层说明"两个项目同名"本身不是问题（官方 0.1.5 起按注册作用域判重，跨作用域同名合法）。
-2. **症状只有一条可达路径，已复现**：官方判重键是 `scopeOf(ctx) ?? ctx.root`，而作用域标签是**模块内 Symbol**。把依赖树换成**两份 `@deepseek-ai/dsh-scope`**（真机：把插件的 scope 模块换成第二份实例）后：第一个项目照常（工具泄漏到全局层），**第二个项目整批「未能挂载到会话」** —— 与报告逐字一致。同根因的另一面（工具无法隔离）因为同名而被「不可判定」跳过，所以面板上只剩一句没有原因的挂载失败。
-
-**修复（两件，都是结构性的）**：
-
-- **判重的回退键归每条连接独有**（`createSharedConnection`：`scoped.ctx.extend({ root: scoped.ctx })`）：标签认得出来时 `??` 短路、它根本不被读到（健康安装行为逐字不变）；认不出来时官方拿到的仍是只属于本连接的 owner，"一条连接一份名字"不再依赖依赖树是否干净。真机前后对比：修复前第二个项目整批失败，修复后两个项目都 `已连接`、工具可用。
-- **失败原因不再丢**（`recordWorkspaceMountError` 是唯一成形处）：fiber 拒绝时原样带上官方错误（此前是"共享连接启动失败（fiber 3）"），属于占用时补「和谁同名」（全局条目 / 其他项目路径）与根因；两条失败横幅都带出第一条原因；「作用域隔离失败」的文案改成"后果 + 原因 + 修法"（这批工具对所有项目可见 → 安装里 `dsh-scope` 有多份 → 收敛成一份）。
-
-**未修的一半（如实记录）**：那种安装里工具隔离本身已失效，根治只能把安装树的 `dsh-scope` 收成一份（重装 profile 或清掉多余副本）；插件负责如实报出并让 MCP 仍可用。**仍未证实**：报告者那台机器是否就是这种依赖树——已请对方回那一行的错误文本（或升级后看提示），本轮结论建立在"能构造出的唯一可达机制 + 真机复现"上。
-
-**测试（+4，全部验证过"撤掉即变红"）**：真宿主「两个工作区同名同时挂载」（四条连接 ACTIVE、各拿各的工具、`exclude` 不被同名全局条目绕过）；真宿主「两份 `dsh-scope` 下两个项目同名仍要挂上，且泄漏如实报出」；替身「占用时的错误文本必须含原文 + 同名者 + 根因」；客户端「横幅带出第一条原因」。夹具补齐 `ctx.extend`（插件给连接 ctx 挂判重键就走它）——这条失真曾让"挂载真的发生"的断言假失败。
-
-**真机复核（打 tag 前，本次碰了 `lib/client.js`，按 `docs/installation.md` 必须做）**：隔离实例 + 两份 `dsh-scope` 模拟该安装，浏览器实操：侧栏入口能开面板；ws-b 两条 `已连接 · 1 个会话在用 · 1 工具`（修复生效）；ws-a 横幅实测为「2 个项目 MCP 的工具无法隔离（会出现在所有项目的会话里）：probe-1、probe-2。首个原因：这批工具对所有项目的会话都可见（它们出现在了全局层：mcp__probe-1__whoami）：这台机器的 DSH 安装里 @deepseek-ai/dsh-scope 有多份模块实例……把安装树收成一份即可（重装该 profile，或清掉多余的 dsh-scope 副本）」。环境已还原：隔离 home 删除、端口释放、浏览器标签关闭、真实 profile 与 `~/.dsh/storages/workspace.json` 未改。
+- Commits: 主体链见 `git log`；最近两轮为 **190a1ad（第三轮审查处置）→ b5cdfc0（v1.5.1 发布）** 与 **44fe85d（第四轮审查处置 + 用户当场发现的勾选列表布局缺陷 + v1.5.2 发布）**
+- Latest validation: `main` 上 `node --test` = **304 tests / 304 pass / 0 fail**；CI（ci run 38063936834）success；release run 38063943578 success
+- Next: 无。后续如需改动请从 `main` 开新分支
 
 ## 第四轮独立审查（只读）与 v1.5.2 发布（2026-10-10）
 

@@ -101,10 +101,124 @@ test('client Remote contribution matches the generated Typert contract', async (
   }
 })
 
+test('client descriptors carry both codec channels, including the skills namespace', async () => {
+  // ⚠️ 这条补的是一个**真实漏测**（变异测试发现）：上面那条契约用例只比较
+  // mode/typeSymbol，看不到 codec 内部；而 typert-manifest 的「双渠道」用例只读
+  // **lib/typert.js**。于是「客户端的 codec 丢了 create()」能全绿通过——而它在
+  // 0.1.6-alpha.2 起的宿主上会**加载即拒**（registry 用 `record.value ??= record.create()`
+  // 物化 schema）。两侧是两份独立产物，必须各自验。
+  const document = createFakeDocument()
+  const { client, cleanup } = await loadClient(document)
+  let contribution
+  const ctx = {
+    remote: { async $mount(value) { contribution = value; return async () => {} } },
+    slots: { inject() {} },
+  }
+
+  try {
+    const dispose = await client.apply(ctx)
+    const codecs = []
+    for (const descriptor of contribution.descriptors) {
+      if (descriptor.invocation?.codec !== undefined) codecs.push([descriptor.id + ' receiver', descriptor.invocation.codec])
+      for (const parameter of descriptor.parameters) codecs.push([descriptor.id + ' parameter ' + parameter.wire, parameter.codec])
+      codecs.push([descriptor.id + ' result', descriptor.result])
+    }
+    assert.ok(codecs.length > 0)
+    for (const [subject, codec] of codecs) {
+      assert.equal(codec.mode, 'strict', subject + ' 必须是 strict codec')
+      // 0.1.5-rc.x 那条线查 schema；0.1.6-alpha.2 起查 create()。两边都得有。
+      assert.equal(typeof codec.schema?.parse, 'function', subject + ' 缺少 schema（0.1.5-rc.x 会加载即拒）')
+      assert.equal(typeof codec.create, 'function', subject + ' 缺少 create()（0.1.6-alpha.2 起会加载即拒）')
+      assert.equal(typeof codec.create().parse, 'function', subject + ' 的 create() 没有返回可用 schema')
+    }
+    // 反向下限：skills 的 descriptor 确实在里面，否则上面的循环对它们空转也会「通过」。
+    // 数量必须与 lib/typert.js 的 skills 条目数一致（typert-manifest 会独立核对那一边）。
+    // 12 = 13 − 2 + 1：内置精选目录（market）与 skills.sh 补充搜索（searchRemote）随市场只留
+    // skillhub.cn 一起下线，三条契约边同时删；setModelInvocable（面板的「模型自动调用」开关）
+    // 随后补上一条。数字仍然精确，所以少登记一条客户端 descriptor 依旧会红。
+    const skills = contribution.descriptors.filter((descriptor) => descriptor.namespace === 'skillsManager')
+    assert.equal(skills.length, 12, `客户端的 skills descriptor 应为 12 条，实际 ${skills.length}`)
+    await dispose()
+  } finally {
+    cleanup()
+  }
+})
+
+test('both stylesheets are injected in a single call, not two', async () => {
+  // ⚠️ SPEC 已核实的陷阱（client.js 的 __injectCss）：它的 id 与 data-plugin-css 是**写死**的
+  // 'dsh-toolbox-ui/mcp.css'。以同一 id 二次调用会复用同一个 <style> 标签并**覆写**
+  // textContent——也就是 skills 样式会把 MCP 面板样式**静默冲掉**（没有报错，只是面板变形）。
+  // 所以两份样式必须合并成**一次**注入。
+  const document = createFakeDocument()
+  const { client, cleanup } = await loadClient(document)
+  const ctx = {
+    remote: { async $mount() { return async () => {} } },
+    slots: { inject() {} },
+  }
+
+  try {
+    const dispose = await client.apply(ctx)
+    // 一次注入 ⇒ 文档里只有一个 style 标签。
+    assert.equal(document.styles.length, 1, '两份样式必须一次注入（二次注入会覆写同一标签）')
+    const text = document.styles[0].textContent
+    // 两份样式的**内容都在**：只留一份就是被冲掉了。
+    assert.match(text, /\.dsh-mcp-panel\{/, 'MCP 面板样式必须在注入的样式表里')
+    assert.match(text, /\.dsh-skills-/, 'skills 样式必须在同一张样式表里（否则 MCP 样式会被冲掉）')
+    await dispose()
+  } finally {
+    cleanup()
+  }
+})
+
+test('a conflicting manager makes the plugin yield without registering any entry', async () => {
+  // D15：检测到**另一个** MCP 管理插件时主动让位。
+  //
+  // ⚠️ 注意「让位」的准确含义（SPEC row 13 与 Architecture 段的措辞是「不注册**入口**并渲染提示」）：
+  // 不注册的是**入口按钮**（悬浮按钮 / 侧栏入口）——它们才是会与另一个面板互相遮挡、
+  // 且都去改写同一份 profile 配置的东西。让位提示本身仍要渲染出来，否则用户只看到
+  // 「插件装了但什么都没有」，那比两个按钮并存更糟。所以这条断言的是
+  // 「入口不在 + 提示在」，不是「一个 slot 都没有」。
+  const document = createFakeDocument()
+  const { client, cleanup } = await loadClient(document)
+  const registered = []
+  const injected = []
+  let mounted = false
+  const skillsService = {
+    async conflictingManager() { return { ok: true, value: { id: 'other-manager', name: 'dsh-mcp-manager-ui-old' } } },
+  }
+  const ctx = {
+    remote: {
+      async $mount() { mounted = true; return async () => {} },
+      skillsManager: skillsService,
+    },
+    get(name) {
+      if (name === 'remote.skillsManager') return skillsService
+      return undefined
+    },
+    slots: {
+      inject(name, mount) { injected.push(name); mount() },
+      register(options) { registered.push(options.id); return () => {} },
+    },
+  }
+
+  try {
+    const dispose = await client.apply(ctx)
+    assert.equal(mounted, true, '仍要完成 Remote mount（提示需要它）')
+    // 让位的核心：两个会打架的入口都不得注册。
+    assert.equal(registered.includes('mcp-fab'), false, '让位时不得注册悬浮按钮入口')
+    assert.equal(injected.includes('sidebar.footer.action'), false, '让位时不得注册侧栏入口')
+    // 但提示必须渲染出来（否则用户什么都看不到）。
+    assert.equal(registered.includes('mcp-handover'), true, '让位时必须渲染提示')
+    await dispose()
+  } finally {
+    cleanup()
+  }
+})
+
 test('client mount failure aborts plugin activation without UI side effects', async () => {
   const document = createFakeDocument()
   const { client, cleanup } = await loadClient(document)
-  const duplicate = new Error('Remote package "dsh-mcp-manager-ui" is already registered')
+  const duplicate = new Error('Remote package "dsh-toolbox-ui" is already registered')
   const ctx = {
     remote: {
       async $mount() {
@@ -194,8 +308,8 @@ test('client disposer releases Remote registration and stylesheet', async () => 
     //                   data-plugin === 插件 id 的标签；缺它就只能靠"materialize
     //                   期间新出现的未打标 style"兜底认领，窗口外插入的标签会变孤儿。
     //   data-plugin-css 本插件自己的去重键。
-    assert.equal(document.styles[0].dataset.plugin, 'dsh-mcp-manager-ui')
-    assert.equal(document.styles[0].dataset.pluginCss, 'dsh-mcp-manager-ui/mcp.css')
+    assert.equal(document.styles[0].dataset.plugin, 'dsh-toolbox-ui')
+    assert.equal(document.styles[0].dataset.pluginCss, 'dsh-toolbox-ui/mcp.css')
 
     let timeoutFired = false
     timer.timeout(() => {

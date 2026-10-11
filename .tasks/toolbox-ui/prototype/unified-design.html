@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH Toolbox — MCP &amp; Skills 统一扩展中心 · DSH 原生原型</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  DSH Toolbox 统一扩展中心 — 设计原型（DSH 原生版）
+  ═══════════════════════════════════════════════════════════════════════════
+
+  这一版与上一版的区别，是把「自造视觉层」换成宿主真实设计语言：
+
+  1. 令牌取真值，不再自造
+     :root / body[data-ds-dark-theme] 里的每个值都是从运行中的 DSH 宿主
+     （ui-theme，packages/client/ui-theme/src/styles/design-platform.css）
+     的 getComputedStyle 上原样读下来的，不是估的颜色。
+     最要紧的一条：--dsw-alias-brand-primary 在浅色下是 #0f1115（近黑）、
+     深色下是 #f9fafb（近白）——DSH 的品牌色是单色，不是蓝。
+     蓝色是 --dsw-alias-state-business-primary。上一版整屏蓝按钮与令牌无关。
+     另外 bg-layer-1/2/3 在浅色下全是纯白，靠 border 分层，不靠灰阶。
+
+  2. 尺寸取真值
+     面板 1000px × 88vh、左栏 288px、radius-panel 28px、深色选择器
+     body[data-ds-dark-theme]——都与已实现的 lib/client.js 一致，
+     而不是原型自己发明的 1080×840 / 360px / 24px / [data-theme=dark]。
+
+  3. 类名沿用实现的前缀
+     共享原语用 dsh-mcp-*（SPEC 约束 7 要求保留此前缀），技能面用 dsh-skills-*，
+     仅原型外壳用 pte-*。这样落地时是 1:1 改名，不是重新映射。
+
+  4. 主题契约（test/theme-contract.test.mjs）在原型阶段就守住
+     - 字面色值只允许出现在下面的令牌镜像块里，规则区一律 var()
+     - 圆角只用 --dsw-radius-* 档位；全圆角（999px/50%）同规则补 corner-shape:round
+     - 抬升面（elevation-*）不再叠加中性边框——elevation 自身已含 0.5px stroke
+     - 等宽只用 --ds-font-family-code
+     - 别名层唯一宿主是 body
+
+  5. 布局稳定性（上一版的实际缺陷）
+     - 详情头改成「标题块 | 操作区」两栏：状态徽章进 meta 行，不再挤标题行换行
+     - 通知条移出头部，进入正文滚动区，Tab 行位置因此恒定
+     - 详情卡片内部滚动：头与 Tab 行 flex:none，只有正文滚
+     - 发现市场模式下作用域区 display:none，不留空档
+     - 顶部三列 grid 钉死，切换能力层时关闭按钮不横移
+
+  未决项（需你拍板，原型按已实现值走）：
+     - 左栏 288px（已实现）vs 360px（上一版设计理由里写的）。
+       288px 是实测结论：作用域徽章放行内会被裁断，所以作用域改由组头承载。
+       要 360px 就得接受行内重新出现作用域徽章。
+     - 「让位保护」不能是面板内的一条提示：D15 的语义是命中冲突后
+       **不注册入口**，面板根本打不开。原型里保留它只为展示这条提示的样式，
+       真实场景中它渲染在入口被占的位置（见 lib/client.js 的 HandoverNotice）。
+-->
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   ① 令牌镜像 —— 与宿主 ui-theme 逐值一致（值读自运行中的 DSH）
+   规则区不得出现字面色值；只有这一节允许。
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --ds-font-family-code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+  --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --ds-transition-duration: .2s;
+  --ds-transition-duration-fast: .1s;
+
+  --dsw-radius-xs: 4px;
+  --dsw-radius-sm: 8px;
+  --dsw-radius-md: 12px;
+  --dsw-radius-lg: 16px;
+  --dsw-radius-xl: 20px;
+  --dsw-radius-panel: 28px;
+}
+
+body {
+  --dsw-alias-bg-base: #fff;
+  --dsw-alias-bg-layer-1: #fff;
+  --dsw-alias-bg-layer-2: #fff;
+  --dsw-alias-bg-layer-3: #fff;
+  --dsw-alias-bg-overlay: #e9ecf2;
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, .24);
+  --dsw-alias-border-l1: #0000000a;
+  --dsw-alias-border-l2: #0000001a;
+  --dsw-alias-border-l3: #0000001f;
+  --dsw-alias-border-l4: #00000029;
+  --dsw-alias-label-primary: #0f1115;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-label-tertiary: #81858c;
+  --dsw-alias-label-primary-inverted: #fff;
+  --dsw-alias-brand-primary: #0f1115;
+  --dsw-alias-brand-text: #0f1115;
+  --dsw-alias-button-elevated-fill: #fff;
+  --dsw-alias-button-primary-fill: #0f1115;
+  --dsw-alias-button-primary-hover: #43454a;
+  --dsw-alias-interactive-bg-hover: #2631480f;
+  --dsw-alias-interactive-bg-active: #2631481a;
+  --dsw-alias-interactive-bg-hover-accent: #26314824;
+  --dsw-alias-interactive-bg-hover-danger: #ec13130d;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-success-tertiary: #e6faed;
+  --dsw-alias-state-error-primary: #ec1313;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-warn-tertiary: #fef5e7;
+  --dsw-alias-state-business-primary: #4176e6;
+  --dsw-alias-state-business-tertiary: #e4edfd;
+  --dsw-alias-switch-thumb: #fff;
+  --dsw-alias-scrollbar-bg-l2: #e5e5e5;
+  --dsw-alias-scrollbar-hover-l2: #d4d4d4;
+  --dsw-alias-toast-bg: #353638;
+  --dsw-elevation-stroke-color: #00000029;
+  --dsw-elevation-stroke: 0 0 0 .5px var(--dsw-elevation-stroke-color);
+  --dsw-elevation-panel: var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, .03), 0 0 16px 0 rgba(0, 0, 0, .02);
+  --dsw-elevation-prominent: var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, .04), 0 0 20px 0 rgba(0, 0, 0, .05);
+  --dsw-shadow-lv3: 0 8px 24px 0 rgba(0, 0, 0, .06), 0 2px 8px 0 rgba(0, 0, 0, .04);
+}
+
+body[data-ds-dark-theme] {
+  --dsw-alias-bg-base: #151517;
+  --dsw-alias-bg-layer-1: #232324;
+  --dsw-alias-bg-layer-2: #2c2c2e;
+  --dsw-alias-bg-layer-3: #353638;
+  --dsw-alias-bg-overlay: #61666b;
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, .5);
+  --dsw-alias-border-l1: #ffffff0f;
+  --dsw-alias-border-l2: #ffffff1f;
+  --dsw-alias-border-l3: #ffffff29;
+  --dsw-alias-border-l4: #ffffff33;
+  --dsw-alias-label-primary: #f9fafb;
+  --dsw-alias-label-secondary: #cfd3d6;
+  --dsw-alias-label-tertiary: #adb2b8;
+  --dsw-alias-label-primary-inverted: #353638;
+  --dsw-alias-brand-primary: #f9fafb;
+  --dsw-alias-brand-text: #f9fafb;
+  --dsw-alias-button-elevated-fill: #43454a;
+  --dsw-alias-button-primary-fill: #f9fafb;
+  --dsw-alias-button-primary-hover: #ebeef2;
+  --dsw-alias-interactive-bg-hover: #ffffff14;
+  --dsw-alias-interactive-bg-active: #ffffff24;
+  --dsw-alias-interactive-bg-hover-accent: #ffffff3d;
+  --dsw-alias-interactive-bg-hover-danger: #f25a5a26;
+  --dsw-alias-state-success-primary: #22c55e;
+  --dsw-alias-state-success-tertiary: #233c2c;
+  --dsw-alias-state-error-primary: #f25a5a;
+  --dsw-alias-state-warn-primary: #f59e0b;
+  --dsw-alias-state-warn-tertiary: #27241f;
+  --dsw-alias-state-business-primary: #7aaaff;
+  --dsw-alias-state-business-tertiary: #34415b;
+  --dsw-alias-switch-thumb: #adb2b8;
+  --dsw-alias-scrollbar-bg-l2: #545557;
+  --dsw-alias-scrollbar-hover-l2: #65676b;
+  --dsw-alias-toast-bg: #43454a;
+  --dsw-elevation-stroke-color: #ffffff33;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ② 别名层 —— 唯一宿主 body（与 lib/client.js 的 MCP_CSS 同源）
+   ═══════════════════════════════════════════════════════════════════════════ */
+body {
+  --mcp-accent: var(--dsw-alias-brand-primary);
+  --mcp-ok: var(--dsw-alias-state-success-primary);
+  --mcp-err: var(--dsw-alias-state-error-primary);
+  --mcp-warn: var(--dsw-alias-state-warn-primary);
+  --mcp-info: var(--dsw-alias-state-business-primary);
+  --mcp-mut: var(--dsw-alias-label-secondary);
+  --mcp-faint: var(--dsw-alias-label-tertiary);
+  --mcp-bg-1: var(--dsw-alias-bg-layer-1);
+  --mcp-bg-2: var(--dsw-alias-bg-layer-2);
+  --mcp-bg-3: var(--dsw-alias-bg-layer-3);
+  --mcp-line: var(--dsw-alias-border-l2);
+  --mcp-line-bold: var(--dsw-alias-border-l3);
+  --mcp-mono: var(--ds-font-family-code);
+  --mcp-r-xs: var(--dsw-radius-xs);
+  --mcp-r-sm: var(--dsw-radius-sm);
+  --mcp-r-md: var(--dsw-radius-md);
+  --mcp-r-lg: var(--dsw-radius-lg);
+  --mcp-r-xl: var(--dsw-radius-xl);
+  --mcp-r-panel: var(--dsw-radius-panel);
+}
+
+* { box-sizing: border-box; }
+
+/* 主题契约要求：每个挂载子树自带 label-primary 与宿主字体，不靠继承 */
+.dsh-mcp-wrap, .dsh-mcp-overlay, .dsh-mcp-toast,
+.dsh-mcp-panel-overlay, .dsh-mcp-fab, .dsh-mcp-footer-action {
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family, inherit);
+}
+
+body {
+  margin: 0;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条：与宿主 .dsh-mcp-wrap 同一套 */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--dsw-alias-scrollbar-bg-l2);
+  border-radius: 999px;
+  corner-shape: round;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--dsw-alias-scrollbar-hover-l2); border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* 图标：统一描边风格，替掉上一版的 emoji */
+.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.i-sm { width: 13px; height: 13px; }
+.i-lg { width: 18px; height: 18px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ③ 原型外壳（pte-*）—— 只用于在浏览器里模拟宿主，不是交付物
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pte-host { display: flex; height: 100vh; overflow: hidden; }
+.pte-sidebar {
+  width: 248px; flex: none; background: var(--mcp-bg-1);
+  border-right: 1px solid var(--mcp-line); padding: 14px 10px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pte-sidebar-title {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--mcp-faint); padding: 4px 8px 10px;
+}
+.pte-sidebar-item {
+  display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+  border-radius: var(--mcp-r-md); color: var(--mcp-mut);
+  font-size: 12.5px; cursor: pointer; user-select: none;
+}
+.pte-sidebar-item:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.pte-sidebar-item.sel { background: var(--dsw-alias-interactive-bg-hover-accent); color: var(--dsw-alias-label-primary); font-weight: 600; }
+.pte-sidebar-foot { margin-top: auto; border-top: 1px solid var(--mcp-line); padding-top: 10px; }
+.pte-stage { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+.pte-debug {
+  position: fixed; left: 14px; bottom: 14px; z-index: 900;
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: 46vw;
+  background: var(--mcp-bg-2); border-radius: var(--mcp-r-lg);
+  box-shadow: var(--dsw-elevation-prominent); padding: 8px;
+}
+.pte-debug .dsh-mcp-btn { font-size: 11px; padding: 4px 9px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ④ 面板骨架 —— 尺寸与结构对齐已实现的 .dsh-mcp-panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-panel {
+  width: 1000px; max-width: 95vw; height: 88vh; max-height: 94vh;
+  box-sizing: border-box; background: var(--mcp-bg-2);
+  border-radius: var(--mcp-r-panel); box-shadow: var(--dsw-elevation-prominent);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: mcpPop .18s cubic-bezier(.2, .9, .3, 1.15);
+}
+@keyframes mcpPop { from { opacity: 0; transform: scale(.97) } to { opacity: 1; transform: scale(1) } }
+
+.dsh-mcp-wrap {
+  box-sizing: border-box; display: flex; flex-direction: column;
+  height: 100%; min-height: 0; gap: 12px; padding: 14px;
+}
+
+/* 标题栏三列钉死：标题 | 操作区（占满剩余）| 关闭。
+   曾经用 flex + space-between，关闭按钮跟着操作区宽度走，切面时横移几百像素。 */
+.dsh-mcp-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; flex: none; }
+.dsh-mcp-title {
+  white-space: nowrap; font-size: 15px; font-weight: 650; letter-spacing: .2px;
+  display: flex; align-items: center; gap: 8px;
+}
+.dsh-mcp-title::before { content: ""; width: 4px; height: 16px; border-radius: 2px; background: var(--mcp-accent); }
+.dsh-mcp-head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.dsh-mcp-head-actions.end { justify-content: flex-end; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑤ 基础控件
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-sm);
+  padding: 6px 12px; background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary); font-family: inherit;
+  font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
+  transition: background var(--ds-transition-duration-fast), border-color var(--ds-transition-duration-fast), color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-btn:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--mcp-line-bold); }
+.dsh-mcp-btn:active { background: var(--dsw-alias-interactive-bg-active); }
+.dsh-mcp-btn:disabled, .dsh-mcp-btn[aria-disabled='true'] { opacity: .4; cursor: not-allowed; }
+.dsh-mcp-btn:disabled:hover { background: var(--dsw-alias-button-elevated-fill); border-color: var(--mcp-line); }
+.dsh-mcp-btn.primary { background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-inverted); }
+.dsh-mcp-btn.primary:hover { background: var(--dsw-alias-button-primary-hover); }
+.dsh-mcp-btn.primary:disabled:hover { background: var(--dsw-alias-button-primary-fill); }
+.dsh-mcp-btn.danger { color: var(--mcp-err); border-color: var(--mcp-err); }
+.dsh-mcp-btn.danger:hover { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.dsh-mcp-btn.icon { width: 30px; height: 30px; padding: 0; }
+.dsh-mcp-btn.sm { padding: 3px 8px; font-size: 11px; }
+.dsh-mcp-btn.ghost { border-color: transparent; background: transparent; }
+.dsh-mcp-btn.ghost:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: transparent; }
+
+/* 分段切换（能力层 / 模式） */
+.dsh-mcp-seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--mcp-bg-3); border-radius: var(--mcp-r-md); }
+.dsh-mcp-seg .dsh-mcp-btn { border-color: transparent; background: transparent; padding: 5px 12px; font-size: 12.5px; }
+.dsh-mcp-seg .dsh-mcp-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-mcp-seg .dsh-mcp-btn.sel {
+  background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-inverted);
+  font-weight: 600; box-shadow: var(--dsw-shadow-lv3);
+}
+.dsh-mcp-seg-count {
+  font-size: 10px; font-weight: 500; padding: 0 5px; border-radius: 999px;
+  corner-shape: round; background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--mcp-mut); line-height: 15px;
+}
+.dsh-mcp-seg .dsh-mcp-btn.sel .dsh-mcp-seg-count {
+  background: var(--dsw-alias-interactive-bg-hover-accent);
+  color: var(--dsw-alias-label-primary-inverted);
+}
+
+/* 徽章：描边药丸，不是实心块；语义走 state-*-tertiary */
+.dsh-mcp-badge {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 1.5px 7px; border-radius: 999px; corner-shape: round;
+  font-size: 10.5px; font-weight: 500; line-height: 16px;
+  border: 1px solid var(--mcp-line); color: var(--mcp-mut); background: var(--mcp-bg-1);
+}
+.dsh-mcp-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; corner-shape: round; background: currentColor; opacity: .85; flex: none; }
+.dsh-mcp-badge.plain::before { display: none; }
+.dsh-mcp-badge.s-on { color: var(--dsw-alias-label-primary); border-color: var(--mcp-ok); background: var(--dsw-alias-state-success-tertiary); }
+.dsh-mcp-badge.s-off { color: var(--mcp-mut); border-color: var(--mcp-line); }
+.dsh-mcp-badge.s-err { color: var(--dsw-alias-label-primary); border-color: var(--mcp-err); background: var(--dsw-alias-interactive-bg-hover-danger); }
+.dsh-mcp-badge.s-warn { color: var(--dsw-alias-label-primary); border-color: var(--mcp-warn); background: var(--dsw-alias-state-warn-tertiary); }
+.dsh-mcp-badge.s-info { color: var(--dsw-alias-label-primary); border-color: var(--mcp-info); background: var(--dsw-alias-state-business-tertiary); }
+.dsh-mcp-badge.s-lock { color: var(--mcp-mut); border-color: var(--mcp-line-bold); }
+
+/* 下拉菜单 */
+.dsh-mcp-dd { position: relative; display: inline-flex; }
+.dsh-mcp-dd-pop {
+  position: absolute; top: calc(100% + 5px); right: 0; z-index: 60;
+  background: var(--mcp-bg-2); border-radius: var(--mcp-r-lg);
+  box-shadow: var(--dsw-elevation-panel); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px; min-width: 186px;
+}
+.dsh-mcp-dd-pop .dsh-mcp-btn { justify-content: flex-start; width: 100%; border-color: transparent; background: transparent; }
+.dsh-mcp-dd-pop .dsh-mcp-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-mcp-dd-pop .dsh-mcp-btn.danger:hover { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.dsh-mcp-dd-sep { height: 1px; background: var(--mcp-line); margin: 4px 2px; }
+
+/* 输入 */
+.dsh-mcp-search { position: relative; flex: none; }
+.dsh-mcp-search .i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--mcp-faint); }
+.dsh-mcp-search input, .dsh-mcp-input, .dsh-mcp-select, .dsh-mcp-textarea {
+  width: 100%; box-sizing: border-box; border-radius: var(--mcp-r-md);
+  border: 1px solid var(--mcp-line); background: var(--mcp-bg-1);
+  color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 12px;
+  padding: 8px 10px; outline: none;
+  transition: border-color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-search input { padding-left: 30px; }
+.dsh-mcp-search input::placeholder, .dsh-mcp-input::placeholder, .dsh-mcp-textarea::placeholder { color: var(--mcp-faint); }
+.dsh-mcp-search input:focus, .dsh-mcp-input:focus, .dsh-mcp-select:focus, .dsh-mcp-textarea:focus { border-color: var(--mcp-accent); }
+.dsh-mcp-select { cursor: pointer; appearance: none; padding-right: 28px; }
+.dsh-mcp-textarea { font-family: var(--mcp-mono); font-size: 11.5px; line-height: 1.6; resize: vertical; min-height: 92px; }
+.dsh-mcp-field { display: flex; flex-direction: column; gap: 6px; }
+.dsh-mcp-field > label { font-size: 12px; font-weight: 600; }
+
+/* 开关：34×19，滑块取 --dsw-alias-switch-thumb */
+.dsh-mcp-toggle {
+  position: relative; width: 34px; height: 19px; flex: none; box-sizing: border-box;
+  border: 0; border-radius: 999px; corner-shape: round; cursor: pointer;
+  background: var(--dsw-alias-border-l3);
+  transition: background var(--ds-transition-duration);
+}
+.dsh-mcp-toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; corner-shape: round; background: var(--dsw-alias-switch-thumb);
+  transition: left var(--ds-transition-duration);
+}
+.dsh-mcp-toggle[aria-checked='true'] { background: var(--mcp-ok); }
+.dsh-mcp-toggle[aria-checked='true']::after { left: 19px; }
+.dsh-mcp-toggle:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑥ 通知条（让位 / 降级 / 更新）—— 进 wrap 流，不挤头部
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-notice {
+  display: flex; align-items: flex-start; gap: 10px; flex: none;
+  padding: 10px 12px; border-radius: var(--mcp-r-lg);
+  border: 1px solid var(--mcp-line); background: var(--mcp-bg-1); font-size: 12px;
+}
+.dsh-mcp-notice > .i { margin-top: 1px; }
+.dsh-mcp-notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dsh-mcp-notice-body b { font-size: 12.5px; }
+.dsh-mcp-notice-body span { color: var(--mcp-mut); }
+.dsh-mcp-notice.warn { border-color: var(--mcp-warn); background: var(--dsw-alias-state-warn-tertiary); }
+.dsh-mcp-notice.warn > .i { color: var(--mcp-warn); }
+.dsh-mcp-notice.err { border-color: var(--mcp-err); background: var(--dsw-alias-interactive-bg-hover-danger); }
+.dsh-mcp-notice.err > .i { color: var(--mcp-err); }
+.dsh-mcp-notice.info { border-color: var(--mcp-info); background: var(--dsw-alias-state-business-tertiary); }
+.dsh-mcp-notice.info > .i { color: var(--mcp-info); }
+.dsh-mcp-notice-actions { display: flex; gap: 6px; flex: none; align-items: center; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑦ 主体：左栏（288px 卡片）+ 详情（卡片）
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
+
+.dsh-mcp-side {
+  width: 288px; min-width: 248px; min-height: 0; flex: none;
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-lg);
+  background: var(--mcp-bg-2); padding: 10px; overflow: hidden;
+}
+.dsh-mcp-list { flex: 1 1 auto; min-height: 52px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; margin: 0 -4px; padding: 0 4px; }
+.dsh-mcp-side-foot {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  border-top: 1px solid var(--mcp-line); padding-top: 8px;
+  font-size: 11px; color: var(--mcp-faint);
+}
+.dsh-mcp-side-foot .spacer { flex: 1; }
+
+/* 组头：作用域由组头承载（行内放不下，288px 会裁断） */
+.dsh-mcp-group {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: 0; background: transparent; font-family: inherit; cursor: pointer;
+  padding: 8px 4px 4px; margin-top: 4px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--mcp-mut);
+}
+.dsh-mcp-group:hover { color: var(--dsw-alias-label-primary); }
+.dsh-mcp-group::after { content: ""; flex: 1; height: 1px; background: var(--mcp-line); }
+.dsh-mcp-group .i { transition: transform var(--ds-transition-duration-fast); color: var(--mcp-faint); }
+.dsh-mcp-group.closed .i { transform: rotate(-90deg); }
+.dsh-mcp-group-path { font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--mcp-faint); }
+.dsh-mcp-group-count {
+  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0; padding: 0 6px;
+  border-radius: 999px; corner-shape: round; background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--mcp-mut); line-height: 15px;
+}
+.dsh-mcp-group.danger { color: var(--mcp-err); }
+.dsh-mcp-group.danger .i { color: var(--mcp-err); }
+
+/* 列表行 */
+.dsh-mcp-item {
+  position: relative; display: flex; align-items: center; gap: 9px;
+  padding: 8px 9px; border-radius: var(--mcp-r-md); cursor: pointer;
+  border: 1px solid transparent; background: transparent; font-family: inherit;
+  text-align: left; width: 100%;
+  transition: background var(--ds-transition-duration-fast), border-color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-item:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--mcp-line); }
+.dsh-mcp-item.sel { background: var(--dsw-alias-interactive-bg-hover-accent); border-color: var(--mcp-accent); }
+.dsh-mcp-item.sel::before { content: ""; position: absolute; left: -1px; top: 20%; bottom: 20%; width: 3px; border-radius: 3px; background: var(--mcp-accent); }
+.dsh-mcp-item.muted .dsh-mcp-item-name { color: var(--mcp-mut); }
+.dsh-mcp-item-check { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--mcp-accent); cursor: pointer; }
+.dsh-mcp-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dsh-mcp-item-name { font-size: 12.5px; font-weight: 600; letter-spacing: .1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsh-mcp-item-sub { font-size: 10.5px; color: var(--mcp-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsh-mcp-dot { width: 8px; height: 8px; border-radius: 50%; corner-shape: round; flex: none; background: var(--mcp-faint); margin-top: 3px; align-self: flex-start; }
+.dsh-mcp-dot.ok { background: var(--mcp-ok); box-shadow: 0 0 4px color-mix(in srgb, var(--mcp-ok) 55%, transparent); }
+.dsh-mcp-dot.err { background: var(--mcp-err); box-shadow: 0 0 6px color-mix(in srgb, var(--mcp-err) 55%, transparent); }
+.dsh-mcp-dot.warn { background: var(--mcp-warn); box-shadow: 0 0 4px color-mix(in srgb, var(--mcp-warn) 55%, transparent); }
+.dsh-mcp-dot.off { background: var(--mcp-faint); opacity: .55; }
+
+/* 空状态 */
+.dsh-mcp-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 28px 18px; text-align: center; color: var(--mcp-mut);
+}
+.dsh-mcp-empty::before {
+  content: ""; width: 34px; height: 34px; border-radius: var(--mcp-r-md);
+  background: var(--dsw-alias-interactive-bg-hover-accent); border: 1px solid var(--mcp-accent);
+}
+.dsh-mcp-empty b { font-size: 13px; color: var(--dsw-alias-label-primary); font-weight: 600; }
+.dsh-mcp-empty span { font-size: 11.5px; max-width: 260px; }
+
+/* 批量操作条（浮动在左栏底部之上） */
+.dsh-mcp-batch {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--mcp-r-lg);
+  background: var(--mcp-bg-3); box-shadow: var(--dsw-elevation-panel);
+  font-size: 11.5px; animation: mcpPop .14s ease-out;
+}
+.dsh-mcp-batch .spacer { flex: 1; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑧ 详情卡片
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-detail {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-lg);
+  background: var(--mcp-bg-2); padding: 14px; overflow: hidden;
+}
+/* 头与 Tab 行 flex:none —— 只有正文滚，操作栏不会随内容滑走 */
+.dsh-mcp-d-head { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dsh-mcp-d-title { flex: 1; min-width: 0; }
+.dsh-mcp-d-name {
+  font-size: 17px; font-weight: 700; letter-spacing: .2px;
+  display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap;
+}
+.dsh-mcp-d-name > span:first-child { overflow-wrap: anywhere; }
+/* 状态徽章在 meta 行，不挤标题行 —— 上一版把状态塞进标题行，长名字必然换行 */
+.dsh-mcp-d-meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.dsh-mcp-d-scope { font-size: 11.5px; color: var(--mcp-mut); }
+.dsh-mcp-d-desc { margin: 6px 0 0; font-size: 12.5px; color: var(--mcp-mut); line-height: 1.5; }
+.dsh-mcp-d-actions { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 详情页签：换行而不是横滚。作用域条用「横滚 + ⋯ 弹层」是因为条目数不可控；
+   详情页签固定几项，横滚条在窄屏下又是隐藏的——实测 390px 下 scrollWidth 431 >
+   clientWidth 309，最后一项会静默跑到屏幕外。换行则每项永远都在。 */
+.dsh-mcp-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 1px 0; }
+.dsh-mcp-tab {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 5px 11px; border-radius: var(--mcp-r-sm);
+  border: 1px solid var(--mcp-line); background: var(--mcp-bg-1);
+  color: var(--mcp-mut); font-family: inherit; font-size: 12px; line-height: 1.5;
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--ds-transition-duration-fast), border-color var(--ds-transition-duration-fast), color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-tab:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--mcp-line-bold); }
+.dsh-mcp-tab.sel { color: var(--dsw-alias-label-primary); border-color: var(--mcp-accent); background: var(--dsw-alias-interactive-bg-hover-accent); font-weight: 600; }
+.dsh-mcp-tab-count {
+  font-size: 10px; font-weight: 500; padding: 0 6px; border-radius: 999px;
+  corner-shape: round; background: var(--mcp-line); color: var(--mcp-mut); line-height: 15px;
+}
+
+.dsh-mcp-d-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+
+/* 卡片内卡片：详情 bg-2，卡 bg-1（宿主同款层次） */
+.dsh-mcp-card { border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-lg); padding: 12px 14px; background: var(--mcp-bg-1); }
+.dsh-mcp-card > h4 {
+  margin: 0 0 10px; font-size: 10.5px; font-weight: 650; color: var(--mcp-mut);
+  text-transform: uppercase; letter-spacing: .8px; display: flex; align-items: center; gap: 6px;
+}
+.dsh-mcp-card > h4::after { content: ""; flex: 1; height: 1px; background: var(--mcp-line); }
+.dsh-mcp-card > h4 .dsh-mcp-btn { text-transform: none; letter-spacing: 0; }
+
+.dsh-mcp-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 12px; word-break: break-all; }
+.dsh-mcp-kv > b { color: var(--mcp-mut); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+.dsh-mcp-kv > div { min-width: 0; }
+.mono { font-family: var(--mcp-mono); font-size: 11.5px; }
+.dsh-mcp-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.dsh-mcp-pre {
+  margin: 0; padding: 10px 12px; border-radius: var(--mcp-r-sm);
+  background: var(--mcp-bg-2); border: 1px solid var(--mcp-line);
+  font-family: var(--mcp-mono); font-size: 11.5px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto;
+}
+.dsh-mcp-tool { display: flex; gap: 9px; padding: 7px 9px; border-radius: var(--mcp-r-sm); background: var(--mcp-bg-2); border: 1px solid transparent; }
+.dsh-mcp-tool + .dsh-mcp-tool { margin-top: 5px; }
+.dsh-mcp-tool-name { font-family: var(--mcp-mono); font-size: 11.5px; font-weight: 600; color: var(--dsw-alias-brand-text); flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-mcp-tool-desc { font-size: 11.5px; color: var(--mcp-mut); min-width: 0; }
+
+/* 诊断块 */
+.dsh-mcp-diag { border-left: 3px solid var(--mcp-err); padding: 10px 12px; border-radius: var(--mcp-r-sm); background: var(--dsw-alias-interactive-bg-hover-danger); font-size: 12px; }
+.dsh-mcp-diag.warn { border-left-color: var(--mcp-warn); background: var(--dsw-alias-state-warn-tertiary); }
+.dsh-mcp-diag.info { border-left-color: var(--mcp-info); background: var(--dsw-alias-state-business-tertiary); }
+.dsh-mcp-diag b { display: block; margin-bottom: 4px; }
+.dsh-mcp-diag ol, .dsh-mcp-diag ul { margin: 4px 0 0; padding-left: 18px; }
+.dsh-mcp-diag li { margin: 2px 0; }
+.dsh-mcp-diag code { font-family: var(--mcp-mono); font-size: 11.5px; background: var(--dsw-alias-interactive-bg-hover); padding: 0 4px; border-radius: var(--mcp-r-xs); }
+.dsh-mcp-diag-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑨ 发现市场
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-market { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 2px; }
+.dsh-mcp-market-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dsh-mcp-chips { display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none; padding: 1px 0; }
+.dsh-mcp-chips::-webkit-scrollbar { display: none; }
+.dsh-mcp-chip {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 5px 11px; border-radius: 999px; corner-shape: round;
+  border: 1px solid var(--mcp-line); background: var(--mcp-bg-1);
+  color: var(--mcp-mut); font-family: inherit; font-size: 12px; line-height: 1.5;
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--ds-transition-duration-fast), border-color var(--ds-transition-duration-fast), color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-chip:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--mcp-line-bold); }
+.dsh-mcp-chip.sel { color: var(--dsw-alias-label-primary); border-color: var(--mcp-accent); background: var(--dsw-alias-interactive-bg-hover-accent); font-weight: 600; }
+.dsh-mcp-chip-count { font-size: 10px; padding: 0 5px; border-radius: 999px; corner-shape: round; background: var(--mcp-line); color: var(--mcp-mut); line-height: 15px; }
+
+.dsh-mcp-market-section { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dsh-mcp-market-section b { font-size: 13px; font-weight: 650; }
+.dsh-mcp-market-section span { font-size: 11.5px; color: var(--mcp-faint); }
+.dsh-mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.dsh-mcp-mcard {
+  border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-lg);
+  background: var(--mcp-bg-1); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 9px;
+  transition: border-color var(--ds-transition-duration-fast);
+}
+.dsh-mcp-mcard:hover { border-color: var(--mcp-line-bold); }
+.dsh-mcp-mcard-top { display: flex; align-items: flex-start; gap: 9px; }
+.dsh-mcp-mcard-icon {
+  width: 30px; height: 30px; flex: none; border-radius: var(--mcp-r-sm);
+  background: var(--dsw-alias-interactive-bg-hover); color: var(--mcp-mut);
+  display: flex; align-items: center; justify-content: center;
+}
+.dsh-mcp-mcard-name { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.dsh-mcp-mcard-meta { font-size: 10.5px; color: var(--mcp-faint); margin-top: 2px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.dsh-mcp-mcard-desc { font-size: 11.5px; color: var(--mcp-mut); line-height: 1.5; flex: 1; }
+.dsh-mcp-mcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--mcp-line); padding-top: 9px; }
+.dsh-mcp-mcard-stat { font-size: 10.5px; color: var(--mcp-faint); }
+.dsh-mcp-mcard-stat.err { color: var(--mcp-err); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑩ 弹窗 / Toast
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dsh-mcp-overlay {
+  position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center;
+  background: var(--dsw-alias-bg-mask-1); padding: 24px;
+}
+.dsh-mcp-modal {
+  box-sizing: border-box; width: 560px; max-width: 92vw; max-height: 84vh; overflow-y: auto;
+  background: var(--mcp-bg-2); border-radius: var(--mcp-r-panel);
+  padding: 20px; box-shadow: var(--dsw-elevation-prominent);
+  display: flex; flex-direction: column; gap: 14px;
+  animation: mcpPop .16s ease-out;
+}
+.dsh-mcp-modal.wide { width: min(1080px, 94vw); height: min(820px, 88vh); overflow: hidden; }
+.dsh-mcp-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: none; }
+.dsh-mcp-modal-head h3 { margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.dsh-mcp-modal-head h3::before { content: ""; width: 4px; height: 14px; border-radius: 2px; background: var(--mcp-accent); }
+.dsh-mcp-modal-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.dsh-mcp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex: none; }
+.dsh-mcp-radio-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--mcp-line); border-radius: var(--mcp-r-md);
+  background: var(--mcp-bg-1); cursor: pointer; font-size: 12.5px;
+}
+.dsh-mcp-radio-row:hover { border-color: var(--mcp-line-bold); }
+.dsh-mcp-radio-row.sel { border-color: var(--mcp-accent); background: var(--dsw-alias-interactive-bg-hover-accent); }
+.dsh-mcp-radio-row input { width: 15px; height: 15px; flex: none; margin: 2px 0 0; accent-color: var(--mcp-accent); }
+.dsh-mcp-radio-row div { min-width: 0; }
+.dsh-mcp-radio-row small { display: block; color: var(--mcp-mut); font-size: 11.5px; margin-top: 2px; }
+
+.dsh-mcp-toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 1400;
+  background: var(--dsw-alias-toast-bg); color: var(--dsw-alias-label-primary);
+  padding: 9px 16px; border-radius: var(--mcp-r-lg); font-size: 12.5px;
+  box-shadow: var(--dsw-shadow-lv3); max-width: 70vw;
+  animation: mcpPop .16s ease-out;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⑪ 响应式 —— 与 .dsh-mcp-panel 的断点一致
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .dsh-mcp-d-head { flex-direction: column; }
+  /* 堆叠后主轴变成纵向、flex-basis 也随之变成高度基准：flex:1 在这里是错的
+     （当前靠 min-height:auto 兜住，一旦头部有确定高度就会把标题压扁）。 */
+  .dsh-mcp-d-title { flex: none; }
+  .dsh-mcp-d-actions { justify-content: flex-start; }
+}
+@media (max-width: 760px) {
+  .pte-stage { padding: 10px; }
+  .dsh-mcp-panel { max-width: none; width: 100%; height: calc(100dvh - 20px); }
+  .dsh-mcp-wrap { padding: 12px; }
+  .dsh-mcp-body { flex-direction: column; overflow-y: auto; }
+  .dsh-mcp-side { width: auto; min-width: 0; flex: none; }
+  .dsh-mcp-list { max-height: 34vh; }
+  .dsh-mcp-detail { flex: none; overflow: visible; }
+  .dsh-mcp-d-body { overflow: visible; }
+}
+@media (max-width: 480px) {
+  .dsh-mcp-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .dsh-mcp-head-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .dsh-mcp-kv { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .dsh-mcp-kv > b { margin-top: 6px; }
+  .dsh-mcp-modal { max-width: none; width: 100%; padding: 14px; }
+}
+
+.hidden { display: none !important; }
+
+/* ── ⑫ 降级动效 ──────────────────────────────────────────────────────────
+   宿主官方客户端包普遍在 prefers-reduced-motion 下关掉过渡与弹入动画
+   （ui-* 包 46 处 @media，另有若干 JS 侧 matchMedia 判定）。
+   `.dsh-mcp-dot` 的呼吸只改透明度、且是「正在连接」的状态线索，故保留。 */
+@media (prefers-reduced-motion: reduce) {
+  .dsh-mcp-panel, .dsh-mcp-modal, .dsh-mcp-toast, .pte-debug { animation: none; }
+  .dsh-mcp-wrap *, .dsh-mcp-overlay *, .dsh-mcp-toggle::after { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ 图标精灵：统一描边风格，替代上一版的 emoji ═══ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
+  <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19h16"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7.5 8.5L12 4l4.5 4.5"/><path d="M4 20h16"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v6h-6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 9v5M12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 8h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V5"/><path d="M6.5 10.5L12 5l5.5 5.5"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.8 5.6 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.6-3.8-9S9.5 5.5 12 3z"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.5 11h11L21 7H6"/></symbol>
+  <symbol id="i-layer" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M17 20V4M17 4l3 3"/></symbol>
+  <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12.5l3 3 5-6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.4 8.3-8 9.5C7.4 20.3 4 17 4 12V6z"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M15 4a5 5 0 0 0-4.6 6.9L4 17.3 6.7 20l6.4-6.4A5 5 0 0 0 20 9l-3 1-2-2z"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 1 3.5 10.9V15h-7v-1.1A6 6 0 0 1 12 3z"/></symbol>
+</defs></svg>
+
+<div class="pte-host">
+  <!-- 模拟宿主侧栏 -->
+  <div class="pte-sidebar">
+    <div class="pte-sidebar-title">DeepSeek Harness</div>
+    <div class="pte-sidebar-item"><svg class="i"><use href="#i-terminal"/></svg>会话：MCP 面板重构</div>
+    <div class="pte-sidebar-item"><svg class="i"><use href="#i-terminal"/></svg>会话：主题令牌对齐</div>
+    <div class="pte-sidebar-item sel"><svg class="i"><use href="#i-layer"/></svg>MCP / 技能管理</div>
+    <div class="pte-sidebar-foot">
+      <div class="pte-sidebar-item"><svg class="i"><use href="#i-settings"/></svg>设置</div>
+    </div>
+  </div>
+
+  <div class="pte-stage">
+    <!-- 原型调试条（放在左下，不再遮挡顶栏操作区） -->
+    <div class="pte-debug">
+      <button class="dsh-mcp-btn" onclick="toggleTheme()"><svg class="i i-sm"><use href="#i-eye"/></svg>明暗</button>
+      <button class="dsh-mcp-btn" onclick="toggleEl('notice-yield')"><svg class="i i-sm"><use href="#i-warn"/></svg>让位条</button>
+      <button class="dsh-mcp-btn" onclick="toggleEl('notice-degrade')"><svg class="i i-sm"><use href="#i-shield"/></svg>降级条</button>
+      <button class="dsh-mcp-btn" onclick="toggleEl('notice-update')"><svg class="i i-sm"><use href="#i-up"/></svg>更新条</button>
+      <button class="dsh-mcp-btn" onclick="toggleBatch()"><svg class="i i-sm"><use href="#i-check-square"/></svg>批量模式</button>
+      <button class="dsh-mcp-btn" onclick="showEmpty()"><svg class="i i-sm"><use href="#i-search"/></svg>空状态</button>
+    </div>
+
+    <!-- ═══════════════ 统一扩展中心面板 ═══════════════ -->
+    <div class="dsh-mcp-panel">
+      <div class="dsh-mcp-wrap">
+
+        <!-- ── 头部三列钉死 ── -->
+        <div class="dsh-mcp-head">
+          <div class="dsh-mcp-title"><svg class="i i-lg" style="color:var(--mcp-accent)"><use href="#i-layer"/></svg>扩展中心</div>
+
+          <div class="dsh-mcp-head-actions">
+            <div class="dsh-mcp-seg" role="tablist" aria-label="能力层">
+              <button class="dsh-mcp-btn sel" id="ab-mcp" role="tab" onclick="setAbility('mcp')">MCP 服务<span class="dsh-mcp-seg-count">5</span></button>
+              <button class="dsh-mcp-btn" id="ab-skills" role="tab" onclick="setAbility('skills')">技能 Skills<span class="dsh-mcp-seg-count">11</span></button>
+            </div>
+          </div>
+
+          <div class="dsh-mcp-head-actions end">
+            <!-- MCP 面 -->
+            <div class="dsh-mcp-head-actions" id="act-mcp">
+              <button class="dsh-mcp-btn" onclick="toast('已重新读取 profile 与项目配置')"><svg class="i i-sm"><use href="#i-refresh"/></svg>刷新</button>
+              <button class="dsh-mcp-btn" onclick="openModal('m-export')"><svg class="i i-sm"><use href="#i-export"/></svg>备份</button>
+              <button class="dsh-mcp-btn" onclick="openModal('m-import')"><svg class="i i-sm"><use href="#i-import"/></svg>导入</button>
+              <button class="dsh-mcp-btn primary" onclick="openMcpModal()"><svg class="i i-sm"><use href="#i-plus"/></svg>添加 MCP</button>
+            </div>
+            <!-- 技能面：位置与 MCP 面完全对齐，只换内容 -->
+            <div class="dsh-mcp-head-actions hidden" id="act-skills">
+              <button class="dsh-mcp-btn" onclick="toast('已重新扫描各作用域的 SKILL.md')"><svg class="i i-sm"><use href="#i-refresh"/></svg>刷新</button>
+              <button class="dsh-mcp-btn" onclick="openModal('m-export')"><svg class="i i-sm"><use href="#i-export"/></svg>备份</button>
+              <button class="dsh-mcp-btn" onclick="openModal('m-import')"><svg class="i i-sm"><use href="#i-import"/></svg>导入技能</button>
+              <button class="dsh-mcp-btn primary" onclick="setMode('market')"><svg class="i i-sm"><use href="#i-cart"/></svg>发现技能</button>
+            </div>
+            <button class="dsh-mcp-btn icon" title="偏好设置" onclick="toast('入口偏好：悬浮按钮 / 侧栏入口')"><svg class="i"><use href="#i-settings"/></svg></button>
+            <button class="dsh-mcp-btn icon" title="关闭" onclick="toast('关闭面板')"><svg class="i"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+
+        <!-- ── 通知条 ── -->
+        <div class="dsh-mcp-notice warn hidden" id="notice-yield">
+          <svg class="i i-lg"><use href="#i-warn"/></svg>
+          <div class="dsh-mcp-notice-body">
+            <b>已让位给另一个 MCP 管理插件</b>
+            <span>检测到 dsh-mcp-manager-ui 已挂载，本面板不再注册入口，以免两个面板互相遮挡、同时改写同一份 profile 配置。卸载其中一个后重启 DSH 即可恢复。</span>
+          </div>
+          <div class="dsh-mcp-notice-actions">
+            <button class="dsh-mcp-btn sm" onclick="toast('D15：让位检测失败时 fail-open，漏检最坏是两个入口并存')">规则说明</button>
+            <button class="dsh-mcp-btn icon ghost sm" style="width:22px;height:22px" onclick="toggleEl('notice-yield')"><svg class="i i-sm"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+
+        <div class="dsh-mcp-notice err hidden" id="notice-degrade">
+          <svg class="i i-lg"><use href="#i-shield"/></svg>
+          <div class="dsh-mcp-notice-body">
+            <b>宿主 skills 服务未就绪，技能面已降级</b>
+            <span>未取到 remote.skillsManager。技能面降级为只读，MCP 面不受影响（SPEC 约束 16：skills 不得进入 MCP gateway 的 inject）。</span>
+          </div>
+          <div class="dsh-mcp-notice-actions">
+            <button class="dsh-mcp-btn sm" onclick="toast('检查宿主是否挂载 @deepseek-ai/dsh-skill')">排查</button>
+            <button class="dsh-mcp-btn icon ghost sm" style="width:22px;height:22px" onclick="toggleEl('notice-degrade')"><svg class="i i-sm"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+
+        <div class="dsh-mcp-notice info" id="notice-update">
+          <svg class="i i-lg"><use href="#i-up"/></svg>
+          <div class="dsh-mcp-notice-body">
+            <b>v1.6.0 可用</b>
+            <span>已支持技能管理与离线内置市场。</span>
+          </div>
+          <div class="dsh-mcp-notice-actions">
+            <button class="dsh-mcp-btn sm primary" onclick="toast('走宿主官方 remote 升级通道')">一键升级</button>
+            <button class="dsh-mcp-btn icon ghost sm" style="width:22px;height:22px" onclick="toggleEl('notice-update')"><svg class="i i-sm"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+
+        <!-- ── 模式层 + 作用域 ── -->
+        <div class="dsh-mcp-head" style="flex:none">
+          <div class="dsh-mcp-seg" role="tablist" aria-label="模式">
+            <button class="dsh-mcp-btn sel" id="md-manage" role="tab" onclick="setMode('manage')">已安装</button>
+            <button class="dsh-mcp-btn" id="md-market" role="tab" onclick="setMode('market')">发现市场</button>
+          </div>
+
+          <div class="dsh-mcp-head-actions" id="scope-bar" style="padding-left:4px">
+            <span style="font-size:11.5px;color:var(--mcp-faint)">作用域</span>
+            <button class="dsh-mcp-chip sel" onclick="setScope(this)">全部<span class="dsh-mcp-chip-count" id="sc-all">16</span></button>
+            <button class="dsh-mcp-chip" onclick="setScope(this)">全局<span class="dsh-mcp-chip-count" id="sc-global">11</span></button>
+            <button class="dsh-mcp-chip" onclick="setScope(this)">当前项目<span class="dsh-mcp-chip-count" id="sc-project">4</span></button>
+            <button class="dsh-mcp-chip" id="sc-bundled-chip" onclick="setScope(this)">系统内置<span class="dsh-mcp-chip-count" id="sc-bundled">1</span></button>
+          </div>
+
+          <div class="dsh-mcp-head-actions end" style="font-size:11.5px;color:var(--mcp-faint)">
+            <span id="runtime-hint">宿主已连接 · 运行时就绪</span>
+          </div>
+        </div>
+
+        <!-- ═══ 已安装：左栏 + 详情 ═══ -->
+        <div class="dsh-mcp-body" id="view-manage">
+
+          <!-- 左栏 -->
+          <div class="dsh-mcp-side">
+            <div class="dsh-mcp-search">
+              <svg class="i i-sm"><use href="#i-search"/></svg>
+              <input type="text" id="f-search" placeholder="搜索名称、命令或描述" oninput="onSearch(this.value)">
+            </div>
+
+            <div class="dsh-mcp-list" id="list-scroll">
+              <!-- MCP 列表 -->
+              <div id="list-mcp">
+                <button class="dsh-mcp-group" onclick="toggleGroup(this)"><svg class="i i-sm"><use href="#i-chev"/></svg>全局<span class="dsh-mcp-group-path">~/.dsh/mcp.json</span><span class="dsh-mcp-group-count">3</span></button>
+
+                <div class="dsh-mcp-item sel" onclick="pickMcp(this, 'chrome-devtools')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">chrome-devtools</span>
+                    <span class="dsh-mcp-item-sub">stdio · npx chrome-devtools-mcp</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 chrome-devtools" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item" onclick="pickMcp(this, 'firecrawl')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">firecrawl</span>
+                    <span class="dsh-mcp-item-sub">streamable-http · 远程抓取</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 firecrawl" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item" onclick="pickMcp(this, 'postgres-db')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot err"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">postgres-db</span>
+                    <span class="dsh-mcp-item-sub">stdio · ECONNREFUSED 127.0.0.1:5432</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 postgres-db" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <button class="dsh-mcp-group" onclick="toggleGroup(this)"><svg class="i i-sm"><use href="#i-chev"/></svg>当前项目<span class="dsh-mcp-group-path">.dsh/mcp.json</span><span class="dsh-mcp-group-count">2</span></button>
+
+                <div class="dsh-mcp-item muted" onclick="pickMcp(this, 'test-runner-mcp')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot off"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">test-runner-mcp</span>
+                    <span class="dsh-mcp-item-sub">stdio · 已停用</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="false" aria-label="启用 test-runner-mcp" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item" onclick="pickMcp(this, 'remote-vector-store')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">remote-vector-store</span>
+                    <span class="dsh-mcp-item-sub">streamable-http · 内网向量库</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 remote-vector-store" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+              </div>
+
+              <!-- 技能列表：作用域进组头，行内只说「哪一份」（288px 的实测结论） -->
+              <div id="list-skills" class="hidden">
+                <button class="dsh-mcp-group" onclick="toggleGroup(this)"><svg class="i i-sm"><use href="#i-chev"/></svg>全局<span class="dsh-mcp-group-path">~/.agents/skills</span><span class="dsh-mcp-group-count">4</span></button>
+
+                <div class="dsh-mcp-item sel" onclick="pickSkill(this, 'zhanggui')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">zhanggui</span>
+                    <span class="dsh-mcp-item-sub">模型与用户均可调用</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 zhanggui" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item" onclick="pickSkill(this, 'decision-notes')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">decision-notes</span>
+                    <span class="dsh-mcp-item-sub">模型与用户均可调用</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 decision-notes" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item" onclick="pickSkill(this, 'office-docx')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot warn"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">office-docx <span class="dsh-mcp-badge s-warn plain">被遮蔽</span></span>
+                    <span class="dsh-mcp-item-sub">项目同名条目已生效，本份未进模型目录</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" aria-label="启用 office-docx" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <div class="dsh-mcp-item muted" onclick="pickSkill(this, 'office-pdf')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot off"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">office-pdf <span class="dsh-mcp-badge plain">.disabled</span></span>
+                    <span class="dsh-mcp-item-sub">SKILL.md.disabled · 宿主目录看不到它</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="false" aria-label="启用 office-pdf" onclick="event.stopPropagation();flip(this)"></button>
+                </div>
+
+                <button class="dsh-mcp-group" onclick="toggleGroup(this)"><svg class="i i-sm"><use href="#i-chev"/></svg>系统内置<span class="dsh-mcp-group-path">bundled · 只读</span><span class="dsh-mcp-group-count">1</span></button>
+
+                <div class="dsh-mcp-item" onclick="pickSkill(this, 'system-core-skill')" role="button" tabindex="0">
+                  <span class="dsh-mcp-dot ok"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">system-core-skill <span class="dsh-mcp-badge s-lock plain"><svg class="i i-sm" style="width:10px;height:10px"><use href="#i-lock"/></svg>只读</span></span>
+                    <span class="dsh-mcp-item-sub">bundled 根只读，不可停用也不可删除</span>
+                  </span>
+                  <button class="dsh-mcp-toggle" role="switch" aria-checked="true" disabled aria-label="系统内置技能不可停用"></button>
+                </div>
+
+                <button class="dsh-mcp-group danger" onclick="toggleGroup(this)"><svg class="i i-sm"><use href="#i-chev"/></svg>需要注意<span class="dsh-mcp-group-path">非法 / 损坏</span><span class="dsh-mcp-group-count">1</span></button>
+
+                <div class="dsh-mcp-item" onclick="pickSkill(this, 'broken-skill')" role="button" tabindex="0">
+                  <input type="checkbox" class="dsh-mcp-item-check hidden" onclick="event.stopPropagation()">
+                  <span class="dsh-mcp-dot err"></span>
+                  <span class="dsh-mcp-item-main">
+                    <span class="dsh-mcp-item-name">broken-skill <span class="dsh-mcp-badge s-err plain">缺 description</span></span>
+                    <span class="dsh-mcp-item-sub">宿主会静默跳过它，故只能由本面板自行扫描</span>
+                  </span>
+                  <button class="dsh-mcp-btn sm" onclick="event.stopPropagation();pickSkill(this.closest('.dsh-mcp-item'),'broken-skill')">诊断</button>
+                </div>
+              </div>
+
+              <!-- 空状态 -->
+              <div class="dsh-mcp-empty hidden" id="list-empty">
+                <b>没有匹配的条目</b>
+                <span>当前关键字与状态筛选下没有能力项。清空搜索即可看到全部。</span>
+                <button class="dsh-mcp-btn" onclick="clearFilters()">清空筛选</button>
+              </div>
+            </div>
+
+            <!-- 批量操作条 -->
+            <div class="dsh-mcp-batch hidden" id="batch-bar">
+              <input type="checkbox" class="dsh-mcp-item-check" id="batch-all" onchange="selectAll(this.checked)" aria-label="全选">
+              <span id="batch-count">已选 2 项</span>
+              <span class="spacer"></span>
+              <button class="dsh-mcp-btn sm" onclick="toast('批量启用')"><svg class="i i-sm"><use href="#i-play"/></svg></button>
+              <button class="dsh-mcp-btn sm" onclick="toast('批量停用')"><svg class="i i-sm"><use href="#i-pause"/></svg></button>
+              <button class="dsh-mcp-btn sm" onclick="toast('导出所选')"><svg class="i i-sm"><use href="#i-export"/></svg></button>
+              <button class="dsh-mcp-btn sm danger" onclick="toast('批量删除需二次确认')"><svg class="i i-sm"><use href="#i-trash"/></svg></button>
+              <button class="dsh-mcp-btn icon ghost sm" style="width:22px;height:22px" onclick="toggleBatch()"><svg class="i i-sm"><use href="#i-close"/></svg></button>
+            </div>
+
+            <!-- 底栏统计 + 快捷操作 -->
+            <div class="dsh-mcp-side-foot">
+              <span id="foot-text">5 个服务 · 4 启用 · 1 失败</span>
+              <span class="spacer"></span>
+              <button class="dsh-mcp-btn icon ghost sm" style="width:24px;height:24px" title="多选" onclick="toggleBatch()"><svg class="i i-sm"><use href="#i-check-square"/></svg></button>
+              <button class="dsh-mcp-btn icon ghost sm" style="width:24px;height:24px" title="排序" onclick="toast('按名称 / 状态 / 作用域排序')"><svg class="i i-sm"><use href="#i-sort"/></svg></button>
+              <button class="dsh-mcp-btn icon ghost sm" style="width:24px;height:24px" title="刷新" onclick="toast('已刷新')"><svg class="i i-sm"><use href="#i-refresh"/></svg></button>
+            </div>
+          </div>
+
+          <!-- ═══ 详情：MCP ═══ -->
+          <div class="dsh-mcp-detail" id="ws-mcp">
+            <div class="dsh-mcp-d-head">
+              <div class="dsh-mcp-d-title">
+                <div class="dsh-mcp-d-name">
+                  <span id="d-name">chrome-devtools</span>
+                  <span class="dsh-mcp-badge plain" id="d-transport">stdio</span>
+                </div>
+                <div class="dsh-mcp-d-meta">
+                  <span class="dsh-mcp-badge s-on" id="d-state">已就绪</span>
+                  <span class="dsh-mcp-d-scope" id="d-scope">全局 · ~/.dsh/mcp.json</span>
+                </div>
+                <p class="dsh-mcp-d-desc" id="d-desc">Chrome 浏览器自动化、DOM 检查与网络分析。</p>
+              </div>
+              <div class="dsh-mcp-d-actions">
+                <button class="dsh-mcp-btn primary" onclick="restart()" id="btn-restart"><svg class="i i-sm"><use href="#i-restart"/></svg>重启服务</button>
+                <button class="dsh-mcp-btn" onclick="toast('握手成功 · ping 12ms')"><svg class="i i-sm"><use href="#i-bolt"/></svg>测试重连</button>
+                <button class="dsh-mcp-btn" onclick="openMcpModal()"><svg class="i i-sm"><use href="#i-edit"/></svg>编辑配置</button>
+                <div class="dsh-mcp-dd">
+                  <button class="dsh-mcp-btn icon" onclick="drop(event,'dd-mcp')" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button>
+                  <div class="dsh-mcp-dd-pop hidden" id="dd-mcp">
+                    <button class="dsh-mcp-btn" onclick="toast('已复制该服务的 JSON 片段')"><svg class="i i-sm"><use href="#i-copy"/></svg>复制 JSON 片段</button>
+                    <button class="dsh-mcp-btn" onclick="toast('已导出单项配置')"><svg class="i i-sm"><use href="#i-export"/></svg>导出单项配置</button>
+                    <button class="dsh-mcp-btn" onclick="toast('子进程 CPU / 内存占用')"><svg class="i i-sm"><use href="#i-terminal"/></svg>查看系统进程</button>
+                    <div class="dsh-mcp-dd-sep"></div>
+                    <button class="dsh-mcp-btn danger" onclick="toast('删除需二次确认')"><svg class="i i-sm"><use href="#i-trash"/></svg>删除此服务</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 协议三分：Tools / Resources / Prompts -->
+            <div class="dsh-mcp-tabs">
+              <button class="dsh-mcp-tab sel" data-pane="p-runtime" onclick="tab(this)">运行环境</button>
+              <button class="dsh-mcp-tab" data-pane="p-tools" onclick="tab(this)">Tools<span class="dsh-mcp-tab-count">6</span></button>
+              <button class="dsh-mcp-tab" data-pane="p-res" onclick="tab(this)">Resources<span class="dsh-mcp-tab-count">2</span></button>
+              <button class="dsh-mcp-tab" data-pane="p-prompts" onclick="tab(this)">Prompts<span class="dsh-mcp-tab-count">1</span></button>
+              <button class="dsh-mcp-tab" data-pane="p-logs" onclick="tab(this)">实时日志</button>
+            </div>
+
+            <!-- 只有这块滚 -->
+            <div class="dsh-mcp-d-body">
+              <!-- 诊断块在正文里，不在头部与其后 Tab 之间 -->
+              <div class="dsh-mcp-diag hidden" id="d-diag">
+                <b>进程连接失败：ECONNREFUSED 127.0.0.1:5432</b>
+                本地未监听该端口，握手阶段即被拒绝，工具未注册。
+                <ol>
+                  <li>确认本机 PostgreSQL 已启动，且监听 5432。</li>
+                  <li>确认 <code>DATABASE_URL</code> 指向的 host/port 与会话所在机器一致。</li>
+                  <li>若走容器，确认端口已发布到宿主。</li>
+                </ol>
+                <div class="dsh-mcp-diag-actions">
+                  <button class="dsh-mcp-btn sm primary" onclick="restart()"><svg class="i i-sm"><use href="#i-restart"/></svg>重试拉起</button>
+                  <button class="dsh-mcp-btn sm" onclick="toast('已复制诊断文本')"><svg class="i i-sm"><use href="#i-copy"/></svg>复制诊断信息</button>
+                  <button class="dsh-mcp-btn sm" onclick="openMcpModal()"><svg class="i i-sm"><use href="#i-edit"/></svg>改端口 / 配置</button>
+                </div>
+              </div>
+
+              <div id="p-runtime">
+                <div class="dsh-mcp-card">
+                  <h4>运行配置<span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500">PID 48291 · 启动 380ms</span></h4>
+                  <div class="dsh-mcp-kv">
+                    <b>传输</b><div class="mono">stdio（本地子进程）</div>
+                    <b>命令</b><div class="mono">npx -y chrome-devtools-mcp@latest --autoConnect</div>
+                    <b>工作目录</b><div class="mono">D:\sudy\github\dsh-toolbox-ui</div>
+                    <b>环境变量</b>
+                    <div class="dsh-mcp-inline">
+                      <span class="mono" id="env-val">PUPPETEER_HEADLESS=true, DEBUG=mcp:*</span>
+                      <button class="dsh-mcp-btn sm" onclick="maskEnv()"><svg class="i i-sm"><use href="#i-eye"/></svg>脱敏</button>
+                      <button class="dsh-mcp-btn sm" onclick="toast('已复制')"><svg class="i i-sm"><use href="#i-copy"/></svg></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="p-tools" class="hidden">
+                <div class="dsh-mcp-card">
+                  <h4>工具清单<span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500">6 个已注册给模型</span></h4>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">puppeteer_navigate</span><span class="dsh-mcp-tool-desc">在受控 Chromium 实例中导航到指定 URL。</span></div>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">puppeteer_screenshot</span><span class="dsh-mcp-tool-desc">对页面或选择器节点截图。</span></div>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">puppeteer_click</span><span class="dsh-mcp-tool-desc">在目标元素上触发真实点击。</span></div>
+                </div>
+              </div>
+
+              <div id="p-res" class="hidden">
+                <div class="dsh-mcp-card">
+                  <h4>资源清单<span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500">2 个静态 / 动态资源</span></h4>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">file:///workspace/schema.sql</span><span class="dsh-mcp-tool-desc">初始化 Schema · text/x-sql</span></div>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">postgres://internal/stats</span><span class="dsh-mcp-tool-desc">连接池指标 · application/json</span></div>
+                </div>
+              </div>
+
+              <div id="p-prompts" class="hidden">
+                <div class="dsh-mcp-card">
+                  <h4>提示词模板<span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500">1 个</span></h4>
+                  <div class="dsh-mcp-tool"><span class="dsh-mcp-tool-name">query_performance_audit</span><span class="dsh-mcp-tool-desc">分析慢查询执行计划并给出优化建议（参数 sql_statement）。</span></div>
+                </div>
+              </div>
+
+              <div id="p-logs" class="hidden">
+                <div class="dsh-mcp-card">
+                  <h4>最近日志<button class="dsh-mcp-btn sm" style="margin-left:8px" onclick="toast('已清空')">清空</button></h4>
+                  <pre class="dsh-mcp-pre">[15:32:01] INFO  Spawning: npx -y chrome-devtools-mcp@latest --autoConnect
+[15:32:02] INFO  Handshake ok, protocol 2024-11-05
+[15:32:02] INFO  Registered 6 tools, 2 resources, 1 prompt
+[15:32:02] READY  Server ready</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ 详情：Skills ═══ -->
+          <div class="dsh-mcp-detail hidden" id="ws-skill">
+            <div class="dsh-mcp-d-head">
+              <div class="dsh-mcp-d-title">
+                <div class="dsh-mcp-d-name">
+                  <span id="s-name">zhanggui</span>
+                  <span class="dsh-mcp-badge plain" id="s-kind">目录捆绑</span>
+                </div>
+                <div class="dsh-mcp-d-meta">
+                  <span class="dsh-mcp-badge s-on" id="s-state">模型与用户均可调用</span>
+                  <span class="dsh-mcp-d-scope" id="s-path">~/.agents/skills/zhanggui/SKILL.md</span>
+                </div>
+                <p class="dsh-mcp-d-desc" id="s-desc">端到端统筹开发请求：解决设计决策、规划路径、带测试实现并交付到验证完成。</p>
+              </div>
+              <div class="dsh-mcp-d-actions">
+                <button class="dsh-mcp-btn primary" id="s-toggle" onclick="toggleSkill()"><svg class="i i-sm"><use href="#i-pause"/></svg>停用技能</button>
+                <button class="dsh-mcp-btn" id="s-editor" onclick="toast('交给系统默认编辑器打开 SKILL.md')"><svg class="i i-sm"><use href="#i-file"/></svg>编辑器打开</button>
+                <div class="dsh-mcp-dd">
+                  <button class="dsh-mcp-btn icon" onclick="drop(event,'dd-skill')" aria-label="更多操作"><svg class="i"><use href="#i-more"/></svg></button>
+                  <div class="dsh-mcp-dd-pop hidden" id="dd-skill">
+                    <button class="dsh-mcp-btn" onclick="toast('在资源管理器中定位目录')"><svg class="i i-sm"><use href="#i-folder"/></svg>打开物理目录</button>
+                    <button class="dsh-mcp-btn" onclick="toast('复制该技能到项目 .agents/skills')"><svg class="i i-sm"><use href="#i-copy"/></svg>复制副本到当前项目</button>
+                    <button class="dsh-mcp-btn" onclick="toast('提升为全局技能')"><svg class="i i-sm"><use href="#i-up"/></svg>提升为全局技能</button>
+                    <div class="dsh-mcp-dd-sep"></div>
+                    <button class="dsh-mcp-btn danger" id="s-del" onclick="toast('删除技能需二次确认')"><svg class="i i-sm"><use href="#i-trash"/></svg>物理删除技能</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 与 MCP 面同一位置的 Tab 行：切面时正文起始位置不跳 -->
+            <div class="dsh-mcp-tabs">
+              <button class="dsh-mcp-tab sel" data-pane="s-overview" onclick="tab(this)">概览</button>
+              <button class="dsh-mcp-tab" data-pane="s-text" onclick="tab(this)">SKILL.md 正文</button>
+              <button class="dsh-mcp-tab" data-pane="s-diag" onclick="tab(this)">诊断<span class="dsh-mcp-tab-count" id="s-diag-count">0</span></button>
+            </div>
+
+            <div class="dsh-mcp-d-body">
+              <div id="s-overview" data-pane>
+                <!-- 只在 bundled 时出现；动作置灰而非隐藏 -->
+                <div class="dsh-mcp-diag info hidden" id="s-bundled">
+                  <b>系统内置只读技能</b>
+                  位于 bundled 根，按宿主约定只读：不可停用、不可删除、不可改名。左侧开关与右上操作已置灰。
+                </div>
+
+                <div class="dsh-mcp-card">
+                  <h4>技能属性</h4>
+                  <div class="dsh-mcp-kv">
+                    <b>路径</b><div class="mono" id="s-path2">~/.agents/skills/zhanggui/SKILL.md</div>
+                    <b>作用域</b><div id="s-scope">全局 · rank 500 · ~/.agents/skills</div>
+                    <b>调用策略</b><div id="s-invoke">模型自动调用：允许 · 用户斜杠命令：允许</div>
+                    <b>依赖权限</b><div>读写文件 · 执行 pwsh · git</div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="s-text" data-pane class="hidden">
+                <div class="dsh-mcp-card">
+                  <h4>SKILL.md<span style="margin-left:auto"><button class="dsh-mcp-btn sm" onclick="toast('正文已复制')"><svg class="i i-sm"><use href="#i-copy"/></svg>复制正文</button></span></h4>
+                  <pre class="dsh-mcp-pre">---
+name: zhanggui
+description: Owns one development request end-to-end — resolves open design decisions, plans the path, implements with tests, and carries the work to verified delivery.
+whenToUse: 当开发请求需要从模糊想法或不明确的设计决策一路推进到已验证交付时使用。
+---
+
+# 掌柜 — 有状态开发编排
+
+你负责端到端统筹开发请求：
+1. 先收集事实证据，不要凭空推测；
+2. 非平凡改动必须走完整 TDD 循环；
+3. 严格遵循宿主设计体系令牌。</pre>
+                </div>
+              </div>
+
+              <!-- 诊断工作区：非法 / 遮蔽的处置都收敛在这一页 -->
+              <div id="s-diag" data-pane class="hidden">
+                <div class="dsh-mcp-diag info" id="s-clean">
+                  <b>无异常</b>
+                  frontmatter 校验通过，未检测到跨作用域同名遮蔽，本份已进入模型目录。
+                </div>
+
+                <div class="dsh-mcp-diag warn hidden" id="s-shadow">
+                  <b>同名遮蔽：本份未进模型目录</b>
+                  全局 <code>~/.agents/skills/office-docx</code> 与项目 <code>.agents/skills/office-docx</code> 同名，按 rank 由项目那份生效。
+                  <div class="dsh-mcp-diag-actions">
+                    <button class="dsh-mcp-btn sm" onclick="toast('展示底层被遮蔽版本的 frontmatter')"><svg class="i i-sm"><use href="#i-eye"/></svg>查看底层那份</button>
+                    <button class="dsh-mcp-btn sm" onclick="toast('已停用全局那份，项目那份生效')"><svg class="i i-sm"><use href="#i-pause"/></svg>停用全局这份</button>
+                    <button class="dsh-mcp-btn sm" onclick="toast('把当前 frontmatter 同步覆盖到底层')"><svg class="i i-sm"><use href="#i-copy"/></svg>同步到另一份</button>
+                  </div>
+                </div>
+
+                <div class="dsh-mcp-diag hidden" id="s-broken">
+                  <b>frontmatter 校验失败（宿主会静默跳过该技能）</b>
+                  <ul>
+                    <li>缺少必需字段 <code>description</code>。</li>
+                    <li>检测到 <code>when_to_use</code>：那是 Claude Code 的字段，DSH 要求驼峰 <code>whenToUse</code>。</li>
+                  </ul>
+                  <div class="dsh-mcp-diag-actions">
+                    <button class="dsh-mcp-btn sm primary" onclick="toast('已补齐 description 并把 when_to_use 改写为 whenToUse')"><svg class="i i-sm"><use href="#i-wrench"/></svg>自动修复 frontmatter</button>
+                    <button class="dsh-mcp-btn sm" onclick="toast('打开 SKILL.md 手工编辑')"><svg class="i i-sm"><use href="#i-file"/></svg>手工编辑</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ═══ 发现市场 ═══ -->
+        <div class="dsh-mcp-market hidden" id="view-market">
+          <div class="dsh-mcp-market-head">
+            <div class="dsh-mcp-chips" id="market-chips">
+              <button class="dsh-mcp-chip sel" onclick="setScope(this)">全部</button>
+              <button class="dsh-mcp-chip" onclick="setScope(this)">官方精选</button>
+              <button class="dsh-mcp-chip" onclick="setScope(this)">工程流程</button>
+              <button class="dsh-mcp-chip" onclick="setScope(this)">文档与报告</button>
+              <button class="dsh-mcp-chip" onclick="setScope(this)">数据与测试</button>
+            </div>
+            <span class="spacer" style="flex:1"></span>
+            <div class="dsh-mcp-search" style="width:220px">
+              <svg class="i i-sm"><use href="#i-search"/></svg>
+              <input type="text" placeholder="在目录与 skills.sh 中搜索">
+            </div>
+            <select class="dsh-mcp-select" style="width:220px">
+              <option>安装到：全局 ~/.agents/skills</option>
+              <option>安装到：当前项目 .agents/skills</option>
+            </select>
+          </div>
+
+          <!-- MCP 面市场 -->
+          <div id="market-mcp">
+            <div class="dsh-mcp-market-section" style="margin:4px 0 10px">
+              <b>官方精选 MCP 服务</b><span>内置目录 · 离线可用 · 已核对协议与命令</span>
+            </div>
+            <div class="dsh-mcp-grid">
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-folder"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">filesystem</div><div class="dsh-mcp-mcard-meta">modelcontextprotocol · <span style="color:var(--mcp-ok)">MIT</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">本地文件系统读写，可限定允许目录沙箱。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat">stdio · 无需密钥</span>
+                  <button class="dsh-mcp-btn sm primary" onclick="prefill('filesystem','npx -y @modelcontextprotocol/server-filesystem D:\\sudy')"><svg class="i i-sm"><use href="#i-plus"/></svg>安装</button>
+                </div>
+              </div>
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-db"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">postgresql</div><div class="dsh-mcp-mcard-meta">modelcontextprotocol · <span style="color:var(--mcp-ok)">MIT</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">连接 PostgreSQL，只读 SQL 与 Schema 检查。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat">stdio · 需连接串</span>
+                  <button class="dsh-mcp-btn sm primary" onclick="prefill('postgres','npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb')"><svg class="i i-sm"><use href="#i-plus"/></svg>安装</button>
+                </div>
+              </div>
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-globe"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">fetch</div><div class="dsh-mcp-mcard-meta">modelcontextprotocol · <span style="color:var(--mcp-ok)">MIT</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">网页抓取并转 Markdown，无浏览器开销。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat">stdio · uvx</span>
+                  <button class="dsh-mcp-btn sm primary" onclick="prefill('fetch','uvx mcp-server-fetch')"><svg class="i i-sm"><use href="#i-plus"/></svg>安装</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Skills 面市场 -->
+          <div id="market-skills" class="hidden">
+            <div class="dsh-mcp-market-section" style="margin:4px 0 10px">
+              <b>内置已核验技能目录</b><span>逐技能判定许可 · 离线开箱可用</span>
+            </div>
+            <div class="dsh-mcp-grid">
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-check"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">test-driven-development</div><div class="dsh-mcp-mcard-meta">obra/superpowers · <span style="color:var(--mcp-ok)">MIT</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">红-绿-重构的 TDD 规范，保证每次改动都有测试守护。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat">243,329 次安装</span>
+                  <button class="dsh-mcp-btn sm primary" onclick="openModal('m-install')"><svg class="i i-sm"><use href="#i-plus"/></svg>安装</button>
+                </div>
+              </div>
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-bulb"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">frontend-design</div><div class="dsh-mcp-mcard-meta">anthropics/skills · <span style="color:var(--mcp-ok)">Apache-2.0</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">界面审美与设计规范指导，并附配色辅助脚本。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat">960,401 次安装 · 含脚本</span>
+                  <button class="dsh-mcp-btn sm primary" onclick="openModal('m-install')"><svg class="i i-sm"><use href="#i-plus"/></svg>安装</button>
+                </div>
+              </div>
+              <div class="dsh-mcp-mcard">
+                <div class="dsh-mcp-mcard-top">
+                  <div class="dsh-mcp-mcard-icon"><svg class="i i-lg"><use href="#i-file"/></svg></div>
+                  <div><div class="dsh-mcp-mcard-name">docx</div><div class="dsh-mcp-mcard-meta">anthropics/skills · <span style="color:var(--mcp-err)">专有条款受限</span></div></div>
+                </div>
+                <div class="dsh-mcp-mcard-desc">Word 文档创建与格式化。许可禁止在官方服务之外保留副本。</div>
+                <div class="dsh-mcp-mcard-foot">
+                  <span class="dsh-mcp-mcard-stat err">许可门禁：默认不可安装</span>
+                  <button class="dsh-mcp-btn sm" onclick="toast('展示 LICENSE.txt 原文与受限条款')">看条款</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：添加 / 编辑 MCP（表单 ⇄ 原始 JSON） ═══ -->
+<div class="dsh-mcp-overlay hidden" id="m-mcp">
+  <div class="dsh-mcp-modal">
+    <div class="dsh-mcp-modal-head">
+      <h3>添加 MCP 服务</h3>
+      <div class="dsh-mcp-head-actions">
+        <button class="dsh-mcp-btn" id="json-toggle" onclick="toggleJson()"><svg class="i i-sm"><use href="#i-terminal"/></svg>原始 JSON</button>
+        <button class="dsh-mcp-btn icon ghost" onclick="closeModals()"><svg class="i"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="dsh-mcp-modal-body" id="mcp-form">
+      <div class="dsh-mcp-field"><label for="i-name">服务名</label><input class="dsh-mcp-input" id="i-name" placeholder="filesystem / postgres / github"></div>
+      <div class="dsh-mcp-field"><label for="i-transport">传输</label>
+        <select class="dsh-mcp-select" id="i-transport"><option>stdio（本地子进程）</option><option>streamable-http（远程）</option><option>sse（远程）</option></select>
+      </div>
+      <div class="dsh-mcp-field"><label for="i-cmd">命令</label><input class="dsh-mcp-input" id="i-cmd" placeholder="npx / uvx / docker / python"></div>
+      <div class="dsh-mcp-field"><label for="i-args">参数（一行一个）</label><textarea class="dsh-mcp-textarea" id="i-args" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;D:\sudy"></textarea></div>
+      <div class="dsh-mcp-field"><label for="i-env">环境变量（KEY=VALUE，一行一个）</label><textarea class="dsh-mcp-textarea" id="i-env" placeholder="API_KEY=&#10;PORT=8080"></textarea></div>
+      <div class="dsh-mcp-field"><label>写入位置</label>
+        <label class="dsh-mcp-radio-row sel"><input type="radio" name="scope" checked><div><b>全局</b> ~/.dsh/mcp.json<small>所有项目会话共享</small></div></label>
+        <label class="dsh-mcp-radio-row"><input type="radio" name="scope"><div><b>当前项目</b> .dsh/mcp.json<small>只对本工程会话生效</small></div></label>
+      </div>
+    </div>
+    <div class="dsh-mcp-modal-body hidden" id="mcp-json">
+      <div class="dsh-mcp-field"><label for="i-json">mcpServers 片段</label>
+        <textarea class="dsh-mcp-textarea" id="i-json" style="min-height:260px">{
+  "my-server": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+    "env": { "PUPPETEER_HEADLESS": "true" }
+  }
+}</textarea>
+      </div>
+    </div>
+    <div class="dsh-mcp-modal-actions">
+      <button class="dsh-mcp-btn" onclick="closeModals()">取消</button>
+      <button class="dsh-mcp-btn primary" onclick="toast('已原子写入配置并重连');closeModals()">保存并连接</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：安装技能（风险披露） ═══ -->
+<div class="dsh-mcp-overlay hidden" id="m-install">
+  <div class="dsh-mcp-modal">
+    <div class="dsh-mcp-modal-head">
+      <h3>安装技能</h3>
+      <button class="dsh-mcp-btn icon ghost" onclick="closeModals()"><svg class="i"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dsh-mcp-modal-body">
+      <div><div style="font-size:15px;font-weight:700">frontend-design</div><div style="font-size:11.5px;color:var(--mcp-mut)">anthropics/skills · Apache-2.0</div></div>
+      <div class="dsh-mcp-diag info">
+        <b>审查结果</b>
+        含 1 个可执行脚本（`scripts/colors.mjs`），未声明提权工具权限。技能正文将作为只读 Prompt 规范注入。
+      </div>
+      <div class="dsh-mcp-field"><label>安装到</label>
+        <label class="dsh-mcp-radio-row sel"><input type="radio" name="iskill" checked><div><b>全局</b> ~/.agents/skills/frontend-design<small>所有项目共享</small></div></label>
+        <label class="dsh-mcp-radio-row"><input type="radio" name="iskill"><div><b>当前工作区</b> .agents/skills/frontend-design<small>只对本工程生效</small></div></label>
+      </div>
+    </div>
+    <div class="dsh-mcp-modal-actions">
+      <button class="dsh-mcp-btn" onclick="closeModals()">取消</button>
+      <button class="dsh-mcp-btn primary" onclick="toast('已安装并生成 SKILL.md');closeModals()">确认安装</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：导入 ═══ -->
+<div class="dsh-mcp-overlay hidden" id="m-import">
+  <div class="dsh-mcp-modal">
+    <div class="dsh-mcp-modal-head">
+      <h3>导入配置</h3>
+      <button class="dsh-mcp-btn icon ghost" onclick="closeModals()"><svg class="i"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dsh-mcp-modal-body">
+      <div class="dsh-mcp-field"><label for="i-src">来源</label>
+        <select class="dsh-mcp-select" id="i-src">
+          <option>Claude Desktop · claude_desktop_config.json</option>
+          <option>Cursor / Windsurf / VS Code</option>
+          <option>Codex · config.toml</option>
+          <option>技能目录 / zip / tar.gz</option>
+        </select>
+      </div>
+      <div class="dsh-mcp-field"><label>预览</label>
+        <pre class="dsh-mcp-pre">将导入 3 个服务：filesystem、github、fetch
+跳过 1 个：已存在同名 serverName
+警告 1 条：VS Code inputs 无法映射</pre>
+      </div>
+    </div>
+    <div class="dsh-mcp-modal-actions">
+      <button class="dsh-mcp-btn" onclick="closeModals()">取消</button>
+      <button class="dsh-mcp-btn primary" onclick="toast('已合并 3 个服务');closeModals()">执行导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗：导出备份 ═══ -->
+<div class="dsh-mcp-overlay hidden" id="m-export">
+  <div class="dsh-mcp-modal">
+    <div class="dsh-mcp-modal-head">
+      <h3>导出备份</h3>
+      <button class="dsh-mcp-btn icon ghost" onclick="closeModals()"><svg class="i"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dsh-mcp-modal-body">
+      <div class="dsh-mcp-field"><label>范围</label>
+        <label class="dsh-mcp-radio-row sel"><input type="radio" name="exp" checked><div><b>全部</b><small>MCP 配置 + 自定义技能包</small></div></label>
+        <label class="dsh-mcp-radio-row"><input type="radio" name="exp"><div><b>仅 MCP 配置</b><small>标准 mcpServers JSON</small></div></label>
+        <label class="dsh-mcp-radio-row"><input type="radio" name="exp"><div><b>仅技能</b><small>各作用域的 SKILL.md 与资源</small></div></label>
+      </div>
+      <div class="dsh-mcp-diag info"><b>说明</b>备份为单个 zip，可在另一台机器上原样还原。密钥默认脱敏，可选择包含明文。</div>
+    </div>
+    <div class="dsh-mcp-modal-actions">
+      <button class="dsh-mcp-btn" onclick="closeModals()">取消</button>
+      <button class="dsh-mcp-btn primary" onclick="toast('已导出 toolbox-backup.zip');closeModals()">下载备份</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+let ability = 'mcp';
+let mode = 'manage';
+let batch = false;
+let jsonView = false;
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => el.classList.toggle('hidden', !on);
+
+/* 明暗：宿主用 body[data-ds-dark-theme]，不是 [data-theme=dark] */
+function toggleTheme() { document.body.toggleAttribute('data-ds-dark-theme'); }
+function toggleEl(id) { $(id).classList.toggle('hidden'); }
+function toast(msg) {
+  const old = document.querySelector('.dsh-mcp-toast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'dsh-mcp-toast';
+  el.setAttribute('role', 'status');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+function drop(e, id) {
+  e.stopPropagation();
+  const pop = $(id), open = pop.classList.contains('hidden');
+  document.querySelectorAll('.dsh-mcp-dd-pop').forEach(p => p.classList.add('hidden'));
+  show(pop, open);
+}
+window.addEventListener('click', () => document.querySelectorAll('.dsh-mcp-dd-pop').forEach(p => p.classList.add('hidden')));
+function openModal(id) { show($(id), true); }
+function closeModals() { document.querySelectorAll('.dsh-mcp-overlay').forEach(o => o.classList.add('hidden')); }
+document.querySelectorAll('.dsh-mcp-overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) closeModals(); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModals(); });
+
+/* 能力层切换：只换中间列与两份内容，两侧位置不动 */
+function setAbility(next) {
+  ability = next;
+  $('ab-mcp').classList.toggle('sel', next === 'mcp');
+  $('ab-skills').classList.toggle('sel', next === 'skills');
+  show($('act-mcp'), next === 'mcp');
+  show($('act-skills'), next === 'skills');
+  show($('list-mcp'), next === 'mcp');
+  show($('list-skills'), next === 'skills');
+  show($('ws-mcp'), next === 'mcp');
+  show($('ws-skill'), next === 'skills');
+  show($('market-mcp'), next === 'mcp');
+  show($('market-skills'), next === 'skills');
+  $('foot-text').textContent = next === 'mcp' ? '5 个服务 · 4 启用 · 1 失败' : '11 个技能 · 10 正常 · 1 非法';
+  $('sc-all').textContent = next === 'mcp' ? '5' : '11';
+  $('sc-global').textContent = next === 'mcp' ? '3' : '8';
+  $('sc-project').textContent = next === 'mcp' ? '2' : '2';
+  $('sc-bundled').textContent = '1';
+  /* bundled 是技能侧独有的作用域，MCP 面不留一个恒为 0 的药丸 */
+  show($('sc-bundled-chip'), next === 'skills');
+  if (batch) toggleBatch();
+}
+
+/* 模式层：市场模式下作用域区整块移除，不留空档 */
+function setMode(next) {
+  mode = next;
+  $('md-manage').classList.toggle('sel', next === 'manage');
+  $('md-market').classList.toggle('sel', next === 'market');
+  show($('view-manage'), next === 'manage');
+  show($('view-market'), next === 'market');
+  show($('scope-bar'), next === 'manage');
+}
+function setScope(el) {
+  [...el.parentElement.children].forEach(c => { if (c.classList.contains('dsh-mcp-chip')) c.classList.remove('sel'); });
+  el.classList.add('sel');
+}
+function toggleGroup(el) {
+  el.classList.toggle('closed');
+  let n = el.nextElementSibling;
+  while (n && !n.classList.contains('dsh-mcp-group')) { n.classList.toggle('hidden', el.classList.contains('closed')); n = n.nextElementSibling; }
+}
+function flip(el) { el.setAttribute('aria-checked', el.getAttribute('aria-checked') === 'true' ? 'false' : 'true'); }
+function toggleBatch() {
+  batch = !batch;
+  document.querySelectorAll('.dsh-mcp-item-check').forEach(c => c.classList.toggle('hidden', !batch));
+  show($('batch-bar'), batch);
+}
+function selectAll(on) {
+  document.querySelectorAll('.dsh-mcp-item-check').forEach(c => { if (!c.closest('.dsh-mcp-item').hasAttribute('data-locked')) c.checked = on; });
+  $('batch-count').textContent = on ? '已选全部' : '已选 0 项';
+}
+function pickMcp(el, id) {
+  document.querySelectorAll('#list-mcp .dsh-mcp-item').forEach(i => i.classList.remove('sel'));
+  el.classList.add('sel');
+  const bad = id === 'postgres-db';
+  $('d-name').textContent = id;
+  $('d-desc').textContent = bad ? 'PostgreSQL 只读查询与 Schema 检查。' : id === 'firecrawl' ? '网页抓取与语义搜索（远程 streamable-http）。' : 'Chrome 浏览器自动化、DOM 检查与网络分析。';
+  $('d-transport').textContent = (id === 'firecrawl' || id === 'remote-vector-store') ? 'streamable-http' : 'stdio';
+  $('d-transport').className = 'dsh-mcp-badge plain';
+  const st = $('d-state');
+  if (bad) { st.className = 'dsh-mcp-badge s-err'; st.textContent = '连接失败'; }
+  else if (id === 'test-runner-mcp') { st.className = 'dsh-mcp-badge s-off'; st.textContent = '已停用'; }
+  else { st.className = 'dsh-mcp-badge s-on'; st.textContent = '已就绪'; }
+  show($('d-diag'), bad);
+}
+function pickSkill(el, id) {
+  document.querySelectorAll('#list-skills .dsh-mcp-item').forEach(i => i.classList.remove('sel'));
+  el.classList.add('sel');
+  $('s-name').textContent = id;
+  $('s-path').textContent = '~/.agents/skills/' + id + '/SKILL.md';
+  $('s-path2').textContent = '~/.agents/skills/' + id + '/SKILL.md';
+  const st = $('s-state'), tg = $('s-toggle'), del = $('s-del'), ed = $('s-editor');
+  // 复位：诊断页三个块全隐，动作全部可用
+  show($('s-shadow'), false); show($('s-bundled'), false); show($('s-broken'), false);
+  show($('s-clean'), true);
+  $('s-diag-count').textContent = '0';
+  $('s-diag-count').style.display = 'none';
+  tg.disabled = false; del.disabled = false; ed.disabled = false;
+  $('s-kind').textContent = '目录捆绑';
+  tg.innerHTML = '<svg class="i i-sm"><use href="#i-pause"/></svg>停用技能';
+  st.className = 'dsh-mcp-badge s-on'; st.textContent = '模型与用户均可调用';
+  $('s-scope').textContent = '全局 · rank 500 · ~/.agents/skills';
+  let pane = 's-overview';
+
+  if (id === 'office-docx') {
+    show($('s-clean'), false); show($('s-shadow'), true);
+    $('s-diag-count').textContent = '1'; $('s-diag-count').style.display = '';
+    pane = 's-diag';
+    st.className = 'dsh-mcp-badge s-warn'; st.textContent = '被遮蔽';
+    $('s-desc').textContent = 'Word 文档的创建、富文本读写与格式化。项目里有一份同名条目在生效。';
+  } else if (id === 'office-pdf') {
+    $('s-kind').textContent = '目录捆绑';
+    tg.innerHTML = '<svg class="i i-sm"><use href="#i-play"/></svg>启用技能';
+    st.className = 'dsh-mcp-badge s-off'; st.textContent = '已停用（.disabled）';
+    $('s-desc').textContent = 'PDF 解析与文本提取。当前为 SKILL.md.disabled，宿主目录里看不到它。';
+  } else if (id === 'system-core-skill') {
+    show($('s-bundled'), true);
+    tg.disabled = true; del.disabled = true;
+    $('s-kind').textContent = 'bundled 只读';
+    st.className = 'dsh-mcp-badge s-lock'; st.textContent = '系统内置只读';
+    $('s-scope').textContent = '系统内置 · rank 600 · bundled（只读根）';
+    $('s-desc').textContent = '宿主内置基线技能，受保护不可禁用、不可删除。';
+  } else if (id === 'broken-skill') {
+    show($('s-clean'), false); show($('s-broken'), true);
+    $('s-diag-count').textContent = '2'; $('s-diag-count').style.display = '';
+    pane = 's-diag';
+    st.className = 'dsh-mcp-badge s-err'; st.textContent = 'frontmatter 校验失败';
+    $('s-desc').textContent = '目录存在但宿主无法解析，模型目录里看不到它，只能由本面板自行扫描发现。';
+  } else if (id === 'decision-notes') {
+    $('s-desc').textContent = '记录技术决策背后的推理、放弃的备选项与代价。';
+  } else {
+    $('s-desc').textContent = '端到端统筹开发请求：解决设计决策、规划路径、带测试实现并交付到验证完成。';
+  }
+  showPane(pane);
+}
+function toggleSkill() {
+  const tg = $('s-toggle'), off = tg.textContent.includes('停用');
+  tg.innerHTML = off ? '<svg class="i i-sm"><use href="#i-play"/></svg>启用技能' : '<svg class="i i-sm"><use href="#i-pause"/></svg>停用技能';
+  toast(off ? '已改名为 SKILL.md.disabled，watcher 触发后从模型目录移除' : '已改回 SKILL.md，技能重新进入模型目录');
+}
+/* Tab 行只切换它自己那一侧的正文页；诊断块（d-diag）由条目状态决定，不随 tab 变 */
+const PANES = new Set(['p-runtime', 'p-tools', 'p-res', 'p-prompts', 'p-logs', 's-overview', 's-text', 's-diag']);
+function tab(el) {
+  const pane = el.dataset.pane;
+  [...el.parentElement.children].forEach(t => t.classList.remove('sel'));
+  el.classList.add('sel');
+  const body = el.parentElement.nextElementSibling;
+  [...body.children].forEach(p => { if (PANES.has(p.id)) show(p, p.id === pane); });
+}
+/* 让条目状态自己选页：非法 / 遮蔽直接落到「诊断」页 */
+function showPane(paneId) {
+  const t = document.querySelector('.dsh-mcp-tab[data-pane="' + paneId + '"]');
+  if (t && !t.classList.contains('sel')) tab(t);
+}
+function restart() {
+  const b = $('btn-restart');
+  b.disabled = true; b.innerHTML = '<svg class="i i-sm"><use href="#i-restart"/></svg>重启中';
+  setTimeout(() => { b.disabled = false; b.innerHTML = '<svg class="i i-sm"><use href="#i-restart"/></svg>重启服务'; toast('子进程已重启，管道重新就绪'); }, 700);
+}
+function maskEnv() {
+  const v = $('env-val');
+  v.textContent = v.textContent.includes('****') ? 'PUPPETEER_HEADLESS=true, DEBUG=mcp:*' : 'PUPPETEER_HEADLESS=true, DEBUG=****';
+}
+function openMcpModal() { jsonView = false; syncJson(); show($('mcp-form'), true); show($('mcp-json'), false); openModal('m-mcp'); }
+function toggleJson() { jsonView = !jsonView; show($('mcp-form'), !jsonView); show($('mcp-json'), jsonView); $('json-toggle').classList.toggle('primary', jsonView); }
+function syncJson() { toggleJsonOff(); }
+function toggleJsonOff() { jsonView = false; show($('mcp-form'), true); show($('mcp-json'), false); $('json-toggle').classList.remove('primary'); }
+function prefill(name, cmd) { openMcpModal(); $('i-name').value = name; $('i-cmd').value = cmd; }
+function onSearch(v) {
+  const empty = v.trim() === 'zzz';
+  show($('list-empty'), empty);
+  show($(ability === 'mcp' ? 'list-mcp' : 'list-skills'), !empty);
+}
+function showEmpty() { $('f-search').value = 'zzz'; onSearch('zzz'); }
+function clearFilters() { $('f-search').value = ''; onSearch(''); }
+setAbility('mcp');
+setMode('manage');
+</script>
+</body>
+</html>
