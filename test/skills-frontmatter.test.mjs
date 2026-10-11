@@ -326,3 +326,39 @@ test('refuses when the legacy camelCase key is present, because the host skips t
     '拒绝时必须点名那个驼峰键，否则用户不知道该改哪一行',
   )
 })
+
+test('refuses to append a second key when the parser sees the field but the line scan cannot', () => {
+  // 引号键与流式映射：YAML 解析器**认得**这个字段（宿主因此读得到它，面板也照它显示权限），
+  // 而「顶层 key: 值」的行扫描认不出那一行。此时若按「键不存在」追加，就会写出**第二个**同名键
+  // ——YAML 重复键让整份 frontmatter 报废（宿主跳过整条技能），而用户要的那个方向根本没生效。
+  // 解析与逐行改写各有一套判据，这里正是它们分叉的地方：改不动就说改不动，别动手。
+  const shapes = [
+    ['键带双引号', `name: x\ndescription: y\n"${KEY}": true`, false],
+    ['键带单引号', `name: x\ndescription: y\n'${KEY}': false`, true],
+    ['整块是流式映射', `{name: x, description: y, ${KEY}: true}`, false],
+  ]
+  for (const [label, fields, value] of shapes) {
+    const raw = skill(fields)
+    assert.equal(diagnoseSkill(raw).ok, true, `${label}：前提是这份 frontmatter 本来合法（宿主读得到）`)
+    assert.throws(
+      () => setFrontmatterBoolean(raw, KEY, value),
+      new RegExp(KEY),
+      `${label}：行扫描找不到那一行时必须拒绝，不能追加出第二个键`,
+    )
+  }
+  // 反方向（要的值已经生效）仍是 no-op：这条路上不许有任何写入。
+  const already = skill(`name: x\ndescription: y\n"${KEY}": true`)
+  assert.deepEqual(setFrontmatterBoolean(already, KEY, true), { text: already, changed: false })
+})
+
+test('refuses to touch a value that carries an anchor, because another key may alias it', () => {
+  // `KEY: &flag true` 这一行正给别处的 `*flag` 供值。整行删掉或就地换值都会让那个引用悬空，
+  // 整份 frontmatter 报废（同样 = 宿主跳过整条技能）。布尔字面量里不可能出现 `&`，
+  // 所以走到这里还见到它只可能是锚点。
+  const deletion = skill(`name: x\ndescription: y\n${KEY}: &flag true\nmirror: *flag`)
+  assert.equal(diagnoseSkill(deletion).invocation.modelInvocable, false, '前提：这一行确实是布尔值')
+  assert.throws(() => setFrontmatterBoolean(deletion, KEY, false), new RegExp(KEY), '整行删掉会让 *flag 悬空')
+
+  const replacement = skill(`name: x\ndescription: y\n${KEY}: &flag false\nmirror: *flag`)
+  assert.throws(() => setFrontmatterBoolean(replacement, KEY, true), new RegExp(KEY), '就地换值同样会让 *flag 悬空')
+})

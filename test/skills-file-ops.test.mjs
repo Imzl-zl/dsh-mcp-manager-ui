@@ -801,3 +801,24 @@ test('works on a disabled skill, because it is the same file', async () => {
   }
 })
 
+test('a refused rewrite leaves the file byte-identical, because half a write is the worst outcome', async () => {
+  // 改写规则拒绝时（这里：值跨了行），本层必须原样放行那个错误、**一个字节都不写**。
+  // 半写是最坏的结局：用户既没拿到想要的状态，文件也被改坏了——而这是**用户手写的资产**。
+  const root = await makeRoot()
+  try {
+    const file = join(root, 'zhanggui', 'SKILL.md')
+    await writeFile(file, '---\nname: zhanggui\ndescription: demo\ndisable-model-invocation: >-\n  true\n---\n\nbody\n')
+    const before = await readFile(file)
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    await assert.rejects(
+      () => setSkillModelInvocable(target, true),
+      /disable-model-invocation/,
+      '形状读不准时要拒绝，而且错误里要点名那个字段',
+    )
+    assert.deepEqual(await readFile(file), before, '拒绝后文件必须逐字节不变')
+    assert.deepEqual(await readdir(join(root, 'zhanggui')), ['SKILL.md'], '原子写不得留下临时文件')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+

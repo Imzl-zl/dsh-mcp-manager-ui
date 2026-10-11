@@ -158,7 +158,7 @@ Three different things, and the detail pane gives the specific reason: **mount f
 Respectively: no session of that project holds the shared connection yet / the configuration changed but the old connection is still being reused (see above) / how many sessions currently share it.
 
 **How do I upgrade? Why did the panel not notify me?**
-If you installed from npm, `dsh plugin --profile web update dsh-toolbox-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries GitHub Releases, at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag.
+If you installed from npm, `dsh plugin --profile web update dsh-toolbox-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries the npm registry (this package's latest dist-tag), at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag. ⚠️ **1.6.1 and earlier asked a different source** (this repository's release feed, whose only latest entry carries the other product line and is marked pre-release), so they will not announce 1.6.2 — the fix ships inside 1.6.2 itself; run `dsh plugin --profile web update dsh-toolbox-ui` once by hand.
 
 **Will editing touch my other configuration?**
 No. Global edits only rewrite the entries declared by `@deepseek-ai/dsh-mcp-client` that this plugin manages, preserving other plugin rows, comments, and `!!js` expressions; "replace" imports only replace that part and never delete MCPs owned by another bundle or agent preset.

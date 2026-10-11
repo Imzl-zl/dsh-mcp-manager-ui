@@ -617,6 +617,29 @@ test('the panel wires the model-invocation switch to setModelInvocable with the 
   assert.equal('writable' in payload, false, 'wire 上不再有 writable：可写与否由服务端判定')
 })
 
+test('a refused write says why instead of looking like a dead switch', async () => {
+  // 改写规则会拒绝某些形状，而宿主给的是**具体原因**（「这个字段的值跨了多行，请手工修改」这类）。
+  // 丢掉它就只剩「点了没反应」——而 docs/skills.md 与发布稿承诺的正是「面板会拒绝并说明原因，
+  // 让你手工改」。技能面的行动作此前一律吞掉 {ok:false}，所以这条钉的是「失败必须说出来」。
+  const internals = loadClientInternals()
+  const flashes = []
+  const row = { name: 'zhanggui', description: 'x', source: 'user-agents', scope: 'global', root: '/root', kind: 'bundle', enabled: true }
+  const tree = internals.__render(internals.SkillsPanel, {
+    call: async (method) => (method === 'list'
+      ? { ok: true, skills: [row], disabled: [] }
+      : { ok: false, error: '无法改写 disable-model-invocation：这个字段的值跨了多行，请手工修改' }),
+    workspaces: [], mode: 'manage', scopeFilter: 'all', onScopeFilter() {}, sortKey: 'default', onSort() {},
+    flash: (msg, kind) => flashes.push([msg, kind]),
+  })
+  const pane = findNode(tree, (node) => node.type === internals.SkillDetailPane)
+  assert.ok(pane, '前提：管理模式要画出右栏详情面板')
+  await pane.props.onModelInvocable(row, false)
+
+  assert.equal(flashes.length, 1, '被拒绝时必须给用户一条消息（0 条 = 开关看起来是坏的）')
+  assert.match(flashes[0][0], /跨了多行|手工修改/, '要把宿主的原话给出去，否则用户不知道该改哪里')
+  assert.equal(flashes[0][1], 'err', '失败要用失败的语气，不能报成成功提示')
+})
+
 test('scope options are derived from the sources actually found, never hardcoded', () => {
   // SPEC 约束 12：本机 ~/.dsh/skills(rank 400) 一度不存在、技能全在 ~/.agents/skills(rank 500)。
   // 若候选项写死一份「全局/项目」清单，用户会看到一个空的作用域，或看不到自己技能真正所在的

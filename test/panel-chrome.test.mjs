@@ -580,8 +580,9 @@ test('外部源（skillhub.cn）：安装走同一套落点，但闸门换成披
 
   // ④ 接线：外部源调 skillHubInstall；落点只送**引用**（source + root + projectPath），
   // 确认（acknowledged）也必须在 wire 上——UI 的勾选框只是它的界面。
-  // 断言改成行为断言（原来那条是正则匹配源码文本，改坏 wire 也照样绿）。
-  assert.match(clientSource, /await call\('skillHubInstall', \{/)
+  // 调用助手名不钉（技能面的写动作统一走 act，见 lib/client.js 里 act 的说明）：这里钉的是
+  // 「入口只有一个」+ wire 上的字段，与助手叫什么无关。
+  assert.match(clientSource, /await (?:call|act)\('skillHubInstall', \{/)
   assert.match(clientSource, /source: option\.source,/)
   assert.match(clientSource, /projectPath: option\.projectPath,/)
   assert.match(clientSource, /acknowledged: true,/, '确认必须上 wire，不能只留在客户端')
@@ -590,7 +591,7 @@ test('外部源（skillhub.cn）：安装走同一套落点，但闸门换成披
   // 市场只剩 skillhub.cn 一条来源，所以安装只走 skillHubInstall，不存在第二条「假装能装」的路。
   // 原来这里钉的是「内置精选不得出现 type:'market'」——那条路已经整条删掉了（没有可固定的
   // commit，抓默认分支不可复现），现在钉的是**不再有任何别的安装入口**。
-  assert.equal((clientSource.match(/await call\('skillHubInstall'/g) ?? []).length, 1,
+  assert.equal((clientSource.match(/await (?:call|act)\('skillHubInstall'/g) ?? []).length, 1,
     '安装只能有一个入口：skillHubInstall')
   // 落点是**同一份** installTargets，两个能力面不各建一套
   assert.equal((clientSource.match(/scopeOptions: installTargets/g) ?? []).length, 1)

@@ -81,11 +81,11 @@ dsh plugin --profile web update dsh-toolbox-ui
 
 为什么 tag 不会自动跨版本：`dsh plugin` 是 `pnpm` 的薄转发器，`update` 就是「按 package.json 里的 spec 再解析一次」，而 git tag 是不可变规格、没有范围语义（`pnpm update --help`："Updates packages to their latest version **based on the specified range**"）。
 
-面板自带更新提示与一键升级（查 GitHub Releases，每天最多一次、可关闭、不会自己动；点「升级」才装）。npm 安装的用户也可以用命令行 `update` 升级，两者等价。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
+面板自带更新提示与一键升级（查 npm registry 上**本包的 latest**，每天最多一次、可关闭、不会自己动；点「升级」才装）。npm 安装的用户也可以用命令行 `update` 升级，两者等价。每个 release 都会同时发布到 npm 与 GitHub Releases，两者版本一致。
 
 ## 发布流程（维护者）
 
-npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，面板的更新提示查 GitHub Releases。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。这两件事现在由 `.github/workflows/release.yml` 在推 tag 时自动完成，并且会先校验「tag 与 package.json 版本一致」再跑测试。
+npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm 升级，而面板的更新提示问的正是 npm 上本包的 latest。两者版本不一致就会出现「提示说有新版、`update` 却拿不到」。这两件事现在由 `.github/workflows/release.yml` 在推 tag 时自动完成，并且会先校验「tag 与 package.json 版本一致」再跑测试。
 
 ### 一次性准备（只需做一次）
 
