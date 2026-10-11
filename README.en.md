@@ -21,7 +21,7 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 > superset of it. Since **1.5.4**, `dsh-mcp-manager-ui` does exactly one thing — move existing installs over:
 >
 > ```bash
-> dsh plugin update        # pulls 1.5.4
+> dsh plugin update        # pulls 1.5.5
 > # after restarting the host, the panel shows a "迁移" (migrate) button:
 > # one click installs dsh-toolbox-ui and removes this package
 > ```
@@ -65,10 +65,10 @@ An **MCP management panel** for DeepSeek Harness Web: click the floating button 
 
 ```sh
 # Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.4
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.5
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.4
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.5
 ```
 
 Then **restart `dsh web`**. To upgrade:

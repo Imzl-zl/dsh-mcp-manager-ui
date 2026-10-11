@@ -13,7 +13,7 @@
 ## 安装
 
 > **这条线已并入 [`dsh-toolbox-ui`](https://www.npmjs.com/package/dsh-toolbox-ui)（MCP + 技能）。**
-> `dsh-mcp-manager-ui` 自 **1.5.4** 起只是**迁移版**：`dsh plugin update` 拿到 1.5.4 并重启宿主后，
+> `dsh-mcp-manager-ui` 自 **1.5.4** 起只是**迁移版**：`dsh plugin update` 拿到 1.5.5 并重启宿主后，
 > 面板顶部会出现「迁移」按钮，点一下即装上后继包并卸掉本包。**新用户请直接装后继包**：
 >
 > ```sh
@@ -23,14 +23,14 @@
 推荐用 npm 安装：包里的 `^1.x` 范围让后续 `dsh plugin update` 能自动升级小版本。
 
 ```sh
-dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.4
+dsh plugin --profile web add dsh-mcp-manager-ui@^1.5.5
 ```
 
 也可以固定 GitHub release tag（适合需要锁定某个具体版本时）：
 
 ```sh
 # 固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.4
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.5.5
 
 # 或固定某个 commit
 dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
@@ -81,8 +81,8 @@ dsh plugin --profile web update dsh-mcp-manager-ui
 
 | 安装规格 | `update` 的效果 | 怎么跨版本 |
 |---|---|---|
-| `dsh-mcp-manager-ui@^1.5.4`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
-| `github:...#v1.5.4`（tag） | 重新解析同一个 tag，**不会动** | 换成新 tag 重新 `add`：`... #<新 tag>` |
+| `dsh-mcp-manager-ui@^1.5.5`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
+| `github:...#v1.5.5`（tag） | 重新解析同一个 tag，**不会动** | 换成新 tag 重新 `add`：`... #<新 tag>` |
 | `github:...#<commit>` | 同上，固定在 commit | 用新 commit/tag 重新 `add` |
 | `github:...#main`（分支） | 拉取最新 main | 已是自动；但不推荐生产（无 release 门槛） |
 | `link:<本地目录>`（开发） | 不适用 | 在 checkout 里 `git pull` 后重启 `dsh web` |
@@ -120,10 +120,17 @@ dsh web    # 打开面板点一遍
 # 3) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
 git add -A && git commit -m "..."
 git push origin main
-git tag -a v1.5.4 -m "dsh-mcp-manager-ui v1.5.4" && git push origin v1.5.4
+git tag -a v1.5.5 -m "dsh-mcp-manager-ui v1.5.5" && git push origin v1.5.5
 ```
 
 推 tag 后 CI 依次做：校验版本 → `pnpm install --frozen-lockfile` → `npm test` → `npm publish`（trusted publishing，无需 token）→ `gh release create`。
+
+> ⚠️ **同一个仓库两条产品线共用一个 `releases/latest`**：老版本（≤1.5.3）面板的「升级」按钮读的就是它，
+> 而按钮下发的规格是**它自己那个包名**的新版本。所以**新线（`dsh-toolbox-ui`）的 Release 必须带
+> `--prerelease`**（`gh release create --prerelease …`）：GitHub 的 "latest release" 会跳过 pre-release，
+> 老线的面板因此会看到**旧线自己的最新版**（例如 1.5.5）——点一下就能升到中转版，再点「迁移」到新线。
+> 忘了加这个标志的后果是真机上验证过的：老用户点「升级」会去装一个不存在的版本，直接报错。
+> 新线自己的更新提示不依赖该 feed（它问的是自己包在 npm 上的 latest），所以标 pre-release 不影响它。
 
 **第 2 步的真机检查什么时候必须做**：客户端那一半是替身测试——组件在 node 里渲染不起来（见[设计与限制](design.md#版本范围怎么定以及它管不到什么)），所以 CI 全绿也证明不了面板能显示。因此**只要本次改动碰了 `lib/client.js`、或推进了 DSH 基线，就必须做**：起 `dsh web`，确认侧栏入口能打开面板、悬浮按钮在位，然后导入 / 预览 / 启停各点一次。
 
@@ -139,7 +146,7 @@ git tag -a v1.5.4 -m "dsh-mcp-manager-ui v1.5.4" && git push origin v1.5.4
 
 ```sh
 npm publish          # 会弹 2FA 挑战；若用 bypass-2FA 的 granular token 则非交互
-gh release create v1.5.4 --title "dsh-mcp-manager-ui v1.5.4" --notes-file <notes>
+gh release create v1.5.5 --title "dsh-mcp-manager-ui v1.5.5" --notes-file <notes>
 ```
 
 `npm login` 的会话 token 只有 2 小时，超时需要重新登录；classic token 已被 npm 永久吊销，能非交互发布的只剩勾了 **Bypass 2FA** 的 granular access token——但它正在被 npm 收窄（已不能做账号/包管理类操作，且 2027-01 起将失去直接发布能力），所以长期方案是上面的 trusted publishing。

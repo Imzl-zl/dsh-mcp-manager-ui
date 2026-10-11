@@ -12,7 +12,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, UPGRADE_OWN_PACKAGE, UPGRADE_TARGET_PACKAGE };`,
+  `${exportMarker}\nexports.__upgrade = { upgradePlan, upgradeFailureText, pnpmOutputTail, UPGRADE_OWN_PACKAGE, UPGRADE_TARGET_PACKAGE };`,
 )
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
 
@@ -56,21 +56,27 @@ const service = { installBundle() {}, removeBundle() {} }
 const hint = (latest, current = '1.4.2') => ({ current, latest, package: 'dsh-toolbox-ui', updateAvailable: !!latest && latest !== current })
 const npmBundle = { name: 'dsh-mcp-manager-ui', source: '^1.4.2', installed: true, version: '1.4.2' }
 
-test('an upgrade is offered only when the host can do it and there is a newer version', () => {
+test('a migration is offered whenever the host can do it — hint or not', () => {
   const { upgradePlan } = loadUpgradeRule()
-  // 正常情形：宿主有 pluginManager + 是 npm 装的 + 有新版本。
-  const ok = upgradePlan({ service, hint: hint('1.5.0'), bundle: npmBundle })
+  // 正常情形：宿主有 pluginManager + 是 npm 装的 + 查到了最新版。
+  const ok = upgradePlan({ service, hint: hint('1.6.1'), bundle: npmBundle })
   assert.equal(ok.supported, true)
   // 目标**不是本包**：这条线已并入 dsh-toolbox-ui，所以规格装的是后继包。
-  assert.equal(ok.spec, 'dsh-toolbox-ui@^1.5.0', '装的是后继包；本包只负责把用户送过去')
+  assert.equal(ok.spec, 'dsh-toolbox-ui@^1.6.1', '装的是后继包；本包只负责把用户送过去')
   assert.equal(ok.replaces, 'dsh-mcp-manager-ui', '装完要卸掉本包，否则 profile 里永远留着它')
 
+  // ⚠️ 1.5.5 的关键行为：**查不到最新版也要能迁**。离线、公司网络拦 registry、限流都会走到
+  // 这里；那时如果判定成"没有目标"，提示条上的按钮就会点了没反应（用户连"该走了"都看不到）。
+  const offline = upgradePlan({ service, hint: null, bundle: npmBundle, fallbackSpec: 'dsh-toolbox-ui@^1.6.1' })
+  assert.equal(offline.supported, true, '离线时也必须能迁移')
+  assert.equal(offline.spec, 'dsh-toolbox-ui@^1.6.1', '用写死的那份规格')
+  assert.equal(offline.version, '1.6.1', '版本要从写死的规格里解出来（横幅要用它说话）')
+  // 既没有 hint 也没有 fallback，才算没有目标。
+  assert.equal(upgradePlan({ service, hint: null, bundle: npmBundle }).reason, 'no-target')
+
   // 宿主没提供这个 namespace（老宿主 / 非 web 形态）：不能给按钮，否则点了没反应。
-  assert.equal(upgradePlan({ service: null, hint: hint('1.5.0'), bundle: npmBundle }).reason, 'no-service')
-  assert.equal(upgradePlan({ service: {}, hint: hint('1.5.0'), bundle: npmBundle }).reason, 'no-service')
-  // 已是最新：不显示按钮。
-  assert.equal(upgradePlan({ service, hint: hint(null), bundle: npmBundle }).reason, 'up-to-date')
-  assert.equal(upgradePlan({ service, hint: hint('1.4.2', '1.4.2'), bundle: npmBundle }).supported, false)
+  assert.equal(upgradePlan({ service: null, hint: hint('1.6.1'), bundle: npmBundle }).reason, 'no-service')
+  assert.equal(upgradePlan({ service: {}, hint: hint('1.6.1'), bundle: npmBundle }).reason, 'no-service')
 })
 
 test('a locally linked install is never upgraded into an npm package', () => {
@@ -113,18 +119,51 @@ test('upgrade failures say what happened instead of just "failed"', () => {
   assert.ok(upgradeFailureText(null, null).length > 0)
 })
 
+test('an unknown migration failure carries pnpm own words, cleaned up', () => {
+  const { upgradeFailureText, pnpmOutputTail } = loadUpgradeRule()
+  // 真机实测过的那次失败（1.5.3 面板的按钮）：面板只显示一个 Windows 崩溃码，而 pnpm 原文
+  // 说得很清楚。官方把整段输出放在 packageResult.output 里，所以要把它接上——但要挑干净。
+  const output = [
+    'Progress: resolved 4, reused 3, downloaded 0, added 3',
+    'npm notice',
+    'npm notice package size: 222.9 kB',
+    '\u001b[31m[ERR_PNPM_NO_MATCHING_VERSION] No matching version found for example-plugin@9.9.9\u001b[0m',
+    '',
+    'The latest release of example-plugin is "1.5.3".',
+  ].join('\n')
+  const text = upgradeFailureText({ code: 'operation-error' }, 3221226505, output)
+  assert.match(text, /ERR_PNPM_NO_MATCHING_VERSION/, '必须把 pnpm 的原句带出来，否则只有崩溃码')
+  assert.match(text, /The latest release/, 'pnpm 的结论行更该出现（它直接告诉用户"最新是什么"）')
+  assert.match(text, /operation-error/)
+  assert.doesNotMatch(text, /Progress:|npm notice|package size/)
+  assert.doesNotMatch(text, /\u001b\[/, 'ANSI 颜色码要剥掉')
+  // 已知码的解释优先：它已经把原因和下一步说清了，不该再被 pnpm 输出淹没。
+  assert.equal(upgradeFailureText({ code: 'stop-profile' }, 1, output), '宿主正在停止，未升级；请重启后再试。')
+  // 没有 output 时行为与改动前逐字一致（老宿主/老官方版本不带这个字段）。
+  assert.equal(upgradeFailureText({ code: 'brand-new-code' }, 7), '迁移失败（错误码 brand-new-code，pnpm 退出码 7）。')
+  // 挑行：没有报错行时取末尾三行；有报错行时从它开始带（结论就在它后面一行）。
+  assert.equal(pnpmOutputTail(''), '')
+  assert.equal(pnpmOutputTail('a\nb\nc\nd\ne'), 'c d e')
+  assert.equal(pnpmOutputTail('one\nERR_PNPM_X boom\n因为原因在这里\n还有一句'), 'ERR_PNPM_X boom 因为原因在这里 还有一句')
+  assert.ok(pnpmOutputTail('x'.repeat(500)).length <= 300)
+})
+
 test('the post-upgrade banner survives the hint going away', () => {
   // 这是一个真机跑出来的缺陷，不是假想：升级成功后**宿主立刻报「已是最新」**（磁盘上的
   // package.json 已经被换成新版），于是 updateHint 变成 null——而横幅原本挂在 updateHint 上，
   // 结果「点完就消失」，用户永远看不到那句「重启宿主后生效」。而宿主代码在进程内执行，
   // 不重启等于没升级，这句话是整个功能的必要闭环。
   //
-  // 所以横幅的存活条件必须把 done 也算进去。
+  // 所以横幅的存活条件必须把 done 也算进去；1.5.5 起更进一步：**除非用户主动关掉，它一直在**
+  // （这条线已经结束，"该走去哪"不能取决于 registry 查询成功与否）。
   assert.match(
     clientSource,
-    /\(updateHint \|\| upgradeState\.phase === 'done'\)/,
-    '升级完成后 updateHint 已是 null，横幅必须靠 done 状态存活',
+    /\(!bannerClosed \|\| upgradeState\.phase !== 'idle'\)/,
+    '横幅不能挂在 updateHint 上：离线时也要看得见"该走了"，进行中/完成/失败更要看得见',
   )
+  // 关闭状态按目标版本记（关掉之后本版本不再提示，目标更新了会再提示）。
+  assert.match(clientSource, /dismissed === bannerVersion/, '关闭要按目标版本记忆')
+  assert.match(clientSource, /localStorage\.setItem\(UPDATE_HINT_DISMISS_KEY, bannerVersion\)/, '关闭时写入的是目标版本')
   // done 分支不能再去读 updateHint 的字段（那时它是 null，会直接崩）。
   const doneBranch = clientSource.match(/phase === 'done'\s*\?\s*\(upgradeState\.leftover[\s\S]{0,400}?\+ upgradeState\.version \+/)
   assert.ok(doneBranch, '找不到 done 分支的文案')
