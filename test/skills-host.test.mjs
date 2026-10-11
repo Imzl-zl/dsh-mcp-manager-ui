@@ -18,13 +18,14 @@
 //    （官方 ctx.remote.skills.list 需要真实 sessionId，会激活冷 Agent，故本插件走自己的 RPC）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SkillsManagerGateway } from '../lib/index.js'
 import { skillRowKey } from '../lib/skills-registry.js'
+import { diagnoseSkill } from '../lib/skills-frontmatter.js'
 
 const hostIndex = readFileSync(fileURLToPath(new URL('../lib/index.js', import.meta.url)), 'utf8')
 
@@ -480,6 +481,164 @@ test('importSkill lands in the referenced root and refuses a read-only one', asy
       /只读/,
     )
     assert.deepEqual(await readdir(bundled), [], '内置根不得被写入')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+// ── 调用权限：一律来自磁盘上的技能文件 ──────────────────────────────────────
+//
+// 为什么不能让行上的权限继续取自宿主 summary：那是**发现缓存**（同文件上方那条「陈旧行」用例
+// 已经证明它会在改名后继续报旧状态）。而调用权限正是本面板要**写**的东西——写盘后若显示回退，
+// 用户看到的是「点了没反应」；更糟的是宿主缓存里的值会被当成事实展示。
+// 所以行的权限从**那个文件本身**解析，与 detail 读的正文同源；读不到就是 null（不知道），
+// 不编一个布尔值出来。
+
+/** 造一个宿主 summary：面板行靠 path + resourceBase 反推根与形态（见 locateSkill）。 */
+function hostSummary({ name, root, source = 'user-agents', invocation }) {
+  const directory = join(root, name)
+  return {
+    name,
+    description: '宿主缓存里的描述',
+    source,
+    provider: 'filesystem',
+    ...(invocation === undefined ? {} : { invocation }),
+    path: join(directory, 'SKILL.md'),
+    resourceBase: { path: directory },
+  }
+}
+
+/** 只提供 skills 与 filesystem provider 配置的宿主替身。 */
+function hostWith(rows, { base, agentsHome }) {
+  return {
+    get: (name) => (name === 'skills' ? { list: async () => rows } : undefined),
+    loader: {
+      entries: () => [{
+        options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome: join(base, 'dsh-home'), agentsHome } },
+      }],
+    },
+  }
+}
+
+test('list reports the invocation that is on disk, not the one the host cache still holds', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-cache-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  await writeFile(join(root, 'zhanggui', 'SKILL.md'),
+    '---\nname: zhanggui\ndescription: 磁盘上这份是禁止模型调用的\ndisable-model-invocation: true\n---\n\n正文\n')
+  try {
+    // 宿主缓存说「模型可调用」——磁盘说不是。磁盘赢。
+    const ctx = hostWith([hostSummary({ name: 'zhanggui', root, invocation: { modelInvocable: true, userInvocable: true } })], { base, agentsHome })
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
+    assert.equal(result.skills.length, 1)
+    assert.equal(result.skills[0].modelInvocable, false, '面板必须显示文件里写的那个值')
+    assert.equal(result.skills[0].userInvocable, true)
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('list reports the real invocation of a disabled skill instead of claiming it cannot be called', async () => {
+  // 已停用的技能在宿主目录里根本不存在（改名成 .disabled），所以它**只有**我们能读到的这份文件。
+  // 之前这些行完全没有 invocation 字段，客户端于是把它渲染成「模型不可调用 / 用户不可调用」——
+  // 一个凭空的断言。停用与调用权限是两件事：停用的技能照样可以声明自己允许被调用。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-disabled-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'paused'), { recursive: true })
+  await writeFile(join(root, 'paused', 'SKILL.md.disabled'),
+    '---\nname: paused\ndescription: 停用但只是不给用户手动调用\nuser-invocable: false\n---\n\n正文\n')
+  try {
+    const ctx = hostWith([], { base, agentsHome })
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
+    assert.deepEqual(result.skills, [])
+    assert.deepEqual(result.disabled.map((row) => row.name), ['paused'])
+    const [row] = result.disabled
+    assert.equal(row.modelInvocable, true, '文件没禁止模型调用，就不许说它不可调用')
+    assert.equal(row.userInvocable, false)
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('a row whose file cannot be read reports an unknown invocation, not a made-up one', async () => {
+  // 宿主的发现缓存可能指向一个已经被删掉/搬走的技能（缓存又比磁盘旧）。此时「能不能被模型调用」
+  // 没有答案：面板必须收到 null 并显示「未知」，而不是替它编一个 false。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-gone-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(root, { recursive: true })
+  try {
+    const ctx = hostWith([hostSummary({ name: 'ghost', root, invocation: { modelInvocable: true, userInvocable: true } })], { base, agentsHome })
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
+    assert.equal(result.skills.length, 1, '宿主的陈旧行照样列出来（它由另一条用例管去重）')
+    assert.equal(result.skills[0].modelInvocable, null, '读不到文件就必须说「不知道」')
+    assert.equal(result.skills[0].userInvocable, null)
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('detail reports the invocation parsed from the very bytes it returns as the body', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-detail-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  await writeFile(join(root, 'zhanggui', 'SKILL.md'),
+    '---\nname: zhanggui\ndescription: 演示\ndisable-model-invocation: true\n---\n\n# 掌柜\n\n正文\n')
+  try {
+    const ctx = hostWith([], { base, agentsHome })
+    const found = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-agents', root })
+    assert.match(found.skill.content, /正文/)
+    assert.equal(found.skill.modelInvocable, false, '正文与权限必须来自同一次读')
+    assert.equal(found.skill.userInvocable, true)
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('setModelInvocable writes the referenced file and refuses a read-only root', async () => {
+  // 面板的开关走这条 RPC。落点只认引用（与 setEnabled 同一条纪律）：客户端送 root，服务端拿
+  // 自己算出来的目标核对；bundled 根一律拒。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-rpc-'))
+  const agentsHome = join(base, 'agents-home')
+  const bundled = join(base, 'bundled')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  await mkdir(join(bundled, 'builtin'), { recursive: true })
+  await writeFile(join(root, 'zhanggui', 'SKILL.md'), '---\nname: zhanggui\ndescription: 演示\n---\n\n正文\n')
+  await writeFile(join(bundled, 'builtin', 'SKILL.md'), '---\nname: builtin\ndescription: 内置\n---\n\n正文\n')
+  const loaderEntries = () => [{
+    options: {
+      name: '@deepseek-ai/dsh-skill-filesystem',
+      config: { dshHome: join(base, 'dsh-home'), agentsHome, bundledSkillDir: bundled },
+    },
+  }]
+  const ctx = { get: () => undefined, loader: { entries: loaderEntries } }
+  try {
+    const result = await SkillsManagerGateway.prototype.setModelInvocable.call({ ctx }, {
+      name: 'zhanggui',
+      source: 'user-agents',
+      root,
+      modelInvocable: false,
+    })
+    assert.equal(result.changed, true)
+    assert.equal(result.modelInvocable, false)
+    const text = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
+    assert.equal(diagnoseSkill(text).invocation.modelInvocable, false, '写盘结果必须被宿主读成「不可调用」')
+
+    const before = await readFile(join(bundled, 'builtin', 'SKILL.md'), 'utf8')
+    await assert.rejects(
+      () => SkillsManagerGateway.prototype.setModelInvocable.call({ ctx }, {
+        name: 'builtin',
+        source: 'bundled',
+        root: bundled,
+        modelInvocable: false,
+      }),
+      /只读/,
+    )
+    assert.equal(await readFile(join(bundled, 'builtin', 'SKILL.md'), 'utf8'), before, '内置根不得被写入')
   } finally {
     await rm(base, { recursive: true, force: true })
   }

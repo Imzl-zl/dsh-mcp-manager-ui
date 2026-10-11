@@ -19,7 +19,7 @@ const clientSource = await readFile(new URL('../lib/client.js', import.meta.url)
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__skills = { SCOPE_LABELS, projectLabelOf, skillScopeLabel, skillGroups, skillGroupRank, skillTwinCounts, skillScopeOptions, skillRows, shadowedSkills, skillDiagnostics, skillDetailRequest, SkillsPanel, SkillRow, SkillGroupHeader, SkillDetail, SkillDetailPane, SkillInstallModal, McpTab, McpOverlay, panelVisibility };`,
+  `${exportMarker}\nexports.__skills = { SCOPE_LABELS, projectLabelOf, skillScopeLabel, skillGroups, skillGroupRank, skillTwinCounts, skillScopeOptions, skillRows, shadowedSkills, skillDiagnostics, skillDetailRequest, SkillsPanel, SkillRow, SkillGroupHeader, SkillDetail, SkillDetailPane, SkillInstallModal, McpTab, McpOverlay, panelVisibility, Toggle };`,
 )
 
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
@@ -208,7 +208,7 @@ const skill = (over = {}) => ({
  * 见 lib/typert.js 的说明与 test/client-admission.test.mjs。
  */
 const SKILLS_METHODS = new Set([
-  'list', 'detail', 'setEnabled', 'removeSkill', 'importSkill',
+  'list', 'detail', 'setEnabled', 'setModelInvocable', 'removeSkill', 'importSkill',
   'skillTargets', 'skillHubSearch', 'skillHubDetail', 'skillHubCategories', 'skillHubInstall',
   'conflictingManager',
 ])
@@ -543,6 +543,77 @@ test('「删除技能」走的是 removeSkill，不是启停开关', async () =>
   assert.equal(payload.source, 'user-agents')
   assert.equal(payload.root, '/root')
   assert.equal(payload.projectPath, undefined)
+  assert.equal('writable' in payload, false, 'wire 上不再有 writable：可写与否由服务端判定')
+})
+
+// ── 「模型自动调用」开关（issue #5）────────────────────────────────────────
+//
+// 用户要的是「快速修改 skill 的 disable-model-invocation」：不必去翻 SKILL.md。面板本来就**显示**
+// 这个状态（列表徽章 + 详情属性行），缺的是**写**。两条必须成立：开关接到 RPC 上，且它显示的
+// 状态与文件一致（行的权限由宿主从磁盘解析，见 lib/skills-registry.js 的 invocationOf）。
+
+test('the model-invocation switch flips both ways and is disabled when it cannot know', () => {
+  const internals = loadClientInternals()
+  const requests = []
+  const row = {
+    name: 'zhanggui', description: '演示', source: 'user-agents', scope: 'global', root: '/root',
+    modelInvocable: true, userInvocable: true,
+  }
+  const detail = (over) => internals.__expand(internals.SkillDetail({
+    row: { ...row, ...over },
+    shadowedBy: null,
+    body: { status: 'ok', text: '正文' },
+    busy: false,
+    onRetry() {}, onToggle() {}, onRemove() {},
+    onModelInvocable: (target, next) => requests.push([target.name, next]),
+  }))
+  const switchOf = (tree) => findNode(tree, (node) => node.props?.role === 'switch')
+
+  const on = switchOf(detail({}))
+  assert.ok(on, '详情页必须给出这个开关——它就是「不必手工改 SKILL.md」的全部价值')
+  assert.equal(on.props['aria-checked'], true, '模型可调用时开关是开的')
+  assert.equal(on.props.disabled, false)
+  on.props.onClick({ stopPropagation() {} })
+  assert.deepEqual(requests, [['zhanggui', false]], '点一下应请求「禁止模型自动调用」')
+
+  requests.length = 0
+  const off = switchOf(detail({ modelInvocable: false }))
+  assert.equal(off.props['aria-checked'], false)
+  off.props.onClick({ stopPropagation() {} })
+  assert.deepEqual(requests, [['zhanggui', true]], '再点一下应请求「允许」——两个方向都要有')
+
+  // 内置技能只读：服务端也会拒，但界面不该给出一个做不到的动作。
+  assert.equal(switchOf(detail({ writable: false })).props.disabled, true, '内置只读')
+  // frontmatter 读不出来（宿主会整条跳过它）：当前值未知，不能让用户在一个假状态上点。
+  const unknown = detail({ modelInvocable: null })
+  assert.equal(switchOf(unknown).props.disabled, true, '读不出权限时不可点')
+  assert.match(textOf(unknown).join(' '), /未知/, '并且要说清是「未知」，不能显示成一个确定的值')
+})
+
+test('the panel wires the model-invocation switch to setModelInvocable with the row reference', async () => {
+  const internals = loadClientInternals()
+  const calls = []
+  const row = { name: 'zhanggui', description: 'x', source: 'user-agents', scope: 'global', root: '/root', kind: 'bundle', enabled: true }
+  const tree = internals.__render(internals.SkillsPanel, {
+    call: async (method, payload) => {
+      calls.push({ method, payload })
+      return method === 'list' ? { ok: true, skills: [row], disabled: [] } : { ok: true }
+    },
+    workspaces: [], mode: 'manage', scopeFilter: 'all', onScopeFilter() {}, sortKey: 'default', onSort() {},
+  })
+  const pane = findNode(tree, (node) => node.type === internals.SkillDetailPane)
+  assert.ok(pane, '管理模式要画出右栏详情面板')
+  assert.equal(typeof pane.props.onModelInvocable, 'function', '权限开关必须接到一个动作上')
+  assert.notEqual(pane.props.onModelInvocable, pane.props.onToggle, '调用权限与启停是两个不同的动作')
+
+  await pane.props.onModelInvocable(row, false)
+  const writes = calls.filter((entry) => entry.method === 'setModelInvocable')
+  assert.equal(writes.length, 1, '开关必须调用 setModelInvocable')
+  const payload = writes[0].payload
+  assert.equal(payload.name, 'zhanggui')
+  assert.equal(payload.source, 'user-agents')
+  assert.equal(payload.root, '/root')
+  assert.equal(payload.modelInvocable, false)
   assert.equal('writable' in payload, false, 'wire 上不再有 writable：可写与否由服务端判定')
 })
 

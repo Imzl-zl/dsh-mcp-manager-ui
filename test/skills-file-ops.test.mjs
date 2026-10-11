@@ -17,13 +17,15 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import {
   importSkill,
+  readSkillDocument,
   scanDisabledSkills,
+  setSkillModelInvocable,
   SkillNotFoundError,
-  readSkillFile,
   removeSkill,
   resolveSkillTarget,
   setSkillEnabled,
 } from '../lib/skills-file-ops.js'
+import { diagnoseSkill } from '../lib/skills-frontmatter.js'
 import { MAX_ARCHIVE_BYTES } from '../lib/skills-archive.js'
 import { makeTar, makeZip } from '../scripts/archive-fixtures.mjs'
 
@@ -177,12 +179,32 @@ test('scans disabled skills that the host catalog cannot see', async () => {
   }
 })
 
-test('reads a skill body so the panel can show it without the host', async () => {
+test('reads a skill body and its on-disk invocation in the same read', async () => {
+  // 正文与调用权限**必须同源**：分两次读会读到两个不同的版本（改动正好落在两次读之间），
+  // 面板于是显示一份正文、配一个不属于它的权限。所以读技能只有这一个入口。
   const root = await makeRoot()
   try {
     const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    const text = await readSkillFile(target)
-    assert.match(text, /body/)
+    const document = await readSkillDocument(target)
+    assert.match(document.text, /body/)
+    assert.deepEqual(document.invocation, { modelInvocable: true, userInvocable: true },
+      '没写这两个字段时就是宿主默认值（都能调用）')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('reports an unknown invocation instead of inventing one when the frontmatter is unreadable', async () => {
+  // 非法 frontmatter 的技能会被宿主整条跳过，此刻「能不能被模型调用」**没有答案**。
+  // 编一个 true/false 出来就是让面板撒谎（已停用技能此前正是这么显示的）。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-skills-broken-'))
+  await writeFile(join(root, 'broken.md'), '---\nname: [unclosed\ndescription: y\n---\n\n正文\n')
+  try {
+    const target = await resolveSkillTarget({ name: 'broken', scope: 'global', root })
+    const document = await readSkillDocument(target)
+    assert.equal(document.invocation, null)
+    assert.match(document.text, /正文/, '正文还是要给出去：面板要能让用户看到那份坏在哪')
+    assert.equal(diagnoseSkill(document.text).ok, false, '前提：这份 frontmatter 确实是坏的')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -267,7 +289,7 @@ test('imports a single .md file as a flat skill named by its frontmatter', async
     // 本层自己的定位必须能立刻找到它——否则导入完面板就点不动了。
     const target = await resolveSkillTarget({ name: 'flat-import', scope: 'global', root })
     assert.equal(target.kind, 'flat')
-    assert.match(await readSkillFile(target), /扁平导入/)
+    assert.match((await readSkillDocument(target)).text, /扁平导入/)
   } finally {
     await rm(root, { recursive: true, force: true })
     await rm(sourceParent, { recursive: true, force: true })
@@ -686,6 +708,96 @@ test('refuses a bundle whose root is itself a link/junction', async () => {
     assert.equal(existsSync(root) && (await readdir(root)).length > 0, false, '根里不得留下任何东西')
   } finally {
     await rm(parent, { recursive: true, force: true })
+  }
+})
+
+// ── 「模型自动调用」开关：把 frontmatter 里那一行改掉 ────────────────────────
+//
+// 为什么归这一层：它真的动用户的技能文件，所以要跟启停/删除/导入同一套纪律——同一个锁键
+// （root + name）、同样的只读根拒绝、同样的原子提交。改写本身的规则（哪一行、能不能改）
+// 归 lib/skills-frontmatter.js，本层只负责「找到哪个文件、怎么安全地写回去」。
+
+test('writes the model-invocation switch into the file the caller pointed at', async () => {
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const result = await setSkillModelInvocable(target, false)
+    assert.equal(result.changed, true)
+    assert.equal(result.modelInvocable, false)
+
+    const file = join(root, 'zhanggui', 'SKILL.md')
+    const text = await readFile(file, 'utf8')
+    // 语义用宿主规则的那份解析确认，而不是比对字符串常量。
+    assert.equal(diagnoseSkill(text).invocation.modelInvocable, false, '宿主必须读到「模型不可调用」')
+    // 只动 frontmatter：既有字段与正文逐字还在。
+    assert.match(text, /name: zhanggui/)
+    assert.match(text, /body/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the switch is idempotent and leaves no temporary file behind', async () => {
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    assert.equal((await setSkillModelInvocable(target, false)).changed, true)
+    assert.equal((await setSkillModelInvocable(target, false)).changed, false, '已经是目标态就该是 no-op')
+    assert.deepEqual(await readdir(join(root, 'zhanggui')), ['SKILL.md'], '原子写不得留下临时文件')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('concurrent identical switches write once, because read-modify-write is serialized', async () => {
+  // 与启停/删除/导入共用同一把锁键（root + name）：并发的两个请求里，后到的那个必须看到
+  // 先到者的结果（否则两次都会声称「我改了」——那就是读-改-写没有串行起来）。
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const results = await Promise.all([
+      setSkillModelInvocable(target, false),
+      setSkillModelInvocable(target, false),
+    ])
+    assert.equal(results.filter((row) => row.changed).length, 1, '只应有一次真的写盘')
+    const text = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
+    assert.equal(diagnoseSkill(text).invocation.modelInvocable, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('refuses to write the switch into a bundled root', async () => {
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const before = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
+    await assert.rejects(
+      () => setSkillModelInvocable({ ...target, writable: false }, false),
+      /只读|read-only/,
+      'bundled 根只读：部署内置的技能不可改调用权限',
+    )
+    assert.equal(await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8'), before, '拒绝后不得改动文件')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('works on a disabled skill, because it is the same file', async () => {
+  // 已停用的技能在磁盘上是 SKILL.md.disabled。权限是**文件里的字段**，与启用态无关，
+  // 所以照样可改；但绝不能顺手把技能启用回来。
+  const root = await makeRoot()
+  try {
+    await setSkillEnabled(await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root }), false)
+    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    assert.equal(disabled.disabled, true, '前提：技能确实处于停用态')
+
+    assert.equal((await setSkillModelInvocable(disabled, false)).changed, true)
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), false, '不得把技能启用回来')
+    const text = await readFile(join(root, 'zhanggui', 'SKILL.md.disabled'), 'utf8')
+    assert.equal(diagnoseSkill(text).invocation.modelInvocable, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 

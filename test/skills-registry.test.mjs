@@ -1,7 +1,8 @@
 // 宿主侧 skills 读取层：把 ctx.skills 的目录投影成面板要的形状。
 //
-// 这一层是纯函数 + 薄封装，不碰文件系统、不写盘——所以用手搓 ctx 即可测（沿用
-// workspace-host.test.mjs 的 createHostFixture 手法），不需要真宿主。
+// 这一层不写盘。**唯一的读盘**是「这一行的调用权限」——它必须来自技能文件本身（宿主的 summary
+// 是发现缓存，会滞后），所以那些字段在假路径下就是 null（不知道，见本文件最后一条用例）；
+// 其余投影仍是纯函数，用手搓 ctx 即可测（沿用 workspace-host.test.mjs 的 createHostFixture 手法）。
 //
 // 关键设计约束（见 .tasks/toolbox-ui/SPEC.md 约束 12/13）：
 //   - 不传 cwd 时宿主只给用户级/自定义/bundled 技能；项目技能必须显式传 cwd。
@@ -169,13 +170,17 @@ test('omits the root when the path shape matches neither known host locator', as
   assert.equal(row.kind, undefined, '形态不认识时也不得填 kind')
 })
 
-test('exposes the invocation policy so the panel can tell model-only from user-only', async () => {
+test('the invocation policy comes from the skill file, so a host summary alone cannot decide it', async () => {
+  // 面板要能区分「模型可调用 / 仅用户可调用」，但**真值不在宿主 summary 里**：那是发现缓存
+  // （同一个文件改写后它继续报旧值，见 test/skills-host.test.mjs 的两条用例）。这里刻意给一个
+  // 声称「模型不可调用」的 summary，而磁盘上并不存在这个文件（/home/u 是假路径）——行必须说
+  // 「不知道」，而不是照抄 summary 的说法。正值方向（真的从文件里读出策略）由宿主用例钉住。
   const skills = fakeSkills({
     '': [skill({ invocation: { modelInvocable: false, userInvocable: true } })],
   })
   const [row] = await listSkillViews(ctxWith(skills), {})
-  assert.equal(row.modelInvocable, false)
-  assert.equal(row.userInvocable, true)
+  assert.equal(row.modelInvocable, null, 'summary 不是真值来源：读不到文件就说不知道')
+  assert.equal(row.userInvocable, null)
 })
 
 test('degrades to an empty list when no skills service is mounted', async () => {

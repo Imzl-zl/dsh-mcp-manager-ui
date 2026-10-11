@@ -18,7 +18,7 @@
 //   :879-883 optionalMetadata  metadata 必须是普通对象，否则静默丢弃
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { diagnoseSkill, parseSkillFrontmatter } from '../lib/skills-frontmatter.js'
+import { diagnoseSkill, parseSkillFrontmatter, setFrontmatterBoolean } from '../lib/skills-frontmatter.js'
 
 /** 拼一份技能原文。 */
 function skill(frontmatter, body = '\n正文\n') {
@@ -202,4 +202,127 @@ test('orders issues so the first one explains why the host skipped the skill', (
   assert.equal(result.ok, false)
   assert.equal(result.issues[0].code, 'description-missing', '按宿主校验顺序：name/description 先于名字语法')
   assert.equal(result.issues[0].level, 'error')
+})
+
+// ── 改写一个顶层布尔字段：面板的「模型自动调用」开关 ──────────────────────────
+//
+// 为什么改写也归这一层：frontmatter 的边界规则（首行必须恰为 `---`、结束行、CRLF 容错）在这里
+// 已经是逐字照抄宿主的那一套。改写若另写一套边界判据，「解析认得的块」与「改写动的块」就会
+// 分叉——而这类分叉的后果是**静默改坏用户的技能文件**。故读写同处一室，共用同一个 parse。
+//
+// 三条不变量：
+//   1. 只动目标那一行，其余字节逐字不变（字段顺序、缩进、正文、行尾风格都不碰）；
+//   2. 「关掉」= 删掉那一行（缺省即 false），所以开 → 关 → 开 必须逐字节回到原文；
+//   3. 形状读不准就抛错——不猜、不重排、不顺手规范化。用户看到「面板做不到」比文件被改坏好。
+const KEY = 'disable-model-invocation'
+
+test('sets a frontmatter boolean in place and leaves every other line alone', () => {
+  const raw = skill(`name: toggle\ndescription: 演示\n${KEY}: false\nwhenToUse: 当用户要切换时`)
+  const { text, changed } = setFrontmatterBoolean(raw, KEY, true)
+  assert.equal(changed, true)
+  // 语义用**诊断器自己的判定**验证（宿主规则），而不是比对另一个字符串常量：
+  assert.equal(diagnoseSkill(text).invocation.modelInvocable, false, '宿主必须读到「模型不可调用」')
+  assert.equal(text, skill(`name: toggle\ndescription: 演示\n${KEY}: true\nwhenToUse: 当用户要切换时`))
+})
+
+test('turning the switch off deletes the line, so toggling twice restores the original bytes', () => {
+  // 原地删除：键夹在别的字段中间时，只删它自己那一行（后面那条 whenToUse 不得被带走）。
+  const raw = skill(`name: toggle\ndescription: 演示\n${KEY}: true\nwhenToUse: 末尾`)
+  const off = setFrontmatterBoolean(raw, KEY, false)
+  assert.equal(off.text, skill('name: toggle\ndescription: 演示\nwhenToUse: 末尾'), '关掉 = 删掉那一行')
+  assert.equal(diagnoseSkill(off.text).invocation.modelInvocable, true)
+
+  // 往返：从「没有任何调用权限字段」的文件出发，开 → 关 必须逐字节回到最初。
+  const original = skill('name: round-trip\ndescription: 演示\nwhenToUse: 末尾')
+  const on = setFrontmatterBoolean(original, KEY, true)
+  assert.equal(setFrontmatterBoolean(on.text, KEY, false).text, original, '开关不该留下任何痕迹')
+})
+
+test('appends a missing field at the end of the frontmatter block, not next to name', () => {
+  const raw = skill('name: append\ndescription: 演示\nwhenToUse: 末尾追加', '\n正文\n')
+  const { text } = setFrontmatterBoolean(raw, KEY, true)
+  assert.equal(text, skill(`name: append\ndescription: 演示\nwhenToUse: 末尾追加\n${KEY}: true`, '\n正文\n'))
+  assert.equal(diagnoseSkill(text).body, '正文', '正文不得被碰到')
+})
+
+test('keeps CRLF files CRLF', () => {
+  const raw = '---\r\nname: crlf\r\ndescription: 演示\r\n---\r\n\r\n正文\r\n'
+  const { text } = setFrontmatterBoolean(raw, KEY, true)
+  assert.equal(text, `---\r\nname: crlf\r\ndescription: 演示\r\n${KEY}: true\r\n---\r\n\r\n正文\r\n`)
+  assert.equal(/[^\r]\n/.test(text), false, '不得混进裸 LF：整份文件的行尾风格必须一致')
+})
+
+test('reports changed:false and returns the text untouched when it already says what we want', () => {
+  const on = skill(`name: x\ndescription: y\n${KEY}: true`)
+  assert.deepEqual(setFrontmatterBoolean(on, KEY, true), { text: on, changed: false })
+  const off = skill('name: x\ndescription: y')
+  assert.deepEqual(setFrontmatterBoolean(off, KEY, false), { text: off, changed: false })
+})
+
+test('only touches the top-level field, not a same-named key nested under metadata', () => {
+  // 宿主只读顶层（frontmatterBoolean(data, key)），所以嵌在 metadata 里的同名键与调用权限无关。
+  const raw = skill(`name: nested\ndescription: y\nmetadata:\n  ${KEY}: true`)
+  const { text, changed } = setFrontmatterBoolean(raw, KEY, true)
+  assert.equal(changed, true, '顶层没有这个键，所以要写一条顶层的')
+  assert.match(text, new RegExp(`metadata:\\n  ${KEY}: true`), '缩进里的那个键不得被动到')
+  assert.equal(diagnoseSkill(text).invocation.modelInvocable, false)
+  assert.equal(diagnoseSkill(raw).invocation.modelInvocable, true, '前提：嵌套的那个键对宿主无效')
+})
+
+test('refuses a value that spans lines, because touching it would leave orphan lines behind', () => {
+  // 这两形状 YAML 都合法、宿主也都读成 true。但「删掉首行 → 留下缩进的孤儿行」会让整份
+  // frontmatter 报废，所以关掉开关这条路上必须拒绝，而不是猜一个改法。
+  const shapes = [
+    ['值跨了两行', `${KEY}:\n  true`],
+    ['值是块标量', `${KEY}: >-\n  true`],
+  ]
+  for (const [label, lines] of shapes) {
+    assert.throws(
+      () => setFrontmatterBoolean(skill(`name: x\ndescription: y\n${lines}`), KEY, false),
+      new RegExp(KEY),
+      `${label} 必须被拒绝`,
+    )
+  }
+})
+
+test('refuses to rewrite a value it would have to guess at', () => {
+  // 值不是布尔：宿主本来就会跳过整条技能，写什么都不算「改好了」。
+  assert.throws(
+    () => setFrontmatterBoolean(skill(`name: x\ndescription: y\n${KEY}: maybe`), KEY, true),
+    new RegExp(KEY),
+  )
+  // 要打开、而这一行带行尾注释：替换掉值之后那句注释归谁无从判断，所以不动手。
+  assert.throws(
+    () => setFrontmatterBoolean(skill(`name: x\ndescription: y\n${KEY}: false # 作者的解释`), KEY, true),
+    new RegExp(KEY),
+  )
+})
+
+test('deleting the line takes its trailing comment with it, because that comment annotates that field', () => {
+  // 与上一条刻意不对称：删除时边界是确定的（整行），没有可猜的地方——注释就是这一行的注解，
+  // 字段没了它也就没了，不会留下半行。
+  const raw = skill(`name: x\ndescription: y\n${KEY}: true # 作者的解释`)
+  const { text, changed } = setFrontmatterBoolean(raw, KEY, false)
+  assert.equal(changed, true)
+  assert.equal(text, skill('name: x\ndescription: y'))
+  assert.equal(diagnoseSkill(text).ok, true, '删完必须还是一份合法技能')
+})
+
+test('refuses to rewrite frontmatter it cannot parse', () => {
+  // 没有 frontmatter、或 YAML 本身读不动（重复键等）时，连「哪一行是哪个字段」都无从确认。
+  assert.throws(() => setFrontmatterBoolean('# 没有 frontmatter\n正文\n', KEY, true), /frontmatter/)
+  assert.throws(
+    () => setFrontmatterBoolean(skill(`name: dup\ndescription: y\n${KEY}: true\n${KEY}: false`), KEY, true),
+    /frontmatter|unique|Map keys/i,
+  )
+})
+
+test('refuses when the legacy camelCase key is present, because the host skips that whole skill', () => {
+  // 驼峰式 disableModelInvocation 让宿主**整条跳过**（:850-861）。此时写一个规范键毫无意义：
+  // 文件里会同时存在两个键，宿主照样跳过——面板不能给一个「我改好了」的假象。
+  assert.throws(
+    () => setFrontmatterBoolean(skill('name: legacy\ndescription: y\ndisableModelInvocation: true'), KEY, false),
+    /disableModelInvocation/,
+    '拒绝时必须点名那个驼峰键，否则用户不知道该改哪一行',
+  )
 })

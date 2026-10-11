@@ -43,6 +43,7 @@ An **MCP management panel and skills manager** for DeepSeek Harness Web: click t
 - **Two entry points, one panel**: the draggable floating button (position remembered) and the official sidebar entry share the same state; the "Entry" control in the panel header can keep just one of them (never neither)
 - **MCP market**: 47 services across 10 categories (search, dev, security & reverse engineering, data, AI & knowledge, browser automation, cloud & infra, productivity, files, comms), each verified against first-party sources. Search-first, with category and "keyless only" filters, sorting, and one-click install from the card; every entry states its free tier honestly and what you must supply (key / connection details / arguments to edit after install). Already-configured entries are detected and skipped, never overwritten
 - Import MCP configuration from other clients installed on this machine: Claude Code, Codex (`config.toml`), OpenCode (including `.jsonc`), pi, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI, Roo Code, and the cross-tool shared config are detected and listed, and one click imports from any of them; you can also paste `mcpServers` JSON from Claude, Cursor, Cline, or Roo, or `servers` JSON from VS Code. Everything is previewed before writing, with "merge" and "replace" modes
+- **Skills pane** (the toolbox's second ability): see every installed skill's **real scope** and cross-scope shadowing, enable/disable (`.disabled`), remove, read the body and diagnostics, and **flip "model auto-invocation" with one switch** — it edits `disable-model-invocation` in `SKILL.md` in place, touching only that one line, and the state always comes from the file itself (unreadable frontmatter reads as "unknown", never a guess); the market is backed by skillhub.cn with an honest disclosure and an explicit acknowledgement before install. See [Skills](docs/skills.md)
 - **Moving servers between workspaces**: copy this project's MCP servers into another registered workspace in one go (done inside the Host, so credentials never pass through the browser), or export the whole project configuration as JSON to download / copy (same shape as `.dsh/mcp.json`, ready to drop into another workspace). See [Moving servers between workspaces](#moving-servers-between-workspaces)
 - Follows the DSH dark/light theme and adapts to narrow/mobile widths
 - Update notice and **one-click upgrade**: a dismissible banner when a newer release exists (at most one check per day; disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`). Nothing happens until you press Upgrade — it **never auto-updates**. The upgrade runs through DSH's official pluginManager and tells you to restart the host when done. A local dev copy installed via `link:` / `file:` / `github:` gets no button (upgrading it would replace your link with an npm package)
@@ -52,10 +53,10 @@ An **MCP management panel and skills manager** for DeepSeek Harness Web: click t
 
 ```sh
 # Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.1
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.2
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.1
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.2
 ```
 
 Then **restart `dsh web`**. To upgrade:

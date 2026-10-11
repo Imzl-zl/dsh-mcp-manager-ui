@@ -40,6 +40,7 @@ DeepSeek Harness Web 的 **MCP 管理面板 + 技能管理面板**：右下角�
 - **全局 + 项目双作用域**：全局写 Web profile，一次注册所有项目可用；项目写该项目 `.dsh/mcp.json`，只该项目会话可见；项目里还能「屏蔽」某个全局 MCP
 - **两个入口，同一个面板**：右下角悬浮按钮（可拖拽、记忆位置）与官方侧栏入口（展开态在「设置」上方显示「MCP」，收起成 56px 轨道时只剩图标）共享同一开关状态；面板右上角「入口」可以把两者只留一个（不能都关）
 - **MCP 市场**：47 个逐条一手核实过的服务，分 10 类（搜索、开发工具、安全与逆向、数据库与数据、AI 与知识、浏览器自动化、云与基础设施、效率协作、文件与本地、通讯）。搜索为主操作，配分类与「只要免密钥」筛选、排序、卡片直接安装；每条如实标注免费额度与需要准备什么（密钥 / 连接信息 / 装完还得改的参数）。已配置的只识别并跳过，不覆盖
+- **技能面**（工具箱的第二个能力面）：看本机全部技能的**真实作用域**与同名遮蔽、启停（`.disabled`）、删除、读正文与诊断，并**一键切换「模型自动调用」**——直接改 `SKILL.md` 的 `disable-model-invocation`，只动那一行、不改写你的文件，状态一律取自文件本身（读不出来就说「未知」）；市场接 skillhub.cn，安装前如实披露 + 一次显式确认。详见[技能管理](docs/skills.md)
 - 导入本机其他客户端的 MCP 配置：自动检测 Claude Code、Codex（`config.toml`）、OpenCode（含 `.jsonc`）、pi、Claude Desktop、Cursor、Windsurf、VS Code、Gemini CLI、Roo Code 与跨工具的共享配置，逐个列出，点一条即导入；也能粘贴 Claude/Cursor/Cline/Roo 的 `mcpServers` 或 VS Code 的 `servers` JSON。写入前预览，支持「合并（同名更新）」与「替换」
 - **跨工作区搬运**：在项目标签页里把本项目的 MCP 一次勾选复制到另一个已注册的工作区（在宿主内完成，凭据不经过浏览器），或把整个项目配置导出成 JSON 下载 / 复制（与 `.dsh/mcp.json` 同格式，可直接放进另一个工作区）。详见[工作区之间复制与导出](#工作区之间复制与导出)
 - 跟随 DSH 深色/浅色主题，适配窄屏与移动宽度
@@ -50,10 +51,10 @@ DeepSeek Harness Web 的 **MCP 管理面板 + 技能管理面板**：右下角�
 
 ```sh
 # 推荐：npm 安装 —— 之后 `dsh plugin update` 会在 ^1.x 内自动升到最新小版本
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.1
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.2
 
 # 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.1
+dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.2
 ```
 
 装完**重启 `dsh web`**。升级：
