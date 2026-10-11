@@ -43,7 +43,7 @@ function makeInactiveEffect() {
 // deferTools 默认 true = 生产时序：真实 mcp-client 的 apply 在 cordis 的微任务里才跑，工具要等
 // connect + tools/list 才注册，所以 setup 当场看到的一定是空集，投射完全依赖后续 tools/change。
 // 需要「工具已就绪」的用例显式调用 await fixture.connectAll()。
-async function createRuntimeFixture({ deferTools = true, extraServers = {}, idleTimeoutMs, readyTimeoutMs, pendingFiber = false } = {}) {
+async function createRuntimeFixture({ deferTools = true, extraServers = {}, idleTimeoutMs, readyTimeoutMs, pendingFiber = false, fiberErrors = {} } = {}) {
   const wsRoot = await mkdtemp(join(tmpdir(), 'dsh-mcp-rt-'))
   await mkdir(join(wsRoot, '.dsh'), { recursive: true })
   await writeFile(join(wsRoot, '.dsh', 'mcp.json'), JSON.stringify({
@@ -142,6 +142,15 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {}, idle
           connectionCount += 1                       // 每 (ws,server) 只应 +1
           publishTargets.set(scopeKey, config.serverName)
           if (!deferTools) publish(scopeKey, config.serverName)
+          // fiberErrors：模拟"官方 apply 自己拒绝"（serverName 已被占用、配置被宿主拒绝）。
+          // 这条路径上真实错误就是唯一线索，所以替身必须真的拒绝，而不是给个假的成功 fiber。
+          const failure = fiberErrors[config.serverName]
+          if (failure !== undefined) {
+            const rejected = Promise.reject(new Error(failure))
+            rejected.catch(() => {})                 // 真实 catch：没人 await 时也不产生 unhandledRejection
+            rejected.state = 3
+            return rejected
+          }
           // pendingFiber：模拟"连接还没就绪"（真实 mcp-client 的 apply 要等 connect + tools/list 结束）。
           // 永不 settle 的 thenable 因此能把"等就绪"这件事变成可测的时序，而不是靠注入定时器。
           const fiber = pendingFiber ? new Promise(() => {}) : Promise.resolve()
@@ -149,6 +158,9 @@ async function createRuntimeFixture({ deferTools = true, extraServers = {}, idle
           fiber.state = pendingFiber ? 0 : 2
           return fiber
         },
+        // 与 cordis 的 Context.extend 一致：子 ctx 原型继承父 ctx，meta 作为自有属性遮蔽继承值。
+        // 插件给连接 ctx 挂一个独有 root 就是走这里（见 createSharedConnection 的判重键说明）。
+        extend(meta = {}) { return Object.assign(Object.create(this), meta) },
       }
       const scope = {
         key: scopeKey, ctx: scopedCtx, disposed: false,
@@ -400,6 +412,34 @@ test('mount failures are recorded for observability instead of silently dropped'
   }
 })
 
+test('a serverName taken in the registration scope is reported with the official reason, the owner and the root cause', async () => {
+  const rt = await import('../lib/workspace-runtime.js')
+  // 官方 apply 拒绝时抛的就是这句（serverName 已被同一注册作用域里的另一个实例占用）。
+  const conflict = 'mcp-client: serverName "exa" is already in use by another mcp-client instance — pick a unique serverName in cordis.yml'
+  const fixture = await createRuntimeFixture({ extraServers: { exa: { command: 'exa-mcp' } }, fiberErrors: { exa: conflict } })
+  try {
+    rt.installAgentRuntime(fixture.ctx)
+    const session = makeSession(fixture, 'mount-conflict-1')
+    const created = await fixture.agentsService.create({ setup: undefined })
+    await created.setup(session.ctx, session.sessionAgent)
+
+    const failures = rt.workspaceMountErrorsView(fixture.wsRoot)
+    const entry = failures.find((failure) => failure.serverName === 'exa')
+    assert.ok(entry, `占用必须记账：${JSON.stringify(failures)}`)
+    // 官方原文是唯一事实来源：我们的措辞（"共享连接启动失败（fiber 3）"）会把线索丢掉。
+    assert.match(entry.error, /is already in use/)
+    assert.doesNotMatch(entry.error, /共享连接启动失败（fiber/)
+    // 「和谁同名」：夹具里 exa 是全局 loader 条目，owner 因此报得出来。
+    assert.match(entry.error, /同名条目：全局 MCP/)
+    // 「为什么只有这个宿主会占用」：这条不变量本该由结构保证（见 createSharedConnection）。
+    assert.match(entry.error, /@deepseek-ai\/dsh-scope 是否被解析成了多份实例/)
+    // 同一轮里没被占用的 server 照常挂载，不许被记成失败。
+    assert.equal(failures.some((failure) => failure.serverName === 'db'), false, JSON.stringify(failures))
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 test('workspace MCPs resolve through the host loader rather than the plugin own path', async () => {
   // 插件自己 import 时，Node 以插件真实路径为基点解析，在 link / pnpm 安装下找不到
   // dsh 自带的 mcp-client（全局 MCP 走 loader 所以一直正常，只有项目 MCP 会挂）。
@@ -409,7 +449,12 @@ test('workspace MCPs resolve through the host loader rather than the plugin own 
     const resolved = []
     const scopeMod = {
       createScope(_ctx, scopeKey) {
-        const scopedCtx = { plugin: (plugin, config) => { fixture.mounts.push([plugin, config]); const f = Promise.resolve(); f.catch = () => f; return f } }
+        const scopedCtx = {
+          plugin: (plugin, config) => { fixture.mounts.push([plugin, config]); const f = Promise.resolve(); f.catch = () => f; return f },
+          // ctx.extend 是 cordis context 契约的一部分（插件给连接 ctx 挂独有 root 就走它），
+          // 替身少了它会让"挂载真的发生"这条断言假失败——那是替身失真，不是插件的问题。
+          extend(meta = {}) { return Object.assign(Object.create(this), meta) },
+        }
         return { ctx: scopedCtx, dispose() {} }
       },
     }
@@ -1499,7 +1544,7 @@ test('scope failures are recorded and surfaced instead of reading as “connecte
     await created.setup(session.ctx, session.sessionAgent)
 
     const status = rt.workspaceConnectionStatus(fixture.ctx, fixture.wsRoot, { name: 'db' })
-    assert.match(status.scopeError, /两份模块实例/, '作用域故障必须带出可判定的原因')
+    assert.match(status.scopeError, /有多份模块实例/, '作用域故障必须带出可判定的原因')
 
     // 面板行：必须标成作用域故障，而不是「0 工具 → 连接失败」——否则用户会去查 MCP 配置。
     // （真实宿主上 schemas(scopeKey) 认不出标签时会退回全局层，因此工具数是「读到」的而不是 0，

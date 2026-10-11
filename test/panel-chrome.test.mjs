@@ -236,6 +236,71 @@ test('技能服务不可用时给出降级通知，且 MCP 面照常渲染', asy
   assert.equal(ofType(tree, internals.ServerDetailPane).length, 1, 'MCP 面的详情要挂上')
 })
 
+// 与 client-behavior 那条同名用例的分工：那条钉 `firstFailureReason` 这个纯函数本身，这条钉**接线**
+// ——横幅真的把原因画出来（假 React 不展开子组件，所以只能读 Notice 的 props）。少了这一条，
+// 「改了 helper 却忘了接到两处横幅上」会一路全绿。
+const renderWorkspaceTab = async (internals, view, wsPath = '/tmp/ws-a') => {
+  const callMcp = async (method) => {
+    if (method === 'getWorkspaceView') return { ok: true, servers: [], global: [], exclude: [], revision: 'r1', ...view }
+    if (method === 'listWorkspaces') return { ok: true, workspaces: [{ path: wsPath, name: 'ws-a', serverCount: 0 }] }
+    return { ok: true, servers: [], revealRevision: '' }
+  }
+  const props = { call: callMcp, callSkills: async () => ({ ok: true, skills: [] }), timer: internals.timer, pluginManager: null, floating: true, onClose() {} }
+  internals.__render(internals.McpTab, props)
+  await internals.__settle()
+  // 两条横幅都只在**项目**作用域渲染，而作用域是面板内部状态：像用户那样点一下作用域药丸，
+  // 否则断言会在全局作用域上静默空过（找不到横幅这件事必须先被排除）。
+  const tree = internals.__render(internals.McpTab, props)
+  const tabs = collectAll(tree, (node) => Array.isArray(node?.props?.tabs) && node.props.tabs.some((tab) => tab.key === wsPath))[0]
+  assert.ok(tabs, '找不到作用域药丸，无法切到项目作用域')
+  tabs.props.onSelect(wsPath)
+  internals.__render(internals.McpTab, props)
+  await internals.__settle()
+  return internals.__render(internals.McpTab, props)
+}
+
+test('失败横幅把首条原因画出来（挂载失败与工具无法隔离共用同一句话）', async () => {
+  const internals = loadClientInternals()
+  // 原因来自 Host：官方 fiber 拒绝的原文（同名占用时还带「和谁同名」与根因）。面板只负责把它摆到
+  // 横幅上——只列 serverName 等于把真因留给用户自己逐条点开。
+  const official = 'mcp-client: serverName "exa" is already in use by another mcp-client instance'
+  const tree = await renderWorkspaceTab(internals, {
+    liveAgents: 2,
+    mountErrors: [
+      { serverName: 'exa', error: official },
+      { serverName: 'db', error: '配置里的 ${VAR} 求值为空' },
+    ],
+    scopeErrors: [{ serverName: 'solo', error: '这批工具对所有项目的会话都可见（echo）：安装里 @deepseek-ai/dsh-scope 有多份模块实例' }],
+  })
+  const noticeOf = (key) => ofType(tree, internals.Notice).find((node) => node.props.key === key)
+
+  const mount = noticeOf('mount-failed')
+  assert.ok(mount, '挂载失败必须有横幅')
+  assert.match(String(mount.props.title), /2 个项目 MCP 未能挂载到会话/)
+  assert.match(String(mount.props.children), /^exa、db。首个原因：/,
+    `横幅正文必须以「名字 + 首个原因」开头，实际 ${JSON.stringify(mount.props.children)}`)
+  assert.match(String(mount.props.children), /is already in use/, '首条原因的原文要摆出来')
+  assert.equal(String(mount.props.children).includes('${VAR}'), false, '其余各条的原因在详情里给全文')
+  assert.match(String(mount.props.children), /2 个会话在运行/, '并发会话数仍作为上下文带出')
+
+  const scope = noticeOf('scope-failed')
+  assert.ok(scope, '工具无法隔离必须有横幅')
+  // 说清**后果**：这批工具在所有项目的会话里可见——否则用户会去查这一个 server 的 MCP 配置。
+  assert.match(String(scope.props.title), /无法隔离（会出现在所有项目的会话里）/)
+  assert.match(String(scope.props.children), /^solo。首个原因：/)
+  assert.match(String(scope.props.children), /@deepseek-ai\/dsh-scope 有多份模块实例/)
+
+  // 宿主确实没给出原因时，横幅也必须说清这一点，而不是画成一句空话。
+  // （用新的面板实例：每个实例的组件身份不同，跨实例找节点会找到空集。）
+  const bare = loadClientInternals()
+  const emptyTree = await renderWorkspaceTab(bare, {
+    mountErrors: [{ serverName: 'exa', error: '   ' }],
+  })
+  const empty = ofType(emptyTree, bare.Notice).find((node) => node.props.key === 'mount-failed')
+  assert.ok(empty, '挂载失败必须有横幅')
+  assert.match(String(empty.props.children), /首个原因：（宿主没有给出原因）/)
+})
+
 test('能力层计数：技能数由面板回传（skills + disabled 之和），MCP 面不显示数字', async () => {
   const internals = loadClientInternals()
   const callSkills = async (method) => (method === 'market'
