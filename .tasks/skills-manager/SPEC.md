@@ -152,7 +152,7 @@ Retired-ids: D3, D4
 
 ## 附录 B：环境与基线
 
-- Worktree：`.worktrees/feature/skills-manager` @ `feature/skills-manager`（从 main `f21196e` 起）；`.worktrees/` 已在 `.gitignore:6`。
+- Worktree：`.worktrees/feature/toolbox-ui` @ `feature/toolbox-ui`（2026-10-11 由 `feature/skills-manager` 改名而来——包名早已是 `dsh-toolbox-ui`，旧名会让这条线看起来还只是技能管理器；从 main `f21196e` 起）；`.worktrees/` 已在 `.gitignore:6`。
 - 依赖：`pnpm install --frozen-lockfile`；测试命令 `node --test`。
 - **测试基线只增不减**：新加的不变量要补用例；改动后 `node --test` 必须 0 失败，且条数不得低于上一次记录（当次值记在 `PROGRESS.md` 的 `Latest validation`）。
 - `DSH_HOME=C:\Users\zhanglu\.dsh`；本机技能实际在 `~/.agents/skills`（rank 500），`~/.dsh/skills`（rank 400）不存在——见约束 12。
