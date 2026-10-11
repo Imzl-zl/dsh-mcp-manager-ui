@@ -33,7 +33,7 @@ test('updateHint RPC reports a newer version and points at that release page', a
     assert.equal(result.latest, '9.9.9')
     // npm 不给我们页面链接，但**提示条要指得出「更新了什么」**——两条线的 tag 都是 vX.Y.Z，
     // 所以由版本号拼本仓库的 release 页（老线的 updateHint 也是这么做的）。
-    assert.equal(result.url, 'https://github.com/Imzl-zl/dsh-mcp-manager-ui/releases/tag/v9.9.9')
+    assert.equal(result.url, 'https://github.com/Imzl-zl/dsh-toolbox-ui/releases/tag/v9.9.9')
   })
 })
 

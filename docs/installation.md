@@ -15,17 +15,17 @@
 推荐用 npm 安装：包里的 `^1.x` 范围让后续 `dsh plugin update` 能自动升级小版本。
 
 ```sh
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.2
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.3
 ```
 
 也可以固定 GitHub release tag（适合需要锁定某个具体版本时）：
 
 ```sh
 # 固定 release tag
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.2
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.3
 
 # 或固定某个 commit
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#<commit>
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#<commit>
 ```
 
 两种方式的**代码与运行行为完全相同**（包里带预构建的 `lib/`，不需要运行 `prepare`，也不需要配置 `allowBuilds`）；区别只在升级：`^1.x` 范围能被 `dsh plugin update` 自动推进，而 tag/commit 是不可变规格、`update` 只会重新解析同一个规格。
@@ -73,7 +73,7 @@ dsh plugin --profile web update dsh-toolbox-ui
 
 | 安装规格 | `update` 的效果 | 怎么跨版本 |
 |---|---|---|
-| `dsh-toolbox-ui@^1.6.2`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
+| `dsh-toolbox-ui@^1.6.3`（npm，推荐） | 在 `^1.x` 内自动升到最新小版本，不会跨到 2.0.0 | 已是自动；跨大版本显式安装 `@^2` |
 | `github:...#v1.4.0`（tag） | 重新解析同一个 tag，**不会动** | 换成新 tag 重新 `add`：`... #<新 tag>` |
 | `github:...#<commit>` | 同上，固定在 commit | 用新 commit/tag 重新 `add` |
 | `github:...#main`（分支） | 拉取最新 main | 已是自动；但不推荐生产（无 release 门槛） |
@@ -96,7 +96,8 @@ npm 与 GitHub Releases 必须**同一次发布里都更新**：用户从 npm �
    npm publish
    ```
 
-2. 在 npmjs.com 该包的 Settings → **Trusted Publisher** → GitHub Actions，填：organization/user `Imzl-zl`、repository `dsh-mcp-manager-ui`、workflow filename `release.yml`（可另填 environment）。
+2. 在 npmjs.com 该包的 Settings → **Trusted Publisher** → GitHub Actions，填：organization/user `Imzl-zl`、repository `dsh-toolbox-ui`、workflow filename `release.yml`（可另填 environment）。
+   ⚠️ 这里的 repository 是 **GitHub 仓库名**，它必须与仓库当前的 slug 一致——仓库此前叫 `dsh-mcp-manager-ui`，改名之后不同步改这一项，`npm publish` 会被拒（OIDC 凭据里带的就是仓库名）。失败是安全的：CI 那一步会红，不会建 Release。
 3. 之后可选但推荐：把包的 Publishing access 设为 **Require two-factor authentication and disallow tokens** —— trusted publishing 不受该限制影响（它用 OIDC，不是 token），而长期写凭据因此彻底用不上。
 
 ### 每次发布
@@ -112,7 +113,7 @@ dsh web    # 打开面板点一遍
 # 3) 提交并推 tag（CI 会校验 tag 与 version 一致，不一致就拒绝发布）
 git add -A && git commit -m "..."
 git push origin main
-git tag -a v1.6.2 -m "v1.4.2 ..." && git push origin v1.6.2
+git tag -a v1.6.3 -m "dsh-toolbox-ui 1.6.3" && git push origin v1.6.3
 ```
 
 推 tag 后 CI 依次做：校验版本 → `pnpm install --frozen-lockfile` → `npm test` → `npm publish`（trusted publishing，无需 token）→ `gh release create`。
@@ -131,7 +132,7 @@ git tag -a v1.6.2 -m "v1.4.2 ..." && git push origin v1.6.2
 
 ```sh
 npm publish          # 会弹 2FA 挑战；若用 bypass-2FA 的 granular token 则非交互
-gh release create v1.6.2 --title "dsh-toolbox-ui v1.6.2" --notes-file <notes>
+gh release create v1.6.3 --title "dsh-toolbox-ui v1.6.3" --notes-file <notes>
 ```
 
 `npm login` 的会话 token 只有 2 小时，超时需要重新登录；classic token 已被 npm 永久吊销，能非交互发布的只剩勾了 **Bypass 2FA** 的 granular access token——但它正在被 npm 收窄（已不能做账号/包管理类操作，且 2027-01 起将失去直接发布能力），所以长期方案是上面的 trusted publishing。

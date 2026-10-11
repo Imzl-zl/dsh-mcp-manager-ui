@@ -120,7 +120,7 @@ test('the old package name survives only where it is still factually correct', (
     { pattern: /OLD_NAME/, why: '本测试自己的旧名基准常量' },
     { pattern: /整个仓库里剩下的/, why: '本测试的说明注释' },
     // 仓库本身的三个字段：仓库仍叫旧名（D13 双包同仓），这是**事实**，改了反而错。
-    { pattern: /^(?:git\+https|https):\/\/github\.com\/Imzl-zl\/dsh-mcp-manager-ui/, why: '仓库字段（仓库仍叫旧名）' },
+    { pattern: /^(?:git\+https|https):\/\/github\.com\/Imzl-zl\/dsh-mcp-manager-ui/, why: '改名前的仓库坐标（历史链接与夹具；GitHub 对旧地址 301，删了等于假装那条线没存在过）' },
     // 曾经还有一条 `api.github.com/repos/Imzl-zl/dsh-mcp-manager-ui` 的豁免，理由是「更新检查
     // 走同一仓库」。1.6.2 起更新检查问的是**本包在 npm 上的 latest**（lib/index.js 的
     // updateLatestUrl），那条 URL 全仓已不再产生——豁免随之删掉：留一条永不命中的规则，

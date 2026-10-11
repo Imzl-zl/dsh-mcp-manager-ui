@@ -39,7 +39,7 @@ const CORDIS_LOADER_PEER = '^1.0.3'
 
 test('package exposes one Web bundle entry', () => {
   assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
-  assert.equal(packageJson.version, '1.6.2')
+  assert.equal(packageJson.version, '1.6.3')
   assert.equal(packageJson.dsh?.client?.platform, 'web')
   // dsh.client.inject 是客户端图里的「工厂先到」依赖边，只能写真实的 client 包名：
   //   @deepseek-ai/dsh-client-runtime  —— 上游 2026-08-22 已删除（be531688 "remove Runtime"）
@@ -56,7 +56,7 @@ test('package exposes one Web bundle entry', () => {
     false,
     'docs 目录或截图不得整目录随包发布',
   )
-  assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-mcp-manager-ui.git')
+  assert.equal(packageJson.repository?.url, 'git+https://github.com/Imzl-zl/dsh-toolbox-ui.git')
   assert.equal((patch.match(/id: mcp-manager-ui/g) ?? []).length, 1)
   // 挂载名必须等于包名（改名后一起变）——不写字面量，从 package.json 推导。
   assert.equal((patch.match(new RegExp('name: ' + packageJson.name, 'g')) ?? []).length, 1)
@@ -177,8 +177,8 @@ test('documentation targets the verified DSH and plugin releases', () => {
     // 版本从 package.json 推导，别硬编码：这两个断言原本写死 v1\.4\.0，于是 bump 版本时
     // 又多了两个真源（旁边 DEV_BASELINE 那条注释记的是同一类坑）。
     const escapedVersion = packageJson.version.replace(/\./g, '\\.')
-    // ⚠️ 这里是**仓库** slug（GitHub 上的名字），不是 npm 包名——改名之后两者已经不同：
-    // 包名 dsh-toolbox-ui，仓库仍是 dsh-mcp-manager-ui（D13 双包同仓，仓库不跟着改）。
+    // ⚠️ 这里是**仓库** slug（GitHub 上的名字）：1.6.3 起仓库已改名成 dsh-toolbox-ui，
+    // 与包名一致；旧包 dsh-mcp-manager-ui 那条线冻结在 1.5.5，只留在历史 tag 与 npm 上。
     // 从 repository.url 推导，避免再把两者混为一谈（首版就是这么错的，改名后必红）。
     const repoSlug = /github\.com\/([^/]+\/[^/.]+)/.exec(packageJson.repository.url)[1]
     assert.match(document, new RegExp('dsh plugin --profile web add github:' + repoSlug + '#v' + escapedVersion))

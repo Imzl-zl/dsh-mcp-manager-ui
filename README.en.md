@@ -1,203 +1,152 @@
-# dsh-toolbox-ui
-
-[中文](README.md) | English
-
 <p align="center">
-  <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+  <img src="docs/images/logo.svg" width="104" height="104" alt="dsh-toolbox-ui">
 </p>
 
+<h1 align="center">dsh-toolbox-ui</h1>
+
+<p align="center"><b>MCP management panel</b> + <b>skills manager</b> for DeepSeek Harness Web</p>
+
 <p align="center">
-  <a href="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/v/dsh-toolbox-ui" alt="npm"></a>
   <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/dm/dsh-toolbox-ui" alt="downloads"></a>
+  <a href="https://github.com/Imzl-zl/dsh-toolbox-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-toolbox-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-toolbox-ui" alt="license"></a>
-  <img src="https://img.shields.io/badge/DSH-%3E%3D0.1.5--rc.1-blue" alt="DSH">
+  <img src="https://img.shields.io/badge/DSH-%E2%89%A50.1.5--rc.1-blue" alt="DSH >= 0.1.5-rc.1">
 </p>
 
-An **MCP management panel and skills manager** for DeepSeek Harness Web: click the floating button (bottom-right) or the sidebar **MCP** entry to inspect connection status, add servers, and edit configuration. The panel floats above the session — **it never interrupts an ongoing conversation**. A capability switch at the top of the panel toggles between MCP and **skills**: see each installed skill's real scope, enable/disable or remove it, diagnose why a skill is not taking effect. The skills market is backed by the external **[skillhub.cn](https://skillhub.cn)** source: browse by category and search, with publisher certification and security-scan results disclosed before install plus an **explicit confirmation** (validated server-side). Upstream entries carry no license information, so this plugin makes **no license judgement** of its own rather than inventing one. See [skills manager](docs/skills.md) (Chinese).
-
-> In-depth design notes (shared-connection model, connection-state semantics, known limits) are currently Chinese-only: [docs/design.md](docs/design.md).
+Click the floating button or the sidebar's "Toolbox" entry: the panel floats above the session, so changing configuration or reading skills never interrupts the conversation you are in. Two ability faces live in the same panel — **MCP** and **skills**.
 
 ## Screenshots
 
-### Global panel
+### MCP market
 
-![MCP management panel](docs/images/mcp-manager-overview.png)
+![MCP market](docs/images/mcp-market.png)
 
-### Project scope (`.dsh/mcp.json`)
+47 services, each verified against first-party sources, across 10 categories. Search-first, with a "keyless only" filter and sorting. Every entry states its free tier honestly and what you must supply (key / connection details / arguments to edit after install); one click installs from the card, and already-configured entries are recognised and skipped.
 
-![Project MCP](docs/images/mcp-manager-workspace.png)
+### Skills pane
 
-### Connection details and adding a server
+![Skills pane](docs/images/skills-overview.png)
 
-![MCP connection details](docs/images/mcp-manager-detail.png)
-
-![Add MCP](docs/images/mcp-manager-add.png)
+See every installed skill's **real scope** and cross-scope shadowing, enable/disable, remove, read the body and diagnostics — and flip **model auto-invocation** with one switch, which edits `disable-model-invocation` in `SKILL.md` in place, touching only that one line.
 
 ## Features
 
-- Inspect every MCP server's status, transport, connection parameters, and tool list; expand a tool to see its full input JSON Schema (required/optional, types, enums, defaults, raw JSON)
-- Filter by transport (HTTP/stdio) and status, search by name/command/URL
-- Enable, disable, reconnect, add, edit, remove; reveal masked credentials temporarily with the eye button and copy with one click
-- **Global + project scopes**: global servers live in the Web profile and are available to every project; project servers live in that project's `.dsh/mcp.json` and are visible only to its sessions. A project can also hide any global MCP
-- **Two entry points, one panel**: the draggable floating button (position remembered) and the official sidebar entry share the same state; the "Entry" control in the panel header can keep just one of them (never neither)
-- **MCP market**: 47 services across 10 categories (search, dev, security & reverse engineering, data, AI & knowledge, browser automation, cloud & infra, productivity, files, comms), each verified against first-party sources. Search-first, with category and "keyless only" filters, sorting, and one-click install from the card; every entry states its free tier honestly and what you must supply (key / connection details / arguments to edit after install). Already-configured entries are detected and skipped, never overwritten
-- Import MCP configuration from other clients installed on this machine: Claude Code, Codex (`config.toml`), OpenCode (including `.jsonc`), pi, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI, Roo Code, and the cross-tool shared config are detected and listed, and one click imports from any of them; you can also paste `mcpServers` JSON from Claude, Cursor, Cline, or Roo, or `servers` JSON from VS Code. Everything is previewed before writing, with "merge" and "replace" modes
-- **Skills pane** (the toolbox's second ability): see every installed skill's **real scope** and cross-scope shadowing, enable/disable (`.disabled`), remove, read the body and diagnostics, and **flip "model auto-invocation" with one switch** — it edits `disable-model-invocation` in `SKILL.md` in place, touching only that one line, and the state always comes from the file itself (unreadable frontmatter reads as "unknown", never a guess); the market is backed by skillhub.cn with an honest disclosure and an explicit acknowledgement before install. See [Skills](docs/skills.md)
-- **Moving servers between workspaces**: copy this project's MCP servers into another registered workspace in one go (done inside the Host, so credentials never pass through the browser), or export the whole project configuration as JSON to download / copy (same shape as `.dsh/mcp.json`, ready to drop into another workspace). See [Moving servers between workspaces](#moving-servers-between-workspaces)
-- Follows the DSH dark/light theme and adapts to narrow/mobile widths
-- Update notice and **one-click upgrade**: a dismissible banner when a newer release exists (at most one check per day; disable with `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK`). Nothing happens until you press Upgrade — it **never auto-updates**. The upgrade runs through DSH's official pluginManager and tells you to restart the host when done. A local dev copy installed via `link:` / `file:` / `github:` gets no button (upgrading it would replace your link with an npm package)
-- **What changed, said once**: after the version changes, the first time you open the panel a small card lists what's new and where to find it (e.g. that the "Entry" control sits in the panel header); confirming it never shows it again, and it uses no network and sends nothing
+**MCP**
+
+- Per-entry status, transport, connection settings and the **registered tools**; expand a tool for its full input JSON Schema (required/optional, types, enums, defaults)
+- Enable, disable, reconnect, add, edit, remove; credential fields are masked by default — reveal the effective runtime value temporarily and copy it in one click
+- **Global + project scopes**: global writes the Web profile (available to every project), project writes that project's `.dsh/mcp.json` (visible only to its sessions); a project can also **block** a global MCP
+- **Import** configuration from other clients installed on this machine: Claude Code, Codex, OpenCode, pi, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI, Roo Code and the cross-tool shared config — or paste JSON directly. Previewed before writing, with merge and replace modes
+- **Move servers between workspaces**: copy this project's MCP servers into another registered workspace (done inside the Host, so credentials never pass through the browser), or export the whole project config as JSON
+
+**Skills**
+
+- Real scope and cross-scope shadowing: the same name in different scopes is a legal configuration; the panel lists each copy and marks which one wins
+- Enable/disable (`.disabled`), remove, read the body and diagnostics — the reason a skill "does not take effect" is right there in the panel
+- **Model auto-invocation switch**: edits `disable-model-invocation` in `SKILL.md`; turning it off deletes that line (off → on round-trips byte-for-byte). The state always comes from the skill file itself — when it cannot be read the panel says "unknown" instead of guessing
+- Market backed by [skillhub.cn](https://skillhub.cn): publisher verification and security-scan findings are disclosed before install, followed by one **explicit confirmation** (validated server-side)
+
+**Shared**
+
+- Pick one or both entry points: the floating button (draggable, position remembered) and the sidebar "Toolbox" entry — at least one stays on
+- Follows the DSH dark/light theme and adapts to narrow widths
+- Update notice and one-click upgrade: at most one npm check per day, dismissible, **never auto-updates**; after an upgrade it explains what changed, without any network request
 
 ## Install
 
 ```sh
-# Recommended: install from npm — `dsh plugin update` then upgrades within ^1.x automatically
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.2
+# Recommended: from npm — `dsh plugin update` then upgrades within ^1.x
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.3
 
-# Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag to upgrade)
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.2
+# Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag)
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.3
 ```
 
-Then **restart `dsh web`**. To upgrade:
-
-```sh
-dsh plugin --profile web update dsh-toolbox-ui
-```
-
-To uninstall (your configured MCP entries stay in place):
+Then **restart `dsh web`**. To uninstall (your existing MCP entries stay):
 
 ```sh
 dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
-Details, local development installs, and troubleshooting: [docs/installation.md](docs/installation.md) (Chinese).
+> Do not add `mcp-manager-ui` to the profile's `cordis.patch.yml`, an agent preset, or an extra `--patch` file by hand — the plugin command already does it, and assembling it twice fails loudly.
 
-> Do not add `mcp-manager-ui` to the profile's `cordis.patch.yml`, an agent preset, or an extra `--patch` file by hand — the plugin command already does that, and duplicating it fails loudly on purpose.
+## Upgrade
 
-## Usage
+```sh
+dsh plugin --profile web update dsh-toolbox-ui
+```
 
-### Opening the panel
+When a newer version exists the panel shows a dismissible banner; pressing Upgrade runs DSH's official pluginManager.
 
-Two entry points, one panel:
+> ⚠️ **1.6.1 and earlier will not announce 1.6.2 or anything after it.** Their update check read this repository's release feed, whose only `latest` entry is held by the legacy package `dsh-mcp-manager-ui` (frozen at 1.5.5) — so it always answered "up to date". 1.6.2 fixed that by querying **this package's latest on npm**, and the fix can only ship inside a newer version: upgrade once by hand, then the banner works again.
+>
+> ```sh
+> dsh plugin --profile web update dsh-toolbox-ui
+> ```
+>
+> Still on the legacy package (≤1.5.3)? Use the **migration** path: press Upgrade in the panel to reach 1.5.5, then press "Migrate" (it installs this package and removes the old one). See [Install & upgrade](docs/installation.md).
 
-- **Floating button (bottom-right)**: draggable, position remembered;
-- **Sidebar "MCP"**: above "Settings" when expanded, icon-only in the 56px rail.
+## Quick start
 
-The panel floats above the session; closing it ("Close" or Esc) does not affect the conversation.
+**Open the panel**: the floating button at the bottom right, or "Toolbox" at the bottom of the sidebar. It floats above the session; Esc or "Close" hides it without touching the session.
 
-Both entries can be turned off independently: the panel header's "Entry" control offers `Floating button + sidebar` (default), `Floating button only`, or `Sidebar only`. They **cannot both be hidden** — the panel is only reachable through these two entries, so this is a three-way choice, not two independent switches. The choice is stored in the browser (localStorage), so a different browser or a cleared cache starts from the default again.
+**Two scopes**:
 
-### Global vs project
-
-Tabs switch between "Global" and each project:
-
-| Tab | Stored in | Visible to | When changes take effect |
+| Tab | Stored in | Visible to | Takes effect |
 |---|---|---|---|
-| Global | The Web profile's `cordis.patch.yml` | every project | DSH hot-reloads, usually immediately |
-| A project | That project's `.dsh/mcp.json` | only that project's sessions | the next newly created connection (see below) |
+| Global | the Web profile's `cordis.patch.yml` | every project | DSH hot-reloads, usually immediately |
+| A project | that project's `.dsh/mcp.json` | only that project's sessions | **on write** — no need to reopen the session or restart the Host |
 
-`serverName` is scoped: different projects, and global vs project, **may reuse the same name** with independent connections; duplicates inside one scope are rejected.
+`serverName` is unique per scope: different projects, and global vs. project, **may share a name** and connect independently.
 
-### Common actions
-
-From a row or the detail pane:
-
-- **Toggle**: enable / disable (global writes the profile patch's `disabled`, project writes `.dsh/mcp.json`);
-- **Reconnect**: global only (project connections are held by sessions and `mcp-client` reconnects them on its own);
-- **Edit / Remove**: removal only affects the current scope;
-- **Hide** (a global MCP, from a project tab): writes `exclude` so that project's new sessions no longer see it — the global instance keeps running, so other projects are unaffected.
-
-### Adding a server
-
-Three ways, all from the panel toolbar:
-
-1. **Add MCP**: fill in `command`/`args`/`env`/`cwd` (stdio) or `url`/`headers` (HTTP), optionally set the call timeout, startup-failure policy, and reconnect policy; presets are available for common servers.
-2. **Import JSON**: paste another client's configuration, preview, then write. "Merge (update by name)" and "replace" modes; field mapping and limits in [docs/json-import.md](docs/json-import.md) (Chinese).
-3. **Built-in MCP**: tick the servers you want (Exa, Tavily, Firecrawl, Chrome DevTools, Playwright). The first three work without a key and need no local dependencies; the last two are local tools requiring Node.js and a browser.
-
-### Moving servers between workspaces
-
-Two entries sit next to the "This project's MCP" heading in a project tab (both apply to the current project only):
-
-- **Copy to…**: tick the servers to move (all selected by default), pick a target workspace, and write them in one go. The copy happens inside the Host, so configuration and credentials never pass through the browser. When the target already has the same name the entry is **skipped by default** (the target's own configuration wins); you can explicitly choose "overwrite same names". The result names exactly what was added, overwritten, or skipped. The target's `exclude` list is not carried over — that is the target project's own visibility decision, not configuration data.
-- **Export**: turn this project's configuration into JSON (same shape as `.dsh/mcp.json`) that you can copy or download — for backups, moving to another machine, or sharing. **The export is the full configuration**: literal credentials (tokens in URLs, literal header / env values) appear in it verbatim, so treat it as a secret. Locations written as `${VAR}` keep the reference form and are never resolved to plaintext. The file can be dropped into another workspace's `.dsh/mcp.json`, or pasted back through "Import MCP" (pasting reads `mcpServers` only; `exclude` has to be set by hand).
-
-The target workspace must be registered with DSH (i.e. it appears as a tab in the panel) — "Copy to…" does not accept an arbitrary directory, and that limit is enforced by the Host, not just hidden in the UI.
-
-### Tools and credentials
-
-The detail pane lists the tools a server currently registers; expand one for its full input schema. Credential fields are masked by default — the eye button asks the Host for the **effective runtime value** (environment references already resolved) and shows it temporarily, with one-click copy. If you do not actually edit a field, saving keeps the original reference instead of writing secrets back into the configuration file.
-
-## When configuration changes take effect (important)
-
-| Scope | When a change takes effect |
-|---|---|
-| Global | DSH hot-reloads it, usually immediately (including running sessions) |
-| Project | **As soon as it is written**: an added server mounts into live sessions, a removed one retracts its tools, and a changed one reloads in place (tool names stay the same) |
-
-Project MCPs are shared by every session of that project and configured in `.dsh/mcp.json`. Saving in the panel aligns the running sessions immediately — **no need to reopen a session and no Host restart**; editing the file by hand is picked up at the **next session mount**.
-
-> **The connection follows the configuration, not the sessions**: when the last session ends the connection is not torn down — it goes idle and the next session reuses it, so it is already up when you need it (this is also the host's own contract: tools must appear before the first turn). Idle recycling defaults to 5 minutes; `idleTimeoutMs` tunes it and `0` means never recycle automatically.
->
-> **How to read the state**: a project row states two independent facts instead of merging them.
-> - **Is the connection there**: `已连接 · 当前无会话使用（连接保留，下次直接用）` / `已连接 · N 个会话在用` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`.
-> - **How many sessions use it**: the `N 个会话在用` part above. The old "待会话挂载" wording merged both into one phrase and read like "not connected yet".
->
-> **Reconnect is a required exit**: mcp-client has a bounded reconnect budget and, once exhausted, it unregisters the tools and stops until the configuration is reloaded or the harness restarts (its README says so). A project MCP is not a resident service, so the panel's "reconnect" button tears the old connection down, rebuilds it from the current configuration, and re-projects it into live sessions.
+**Adding MCP**: use "Add MCP" for the form, or "Import MCP" to paste another client's configuration (previewed before writing). Common servers ship with presets.
 
 ## FAQ
 
-**The panel says a server is "disabled", but the model reports `unknown tool "mcp__xxx__..."`.**
-That server is disabled, so it registers no tools. Enable it in the panel (global writes the profile patch and hot-reloads; project writes `.dsh/mcp.json` and applies to new sessions).
+**When does a change in a project take effect?** The moment you save: new entries attach to live sessions, removed ones retract their tools, edits reload the connection in place — no need to reopen the session or restart the Host. Editing `.dsh/mcp.json` by hand is picked up when the next session mounts.
 
-**A row shows "mount failed", "connection failed", or "scope isolation failed" — what is the difference?**
-Three different things, and the detail pane gives the specific reason: **mount failed** = the plugin could not mount it during session setup (a `${VAR}` resolved to empty, startup failed under `failOnStartupError`, tool registration was rejected); **connection failed** = `mcp-client` could not connect or exhausted its reconnect budget (the reason comes from its logs); **scope isolation failed** = the connection is fine but the tools are not in the shared scope layer (two copies of `@deepseek-ai/dsh-scope` ended up loaded in the Host). See [docs/design.md](docs/design.md) (Chinese) for the diagnosis.
+**The connection follows the configuration, not the session.** When the last session ends the connection is not torn down; it goes idle and the next session reuses it, so it is already there when you need it. Two knobs live on the server entry: `idleTimeoutMs` (how long an idle connection is kept, default 5 minutes, `0` = never reclaim) and `readyTimeoutMs` (the total budget for waiting until ready on mount, default 5s, `0` = do not wait). See [Design & limits](docs/design.md#项目级专有字段dshmcpjson-里每个-server-可写).
 
-**What do "waiting for a session", "pending configuration", and "N sessions sharing" on a project row mean?**
-Respectively: no session of that project holds the shared connection yet / the configuration changed but the old connection is still being reused (see above) / how many sessions currently share it.
+**What do the project row's status strings mean?** They separate two independent facts: **whether a connection exists** (`已连接 · 当前无会话使用（连接保留，下次直接用）` / `已连接 · N 个会话在用` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`) and **how many sessions are using it** — the old "waiting for a session to mount" wording merged both into one sentence and read like "not connected yet".
 
-**How do I upgrade? Why did the panel not notify me?**
-If you installed from npm, `dsh plugin --profile web update dsh-toolbox-ui` upgrades within `^1.x` — or just press Upgrade on the panel banner, which does the same thing without the command. The banner only queries the npm registry (this package's latest dist-tag), at most once a day, is dismissible, and never acts on its own. Tag-pinned installs never cross versions — re-add with the new tag. ⚠️ **1.6.1 and earlier asked a different source** (this repository's release feed, whose only latest entry carries the other product line and is marked pre-release), so they will not announce 1.6.2 — the fix ships inside 1.6.2 itself; run `dsh plugin --profile web update dsh-toolbox-ui` once by hand.
+**The panel says "disabled" but the model reports `unknown tool "mcp__xxx__…"`.** That MCP is disabled, so it registers no tools. Enable it in the panel.
 
-**Will editing touch my other configuration?**
-No. Global edits only rewrite the entries declared by `@deepseek-ai/dsh-mcp-client` that this plugin manages, preserving other plugin rows, comments, and `!!js` expressions; "replace" imports only replace that part and never delete MCPs owned by another bundle or agent preset.
+**How do I tell "mount failed", "connection failed" and "scope isolation failed" apart?** Three different things: **mount failed** = it never attached during session mount; **connection failed** = `mcp-client` cannot connect or ran out of retries; **scope isolation failed** = the connection is fine but its tools are not in the shared scope layer. The detail pane gives the specific reason; see [Design & limits](docs/design.md#连接状态语义).
 
-**Does uninstalling remove my configured MCPs?**
-No. Uninstalling the plugin leaves existing `@deepseek-ai/dsh-mcp-client` rows in the profile untouched, and a project's `.dsh/mcp.json` stays where it is (it is an ordinary JSON file).
+**Will it touch my other configuration?** No. Global edits only touch the entries declared by `@deepseek-ai/dsh-mcp-client` and managed by this plugin, preserving other plugin entries, comments and `!!js` expressions. Uninstalling leaves your existing MCP entries and project `.dsh/mcp.json` alone.
 
 ## Compatibility
 
 | Item | Verified |
 |---|---|
-| DeepSeek Harness | `0.1.5-rc.1` and above (verified through `0.2.0-rc.2`) |
-| Node.js | whatever runtime DSH ships/supports |
-| Platform | Windows; Linux/macOS share the same DSH Web contracts |
+| DeepSeek Harness | `0.1.5-rc.1` and above (verified up to `0.2.0-rc.2`) |
+| Node.js | the runtime DSH ships with / supports |
+| Platform | Windows; Linux and macOS use the same DSH Web contract |
 
-Only 0.1.5 and above are supported (earlier versions lack "`serverName` uniqueness per registration scope" and "`setup` receives the agent"); there are no fallback branches for older versions. Rationale and dependency details: [docs/design.md](docs/design.md) (Chinese).
+Requires 0.1.5 or newer (older versions lack per-scope `serverName` uniqueness and the `agent` passed to setup); no downgrade branches are kept for older hosts.
 
 ## Development
 
 ```sh
-npm test                              # full suite (includes real-host integration tests)
-dsh --profile web --dump-config       # inspect the effective profile configuration
-dsh web                               # run the Web UI for real verification
+npm test        # full suite, including host-level integration tests (real cordis / dsh-tools / dsh-scope / dsh-mcp-client + a real stdio MCP child process)
+dsh web         # start the Web app for hands-on verification
 ```
-
-Besides fixture-based tests (which check internal consistency), `npm test` includes **real-host integration tests** that run genuine `cordis` + `dsh-tools` + `dsh-scope` + `dsh-mcp-client` plus a real stdio MCP child process, covering "two sessions of one project share a single connection, tools are projected into each session, nothing leaks into the global view, and the child process exits with the last session". CI (push to `main` / pull requests, and tag pushes for releases) runs the same gate; see [docs/installation.md](docs/installation.md#发布流程维护者) (Chinese) for the release flow.
 
 ## Documentation
 
-- [Installation and upgrades](docs/installation.md) (Chinese)
-- [JSON import](docs/json-import.md) (Chinese)
-- [Design and limits](docs/design.md) (Chinese)
-- [Official DeepSeek Harness plugin publishing guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
+- [Install & upgrade](docs/installation.md) — three install flavours, release flow, troubleshooting
+- [Skills](docs/skills.md) — scopes and shadowing, enable/disable, invocation policy, the skill market
+- [JSON import](docs/json-import.md) — field mapping and limits
+- [Design & limits](docs/design.md) — shared connection model, connection-state semantics, known limits, dependency details
+- [DeepSeek Harness plugin publishing guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
 
-## Links
+## Friend link
 
-- [LINUX DO](https://linux.do/)
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-- [GitHub `dsh-plugin` topic](https://github.com/topics/dsh-plugin)
+<p align="center">
+  <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="44" height="44"></a><br>
+  <a href="https://linux.do/">LINUX DO</a>
+</p>
 
 ## License
 

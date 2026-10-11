@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="dsh-toolbox-ui">
+  <title>dsh-toolbox-ui</title>
+  <!-- 与 DSH 官方图标同一套观感：近白圆角方块（#F9FAFA / 半径 157/960）+ 深墨剪影（#2C3038），
+       无渐变、无彩色；外留白 32 与图形占比也照它的比例来。 -->
+  <rect x="32" y="32" width="960" height="960" rx="157" fill="#F9FAFA" stroke="#2C3038" stroke-opacity="0.08" stroke-width="4"/>
+  <g fill="#2C3038" stroke="#2C3038" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 提手 -->
+    <path d="M412 372V318a44 44 0 0 1 44-44h112a44 44 0 0 1 44 44v54" fill="none" stroke-width="48"/>
+    <!-- 箱体 -->
+    <rect x="202" y="352" width="620" height="440" rx="72" stroke="none"/>
+    <!-- 盖子缝（负空间）与锁扣 -->
+    <rect x="202" y="436" width="620" height="26" fill="#F9FAFA" stroke="none"/>
+    <rect x="484" y="424" width="56" height="56" rx="10" stroke="none"/>
+  </g>
+</svg>

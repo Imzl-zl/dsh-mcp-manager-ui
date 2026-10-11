@@ -1,168 +1,120 @@
-# dsh-toolbox-ui
-
-中文 | [English](README.en.md)
-
 <p align="center">
-  <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="40" height="40"></a>
+  <img src="docs/images/logo.svg" width="104" height="104" alt="dsh-toolbox-ui">
 </p>
 
+<h1 align="center">dsh-toolbox-ui</h1>
+
+<p align="center">DeepSeek Harness Web 的 <b>MCP 管理面板</b> + <b>技能管理面板</b></p>
+
 <p align="center">
-  <a href="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-mcp-manager-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/v/dsh-toolbox-ui" alt="npm"></a>
   <a href="https://www.npmjs.com/package/dsh-toolbox-ui"><img src="https://img.shields.io/npm/dm/dsh-toolbox-ui" alt="downloads"></a>
+  <a href="https://github.com/Imzl-zl/dsh-toolbox-ui/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-toolbox-ui/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-toolbox-ui" alt="license"></a>
-  <img src="https://img.shields.io/badge/DSH-%3E%3D0.1.5--rc.1-blue" alt="DSH">
+  <img src="https://img.shields.io/badge/DSH-%E2%89%A50.1.5--rc.1-blue" alt="DSH >= 0.1.5-rc.1">
 </p>
 
-DeepSeek Harness Web 的 **MCP 管理面板 + 技能管理面板**：右下角悬浮按钮或侧栏「MCP」入口，点开就能看连接状态、加服务器、改配置——面板浮在会话之上，**不打断正在进行的对话**。面板顶部可切换能力层（MCP / 技能）：技能面能看本机技能的真实作用域、启停与删除、诊断「为什么这个技能不生效」。技能市场接外部源 **[skillhub.cn](https://skillhub.cn)**：按分类浏览与搜索，安装前披露发布方认证与安全扫描结论、并要一次**显式确认**（该确认在服务端校验）；上游条目没有许可信息，所以本插件**不做许可判定**，也不替它编一个出来。详见 [技能管理](docs/skills.md)。
+点右下角悬浮按钮或侧栏「工具箱」打开，面板浮在会话之上——改配置、看技能，都不打断正在进行的对话。两个能力面在同一个面板里切换：**MCP** 与**技能**。
 
 ## 界面预览
 
-### 全局管理面板
+### MCP 市场
 
-![MCP 管理面板](docs/images/mcp-manager-overview.png)
+![MCP 市场](docs/images/mcp-market.png)
 
-### 项目作用域（`.dsh/mcp.json`）
+47 个逐条一手核实过的服务，分 10 类；搜索为主操作，配「只要免密钥」筛选与排序。每条如实标注免费额度、要准备什么（密钥 / 连接信息 / 装完还得改的参数），卡片直接安装；已配置的只识别并跳过。
 
-![项目 MCP](docs/images/mcp-manager-workspace.png)
+### 技能面板
 
-### 连接详情与新增
+![技能面板](docs/images/skills-overview.png)
 
-![MCP 连接详情](docs/images/mcp-manager-detail.png)
+看本机每个技能的**真实作用域**与同名遮蔽，启停、删除、读正文与诊断，并一键切换「模型自动调用」——它直接改 `SKILL.md` 的 `disable-model-invocation`，只动那一行。
 
-![新增 MCP](docs/images/mcp-manager-add.png)
+## 特性
 
-## 功能
+**MCP 面**
 
-- 查看每个 MCP 的状态、传输方式、连接参数与工具列表；展开工具可看完整输入 JSON Schema（必填/可选、类型、枚举、默认值与原始 JSON）
-- 按传输方式（HTTP/stdio）与状态筛选，按名称/命令/URL 搜索
-- 启用、禁用、重连、添加、编辑、移除；需要时用眼睛临时揭示被掩码的凭据并一键复制
-- **全局 + 项目双作用域**：全局写 Web profile，一次注册所有项目可用；项目写该项目 `.dsh/mcp.json`，只该项目会话可见；项目里还能「屏蔽」某个全局 MCP
-- **两个入口，同一个面板**：右下角悬浮按钮（可拖拽、记忆位置）与官方侧栏入口（展开态在「设置」上方显示「MCP」，收起成 56px 轨道时只剩图标）共享同一开关状态；面板右上角「入口」可以把两者只留一个（不能都关）
-- **MCP 市场**：47 个逐条一手核实过的服务，分 10 类（搜索、开发工具、安全与逆向、数据库与数据、AI 与知识、浏览器自动化、云与基础设施、效率协作、文件与本地、通讯）。搜索为主操作，配分类与「只要免密钥」筛选、排序、卡片直接安装；每条如实标注免费额度与需要准备什么（密钥 / 连接信息 / 装完还得改的参数）。已配置的只识别并跳过，不覆盖
-- **技能面**（工具箱的第二个能力面）：看本机全部技能的**真实作用域**与同名遮蔽、启停（`.disabled`）、删除、读正文与诊断，并**一键切换「模型自动调用」**——直接改 `SKILL.md` 的 `disable-model-invocation`，只动那一行、不重排你的文件，状态一律取自文件本身（读不出来就说「未知」）；市场接 skillhub.cn，安装前如实披露 + 一次显式确认。详见[技能管理](docs/skills.md)
-- 导入本机其他客户端的 MCP 配置：自动检测 Claude Code、Codex（`config.toml`）、OpenCode（含 `.jsonc`）、pi、Claude Desktop、Cursor、Windsurf、VS Code、Gemini CLI、Roo Code 与跨工具的共享配置，逐个列出，点一条即导入；也能粘贴 Claude/Cursor/Cline/Roo 的 `mcpServers` 或 VS Code 的 `servers` JSON。写入前预览，支持「合并（同名更新）」与「替换」
-- **跨工作区搬运**：在项目标签页里把本项目的 MCP 一次勾选复制到另一个已注册的工作区（在宿主内完成，凭据不经过浏览器），或把整个项目配置导出成 JSON 下载 / 复制（与 `.dsh/mcp.json` 同格式，可直接放进另一个工作区）。详见[工作区之间复制与导出](#工作区之间复制与导出)
+- 逐条看状态、传输方式、连接参数与**已注册的工具**；展开工具可看完整输入 JSON Schema（必填/可选、类型、枚举、默认值）
+- 启停、重连、添加、编辑、移除；凭据类字段默认掩码，点眼睛临时揭示有效运行值并一键复制
+- **全局 + 项目双作用域**：全局写 Web profile（所有项目可用），项目写该项目 `.dsh/mcp.json`（只该项目会话可见）；项目里还能「屏蔽」某个全局 MCP
+- 从本机其他客户端**导入**：Claude Code、Codex、OpenCode、pi、Claude Desktop、Cursor、Windsurf、VS Code、Gemini CLI、Roo Code 与跨工具共享配置，也能直接粘贴 JSON；写入前预览，支持「合并」与「替换」
+- **跨工作区搬运**：把本项目的 MCP 复制到另一个已注册工作区（在宿主内完成，凭据不经过浏览器），或导出成 JSON 备份 / 分享
+
+**技能面**
+
+- 真实作用域与同名遮蔽：同名技能跨作用域是合法配置，面板逐条列出并标出哪一份生效
+- 启停（`.disabled`）、删除、读正文与诊断——「技能不生效」的原因直接摆在面板里
+- **「模型自动调用」开关**：直接改 `SKILL.md` 的 `disable-model-invocation`，关掉=删掉那一行（开→关能逐字节还原原文）；状态一律取自技能文件本身，读不出来就说「未知」而不是猜一个值
+- 市场接 [skillhub.cn](https://skillhub.cn)：安装前披露发布方认证与安全扫描结论，并要一次**显式确认**（该确认在服务端校验）
+
+**公共**
+
+- 入口三选一：右下角悬浮按钮（可拖拽、记忆位置）+ 侧栏「工具箱」；可以只留一个，不能都关
 - 跟随 DSH 深色/浅色主题，适配窄屏与移动宽度
-- 更新提示与**一键升级**：有新版时在面板顶部显示可关闭的提示条（每天最多查一次，可用 `DSH_MCP_MANAGER_DISABLE_UPDATE_CHECK` 关闭）。点了「升级」才动，**不会自动升级**；升级由 DSH 官方的 pluginManager 执行，装完提示重启宿主生效。用 `link:` / `file:` / `github:` 装的本地开发副本不给按钮（那会把链接换成 npm 包）
-- **升级后主动说一次变了什么**：版本变了后第一次打开面板弹一张小卡片，列出本次更新内容，并指路新功能在哪（例如「入口」开关在面板右上角）；确认一次后不再提示，不联网、不发任何数据
+- 更新提示与一键升级：每天最多查一次 npm、可关闭、**绝不自动升级**；升级后弹一次「本次更新内容」，不联网
 
 ## 安装
 
 ```sh
-# 推荐：npm 安装 —— 之后 `dsh plugin update` 会在 ^1.x 内自动升到最新小版本
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.2
+# 推荐：npm 安装 —— 之后 `dsh plugin update` 在 ^1.x 内自动升小版本
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.3
 
-# 或固定 GitHub release tag（不会自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-mcp-manager-ui#v1.6.2
+# 或固定 GitHub release tag（不自动跨版本，升级要换 tag 重新 add）
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.3
 ```
 
-装完**重启 `dsh web`**。升级：
-
-```sh
-dsh plugin --profile web update dsh-toolbox-ui
-```
-
-卸载（不会删除 profile 里已有的 MCP 条目）：
+装完**重启 `dsh web`**。卸载（不会删除 profile 里已有的 MCP 条目）：
 
 ```sh
 dsh plugin --profile web remove dsh-toolbox-ui
 ```
 
-细节、本地开发安装与故障排查见 [安装与升级](docs/installation.md)。
-
 > 不要把 `mcp-manager-ui` 手工插进 profile 的 `cordis.patch.yml`、Agent preset 或额外的 `--patch` 文件——插件命令已经完成这件事，重复装配会明确报错。
 
-## 使用
+## 升级
 
-### 打开面板
+```sh
+dsh plugin --profile web update dsh-toolbox-ui
+```
 
-两个入口，同一个面板：
+面板顶部有新版时会显示可关闭的提示条，点「升级」走 DSH 官方的 pluginManager。
 
-- **右下角悬浮按钮**：可拖拽移动，位置会被记住；
-- **侧栏底部「MCP」**：展开态在「设置」上方，侧栏收起成 56px 轨道时只剩图标。
+> ⚠️ **1.6.1 及更早的版本不会提示 1.6.2 及之后的新版。** 它们的更新检查读的是本仓库的 release feed，而那条 feed 的 latest 被另一条产品线、即已冻结在 1.5.5 的旧包占着，于是永远显示「已是最新」。这个缺陷在 1.6.2 修掉了（改成查**本包在 npm 上的 latest**），修复只能装在新版里——所以请**手动升一次**，之后就恢复正常：
+>
+> ```sh
+> dsh plugin --profile web update dsh-toolbox-ui
+> ```
+>
+> 仍装着旧包 `dsh-mcp-manager-ui`（≤1.5.3）的话走**迁移**：面板点「升级」升到 1.5.5，再点「迁移」即可（它会装本包、卸掉旧包），详见[安装与升级](docs/installation.md)。
 
-面板浮在会话之上，关掉它（右上角「关闭」或 Esc）不会影响会话。
+## 快速上手
 
-两个入口都能单独关掉：面板右上角「入口」里选 `悬浮按钮 + 侧栏入口`（默认）/ `仅悬浮按钮` / `仅侧栏入口`。**不能两个都关**——面板只能从这两个入口打开，所以这是一个三选一，而不是两个独立的开关。选择存在浏览器本地（localStorage），换浏览器或清缓存要重选一次。
+**打开面板**：右下角悬浮按钮，或侧栏底部「工具箱」。面板浮在会话之上，按 Esc 或点「关闭」收起，不影响会话。
 
-### 全局 vs 项目
-
-顶部标签页在「全局」与各项目之间切换：
+**两个作用域**：
 
 | 标签页 | 存哪 | 谁可见 | 改动何时生效 |
 |---|---|---|---|
 | 全局 | Web profile 的 `cordis.patch.yml` | 所有项目 | DSH 热加载，通常立即生效 |
-| 某项目 | 该项目 `.dsh/mcp.json` | 只该项目会话 | 写盘即生效（见下） |
+| 某项目 | 该项目 `.dsh/mcp.json` | 只该项目会话 | **写盘即生效**，不需重开会话或重启 Host |
 
 `serverName` 按作用域判重：不同项目之间、全局与项目之间**可以同名**，各自独立连接；同一作用域内不能重名。
 
-### 常用操作
-
-在列表行或详情页里：
-
-- **开关**：启用 / 禁用（全局写 profile 补丁的 `disabled`，项目写 `.dsh/mcp.json`）；
-- **重连**：全局条目重载 loader 条目；项目连接会拆掉旧连接、按当前配置重建并重新投射给存活会话（`mcp-client` 的重连预算耗尽后必须靠它恢复）；
-- **编辑 / 移除**：移除只影响当前作用域；
-- **屏蔽**（项目页里对全局 MCP）：写 `exclude`，该项目的新会话不再看到它——全局实例仍在跑，所以不影响其他项目。
-
-### 添加 MCP
-
-三条路，都从面板顶部工具栏进：
-
-1. **添加 MCP**：表单填 `command`/`args`/`env`/`cwd`（stdio）或 `url`/`headers`（HTTP），可设调用超时、启动失败策略与重连策略；常用服务器有预设模板可一键套用。
-2. **导入 JSON**：粘贴其他客户端的配置，先预览再写入。支持「合并（同名更新）」与「替换」，字段映射与限制见 [JSON 导入](docs/json-import.md)。
-3. **内置 MCP**：勾选未配置的项一次装好（Exa、Tavily、Firecrawl、Chrome DevTools、Playwright）。前三项有免密额度、不需要本地依赖；后两项是本地工具，需要 Node.js 与浏览器。已配置的项只识别并跳过，不会覆盖。
-
-### 工作区之间复制与导出
-
-项目标签页里，「此项目的 MCP」标题右侧有两个入口（都只作用于当前项目）：
-
-- **复制到…**：勾选要搬的 MCP（默认全选），选一个目标工作区。界面会先把这次的结果算给你看——**新增 / 覆盖 / 跳过**哪些条目（切换「跳过 / 覆盖」时立即重算），确认后才写过去。复制在宿主内完成，配置与凭据不经过浏览器。目标已有同名条目时**默认跳过**（保留目标现有配置），也可以显式选「覆盖目标同名」。结果会如实说出哪几条新增、哪几条覆盖、哪几条被跳过——不会只报一句「已复制」。目标工作区的 `exclude`（屏蔽了哪些全局 MCP）不跟着搬：那是那个项目自己的意图，不是配置数据。
-- **导出**：把本项目配置导出成 JSON（与 `.dsh/mcp.json` 同格式），可复制或下载成文件。用于备份、跨机器迁移或分享给同事。**导出内容是完整配置**：字面写死的凭据（URL 里的 token、字面 header / env 值）会原样出现在里面，请按密钥对待；用 `${VAR}` 引用的位置保持引用写法，不会被解析成明文。这份文件可以直接放进目标工作区的 `.dsh/mcp.json`，也可以用「导入 MCP」粘贴回来（粘贴只读 `mcpServers`，`exclude` 需要手动设）。
-
-目标工作区必须在 DSH 里注册过（也就是出现在面板顶部标签里的那些）——「复制到…」不接受任意目录，这条限制在 Host 侧强制，不只是界面不显示。
-
-### 看工具与敏感值
-
-详情页列出该 MCP 当前注册的工具；展开可看完整输入 Schema。凭据类字段默认掩码，点眼睛图标会向 Host 读取**有效运行值**（已解析过的环境变量）并临时显示，再点一次恢复；已显示的值可一键复制。编辑时若没实际改动输入，保存仍保留原来的引用写法，不会把密钥写回配置文件。
-
-## 配置生效时机（重要）
-
-| 作用域 | 修改后何时生效 |
-|---|---|
-| 全局 | DSH 热加载，通常立即生效（含运行中的会话） |
-| 项目 | **写盘即生效**：新增立刻挂上存活会话、删除立刻撤掉工具、改动就地重载连接（工具名不变） |
-
-项目 MCP 由本项目所有会话共用一份连接，配置写在 `.dsh/mcp.json`。面板保存的那一刻就会对齐到正在运行的会话，**不需要重开会话，也不需要重启 Host**；手工编辑该文件则在**下一次会话挂载**时被采纳。
-
-> **连接跟配置走，不跟会话走**：最后一个会话结束不会拆掉连接，它只进入空闲等待，下一次会话直接复用——这样"要用的时候"它已经就绪（这也是宿主自己的契约：工具必须在首轮之前出现）。两个旋钮写在 server 条目里：`idleTimeoutMs`（空闲保留多久，默认 5 分钟，`0` = 永不回收）与 `readyTimeoutMs`（挂载时等就绪的总预算，默认 5s，`0` = 不等）。字段速查与边界见 [设计与限制](docs/design.md#项目级专有字段dshmcpjson-里每个-server-可写)。
->
-> **状态怎么看**：项目行把两件独立的事分开说，不合成一个状态。
-> - **连接在不在**：`已连接 · 当前无会话使用（连接保留，下次直接用）` / `已连接 · N 个会话在用` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`。
-> - **几个会话在用**：见上一行的 `N 个会话在用`；不再出现「待会话挂载」那种把两者压成一句、容易被读成"还没连上"的写法。
->
-> **重连是必需出口**：mcp-client 的自动重连有次数上限，耗尽后它会注销工具并停止，只能靠重载配置或重启宿主恢复（它的 README 明写）。项目 MCP 又不是常驻服务，所以面板的「重连」按钮会拆掉旧连接、按当前配置重建，并重新投射给存活会话。
+**加 MCP**：面板顶部「添加 MCP」填表单，「导入 MCP」粘贴其他客户端的配置（先预览再写入）。常用服务器有预设模板。
 
 ## 常见问题
 
-**面板里显示「已禁用」，但模型调用报 `unknown tool "mcp__xxx__..."`**
-那个 MCP 被禁用了，所以它没有注册任何工具。在面板里点「启用」即可（全局会写 profile 补丁并热加载，项目写 `.dsh/mcp.json`、写盘即生效）。
+**项目里的改动什么时候生效？** 保存的那一刻就对齐到正在运行的会话：新增立刻挂上存活会话、删除立刻撤掉工具、改动就地重载连接——不需要重开会话，也不需要重启 Host。手工编辑 `.dsh/mcp.json` 则在**下一次会话挂载**时被采纳。
 
-**那一行显示「挂载失败」「连接失败」或「作用域隔离失败」，怎么区分？**
-三类是不同的事，详情页会给出具体原因：**挂载失败** = **会话挂载阶段**（`agent/created` 监听器）就没挂上（变量求值为空、`failOnStartupError` 下启动失败、工具注册被拒）；**连接失败** = `mcp-client` 连不上或重连耗尽（原因取自它的日志）；**作用域隔离失败** = 连接正常但工具不在共享作用域层（宿主里出现了两份 `@deepseek-ai/dsh-scope`）。排查与原理见 [设计与限制](docs/design.md#连接状态语义)。
+**连接跟配置走，不跟会话走。** 最后一个会话结束不会拆掉连接，它只进入空闲等待，下一次会话直接复用——「要用的时候」它已经就绪。两个旋钮写在 server 条目里：`idleTimeoutMs`（空闲保留多久，默认 5 分钟，`0` = 永不回收）与 `readyTimeoutMs`（挂载时等就绪的总预算，默认 5s，`0` = 不等）。字段速查见[设计与限制](docs/design.md#项目级专有字段dshmcpjson-里每个-server-可写)。
 
-**项目行那些状态文案分别是什么意思？**
-它们把两件独立的事分开说：**连接在不在** —— `已连接 · 当前无会话使用（连接保留，下次直接用）`（最后一个会话结束了，连接按空闲策略留着）/ `已连接 · N 个会话在用 · M 工具` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`；**几个会话在用** —— 就是那句里的 `N 个会话在用`。旧版本的「待会话挂载」正是把这两件事压成一句，所以容易被读成"还没连上"。
+**项目行那些状态文案是什么意思？** 它们把两件独立的事分开说：**连接在不在**（`已连接 · 当前无会话使用（连接保留，下次直接用）` / `已连接 · N 个会话在用` / `连接中…` / `连接失败` / `尚未建立连接（新会话自动挂载）`）与**几个会话在用**——不再有「待会话挂载」那种把两者压成一句、容易被读成「还没连上」的合成状态。
 
-**怎么升级？为什么面板没提示？**
-从 npm 装的直接 `dsh plugin --profile web update dsh-toolbox-ui` 就会升小版本，也可以直接点面板提示条上的「升级」（同一件事，免去敲命令）。面板的提示条只查 npm registry 上**本包的 latest**、每天最多一次、可关闭、不会自己动；固定 tag 安装的用户不会自动跨版本，需要用新 tag 重新 `add`（见 [安装与升级](docs/installation.md)）。⚠️ **1.6.1 及更早的版本问的是另一个源**（本仓库的 release feed，那里只有一条被标成 pre-release 的另一产品线），所以它们不会提示 1.6.2——这个修复装在 1.6.2 自己里，先手动 `dsh plugin --profile web update dsh-toolbox-ui` 升一次即可。
+**面板显示「已禁用」，模型却报 `unknown tool "mcp__xxx__…"`？** 那个 MCP 被禁用了，所以它没有注册任何工具。在面板里点「启用」即可。
 
-**改动会不会碰到我的其他配置？**
-不会。全局改动只动 profile 补丁里由 `@deepseek-ai/dsh-mcp-client` 声明、且由本插件管理的条目，保留其他插件条目、注释与 `!!js` 表达式；导入「替换」也只替换这一部分，不会删除其他 bundle 或 Agent preset 自带的 MCP。
+**「挂载失败」「连接失败」「作用域隔离失败」怎么区分？** 三件不同的事：**挂载失败**=会话挂载阶段就没挂上；**连接失败**=`mcp-client` 连不上或重连耗尽；**作用域隔离失败**=连接正常但工具不在共享作用域层。详情页会给具体原因，排查见[设计与限制](docs/design.md#连接状态语义)。
 
-**卸载后我配置的 MCP 会消失吗？**
-卸载插件不会删除 profile 里已有的 `@deepseek-ai/dsh-mcp-client` 条目；项目的 `.dsh/mcp.json` 也留在原处（它本来就是普通 JSON 文件）。
+**会碰到我的其他配置吗？** 不会。全局改动只动由 `@deepseek-ai/dsh-mcp-client` 声明、且由本插件管理的条目，保留其他插件条目、注释与 `!!js` 表达式；卸载也不会删除你已有的 MCP 条目与项目的 `.dsh/mcp.json`。
 
 ## 兼容性
 
@@ -172,30 +124,29 @@ dsh plugin --profile web remove dsh-toolbox-ui
 | Node.js | DSH 自带/支持的运行时 |
 | 平台 | Windows；Linux/macOS 使用同一 DSH Web 契约 |
 
-只支持 0.1.5 起（更早的版本缺少「按注册作用域判 `serverName` 唯一性」与「setup 传入 agent」两个能力），不为旧版本保留降级分支。原因与依赖细节见 [设计与限制](docs/design.md#兼容性与依赖细节)。
+只支持 0.1.5 起（更早的版本缺少「按注册作用域判 `serverName` 唯一性」与「setup 传入 agent」两个能力），不为旧版本保留降级分支。
 
 ## 开发
 
 ```sh
-npm test                              # 全部测试（含真机集成用例）
-dsh --profile web --dump-config       # 看 profile 的有效配置
-dsh web                               # 起 Web 做真实操作验证
+npm test        # 全部测试（含真机集成用例：真 cordis / dsh-tools / dsh-scope / dsh-mcp-client + 真 stdio MCP 子进程）
+dsh web         # 起 Web 做真实操作验证
 ```
-
-`npm test` 里除替身用例（验证插件内部自洽）外，还有一组**真机集成用例**：真 `cordis` + 真 `dsh-tools` + 真 `dsh-scope` + 真 `dsh-mcp-client` + 一个真 stdio MCP 子进程，覆盖「同项目两个会话共用一份连接、工具投射进会话层、不泄漏到全局、子进程随最后一个会话退出」。CI（push 到 main / PR，以及推 tag 发版）跑的是同一条门槛，发版流程见 [安装与升级](docs/installation.md#发布流程维护者)。
 
 ## 文档
 
-- [安装与升级](docs/installation.md)
-- [JSON 导入](docs/json-import.md)
-- [设计与限制](docs/design.md)（共享连接模型、连接状态语义、已知限制、依赖细节）
+- [安装与升级](docs/installation.md) —— 三种安装方式、发布流程、故障排查
+- [技能管理](docs/skills.md) —— 作用域与遮蔽、启停、调用权限、技能市场
+- [JSON 导入](docs/json-import.md) —— 字段映射与限制
+- [设计与限制](docs/design.md) —— 共享连接模型、连接状态语义、已知限制、依赖细节
 - [DeepSeek Harness 官方插件发布指南](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
 
-## 相关链接
+## 友情链接
 
-- [LINUX DO](https://linux.do/)（友链）
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-- [GitHub `dsh-plugin` 主题](https://github.com/topics/dsh-plugin)
+<p align="center">
+  <a href="https://linux.do/" title="LINUX DO"><img src="docs/images/linux-do-logo.svg" alt="LINUX DO" width="44" height="44"></a><br>
+  <a href="https://linux.do/">LINUX DO</a>
+</p>
 
 ## License
 

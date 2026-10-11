@@ -8,8 +8,9 @@ name: release
 # 一次性准备（只需做一次）：
 #   1. 包必须已存在：首次发布要在本地交互式 `npm publish`（npm 要求 2FA 挑战）。
 #   2. npmjs.com -> 该包 -> Settings -> Trusted Publisher ->
-#      GitHub Actions: organization/user = Imzl-zl, repository = dsh-mcp-manager-ui,
+#      GitHub Actions: organization/user = Imzl-zl, repository = dsh-toolbox-ui,
 #      workflow filename = release.yml（可另填 environment）。
+#      ⚠️ 这一项是 **GitHub 仓库名**，必须与仓库当前 slug 一致；改名后不同步改它，publish 会被拒。
 #   3. 之后每次发布只需要：改 version、提交、`git push origin main`、`git push origin vX.Y.Z`。
 #
 # 想先确认流水线本身健康（不改任何版本、不发布），手动跑一次：
@@ -96,8 +97,8 @@ jobs:
       # Release notes：有手写稿就用它，否则用提交生成。手写稿放在 .github/release-notes/，
       # 不放 docs/ —— docs 会随包发布到 npm。
       #
-      # ⚠️ 标题里的包名**从 package.json 取，不写死**：同一个仓库里有两条产品线
-      # （main 的 dsh-mcp-manager-ui 与 toolbox 线的 dsh-toolbox-ui），写死会让其中一条
+      # ⚠️ 标题里的包名**从 package.json 取，不写死**：这个仓库里先后有两条产品线
+      # （旧包 dsh-mcp-manager-ui 已冻结在 1.5.5，现在是 dsh-toolbox-ui），写死会让其中一条
       # 的 Release 标题挂上另一条的包名（v1.6.0 的稿子当初就是这么错的）。
       #
       # ⚠️⚠️ **必须带 `--prerelease`**：两条线共用一个 `releases/latest`，而老线（≤1.5.3）面板的
