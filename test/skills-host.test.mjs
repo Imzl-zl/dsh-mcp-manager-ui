@@ -18,8 +18,8 @@
 //    （官方 ctx.remote.skills.list 需要真实 sessionId，会激活冷 Agent，故本插件走自己的 RPC）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { mkdtemp, mkdir, readdir, writeFile, rm } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -400,6 +400,9 @@ test('importSkill lands in the referenced root and refuses a read-only one', asy
   const bundled = join(base, 'bundled')
   const source = join(base, 'to-import')
   await mkdir(source, { recursive: true })
+  // 只读根也要先建出来：下面那条「内置根不得被写入」要靠 readdir 去**看**这个目录，
+  // 不建就是 ENOENT——断言写在那儿却从来没跑到（真实动机是「拒绝了，就什么都没落下」）。
+  await mkdir(bundled, { recursive: true })
   await writeFile(join(source, 'SKILL.md'), '---\nname: imported-by-rpc\ndescription: 来自 RPC 的导入\n---\n\n正文\n')
   const ctx = {
     get: () => undefined,
