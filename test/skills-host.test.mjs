@@ -796,6 +796,89 @@ test('the host picks up a disabled skill without a restart (the docs must not te
   }
 })
 
+test('the two invocation faces are reachable over RPC, so every bracket is operable', async () => {
+  // ⚠️ 这条证明「面板与文件 1:1」在 **wire 层**也成立：两个面各有一条 RPC，都能真的改盘，
+  // 而且断言落在**真宿主看到的行为**上（不是一个面在文件里写了什么）。
+  // 以前只有 setModelInvocable 一条，于是「仅手动可调用」那一档在面板里**够不到**；
+  // 用户在面板里把技能从「仅手动」拨到停用再拨回启用，会落到「两个都能用」而没有开关能拨回去。
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SkillRegistry, isModelInvocable, isUserInvocable } = await import('@deepseek-ai/dsh-skill')
+  const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+
+  const base = await mkdtemp(join(tmpdir(), 'dsh-faces-rpc-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  const file = join(root, 'the-skill', 'SKILL.md')
+  const dshHome = join(base, 'dsh-home')
+  await mkdir(join(root, 'the-skill'), { recursive: true })
+  const original = '---\nname: the-skill\ndescription: 演示\n---\n\n正文\n'
+  await writeFile(file, original)
+
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  // ⚠️ `watch: true`（真机默认）：宿主的技能目录有**发现缓存**，我们改了盘之后要靠它的
+  // watcher 作废缓存才会反映到 `list()`。用 `watch: false` 跑会让下面的断言读到旧缓存，
+  // 把一个**正确**的实现报成失败（本轮在验收脚本上踩过同一个坑）。
+  const fiber = ctx.plugin({
+    apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+  }, { dshHome, agentsHome, watch: true })
+  await fiber
+  try {
+    const hostCtx = {
+      get: (n) => ctx.get(n),
+      loader: { entries: () => [{ options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome, agentsHome } } }] },
+    }
+    const row = (await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, {})).skills[0]
+    const ref = { ...row, projectPath: row.cwd }
+    /**
+     * 宿主当前**两个面**分别拿不拿得到它。
+     * 等到它变成期望值为止（watcher 的稳定阈值是 200ms，给足余量）——探的是宿主行为，
+     * 不是文件内容，所以必须等它自己重新发现。
+     */
+    const expectFaces = async (expected, why) => {
+      let actual
+      for (let i = 0; i < 40; i += 1) {
+        const list = await ctx.skills.list({})
+        actual = {
+          model: list.filter(isModelInvocable).some((s) => s.name === 'the-skill'),
+          user: list.filter(isUserInvocable).some((s) => s.name === 'the-skill'),
+          reported: list.some((s) => s.name === 'the-skill'),
+        }
+        if (actual.model === expected.model && actual.user === expected.user && actual.reported === expected.reported) return
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert.deepEqual(actual, expected, why)
+    }
+
+    // ① 只关用户面 → 规范里「仅模型可调用」那一档（以前从面板够不到）
+    const userOff = await SkillsManagerGateway.prototype.setUserInvocable.call({ ctx: hostCtx },
+      { ...ref, userInvocable: false })
+    assert.equal(userOff.changed, true)
+    await expectFaces({ model: true, user: false, reported: true },
+      '只关用户面：模型仍可自动调用，用户不能手动调用')
+
+    // ② 只关模型面 → 「仅手动可调用」那一档
+    await SkillsManagerGateway.prototype.setUserInvocable.call({ ctx: hostCtx }, { ...ref, userInvocable: true })
+    await SkillsManagerGateway.prototype.setModelInvocable.call({ ctx: hostCtx }, { ...ref, modelInvocable: false })
+    await expectFaces({ model: false, user: true, reported: true },
+      '只关模型面：模型不自动发现，用户仍能手动调用')
+
+    // ③ 两个都关 → 停用（两个面都拿不到，而宿主仍报告它 → 面板列得出来、能恢复）
+    await SkillsManagerGateway.prototype.setUserInvocable.call({ ctx: hostCtx }, { ...ref, userInvocable: false })
+    await expectFaces({ model: false, user: false, reported: true },
+      '两个面都关 = 停用；而宿主照样报告它（这就是面板不必扫盘的原因）')
+
+    // ④ 两个都打开 → 逐字节还原原文
+    await SkillsManagerGateway.prototype.setUserInvocable.call({ ctx: hostCtx }, { ...ref, userInvocable: true })
+    await SkillsManagerGateway.prototype.setModelInvocable.call({ ctx: hostCtx }, { ...ref, modelInvocable: true })
+    assert.equal(await readFile(file, 'utf8'), original, '两个面恢复后必须逐字节还原原文')
+    await expectFaces({ model: true, user: true, reported: true }, '两个面都恢复成可调用')
+  } finally {
+    await fiber.dispose?.()
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
 test('setModelInvocable writes the referenced file and refuses a read-only root', async () => {
   // 面板的开关走这条 RPC。落点只认引用（与 setEnabled 同一条纪律）：客户端送 root，服务端拿
   // 自己算出来的目标核对；bundled 根一律拒。

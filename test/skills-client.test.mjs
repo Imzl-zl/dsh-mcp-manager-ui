@@ -600,6 +600,60 @@ test('the model-invocation switch flips both ways and is disabled when it cannot
   assert.match(textOf(unknown).join(' '), /未知/, '并且要说清是「未知」，不能显示成一个确定的值')
 })
 
+test('the user-invocable face has its OWN switch, wired to its own action', () => {
+  // ⚠️ 这条补的是变异测试找到的缺口：原来 `switchOf` 只取**第一个** switch，于是第二个
+  // （用户面）**完全没有被测**——把它接回 onModelInvocable 也不会有任何用例变红。
+  //
+  // 为什么第二个开关必须存在：宿主支持**两个**调用面，而「停用」只是「两个都关」这一种组合。
+  // 只给模型面一个开关的话，用户在面板里拨不回「仅手动可调用」那一档（只能去编辑文件）。
+  const internals = loadClientInternals()
+  const calls = []
+  const row = {
+    name: 'zhanggui', description: '演示', entry: 'zhanggui', kind: 'bundle',
+    root: '/u/.agents/skills', source: 'user-agents', scope: 'global', writable: true,
+    modelInvocable: true, userInvocable: false,
+  }
+  const detail = (over) => internals.__expand(internals.SkillDetail({
+    row: { ...row, ...over },
+    shadowedBy: null,
+    body: { status: 'ok', text: '正文' },
+    busy: false,
+    onRetry() {}, onToggle() {}, onRemove() {},
+    onModelInvocable: (target, next) => calls.push(['model', target.name, next]),
+    onUserInvocable: (target, next) => calls.push(['user', target.name, next]),
+  }))
+  /** 两个调用面的开关（顺序 = 详情页里的顺序：先模型面、后用户面）。 */
+  const switches = (tree) => {
+    const found = []
+    findNode(tree, (node) => { if (node.props?.role === 'switch') found.push(node); return false })
+    return found
+  }
+
+  const both = switches(detail({}))
+  assert.equal(both.length, 2, `两个调用面各要有一个开关，实际 ${both.length} 个`)
+  // 状态各自如实反映（这里刻意一开一关，好把「两个开关都显示同一个值」这种错抓出来）
+  assert.equal(both[0].props['aria-checked'], true, '模型面：文件里是允许')
+  assert.equal(both[1].props['aria-checked'], false, '用户面：文件里是禁止')
+
+  // ⚠️ 关键：点第一个只能动模型面、点第二个只能动用户面（接错方法就红）
+  both[0].props.onClick({ stopPropagation() {} })
+  assert.deepEqual(calls, [['model', 'zhanggui', false]], '点模型面开关必须只请求模型面')
+  calls.length = 0
+  both[1].props.onClick({ stopPropagation() {} })
+  assert.deepEqual(calls, [['user', 'zhanggui', true]], '点用户面开关必须只请求用户面（接错方法就是这里红）')
+
+  // 文案要说清两个面的差别，否则用户不知道为什么要有两个开关
+  assert.match(textOf(detail({})).join(' '), /模型自动调用/, '模型面要有标签')
+  assert.match(textOf(detail({})).join(' '), /用户可调用/, '用户面要有标签')
+
+  // 两个面都读不出来时，两个开关都必须禁用（不能让人在假状态上点）
+  const unknown = switches(detail({ modelInvocable: null, userInvocable: null }))
+  assert.equal(unknown.every((node) => node.props.disabled === true), true, '读不出权限时两个开关都不可点')
+  // 内置只读同理
+  const readonly = switches(detail({ writable: false }))
+  assert.equal(readonly.every((node) => node.props.disabled === true), true, '内置只读时两个开关都不可点')
+})
+
 test('「调用权限未知」说的是**真实原因**，不能一律冤枉 frontmatter', () => {
   // ⚠️ 真机报告（issue #5）：技能目录是符号链接时那一行显示「调用权限未知」，悬浮提示写着
   // 「SKILL.md 的 frontmatter 读不出来（宿主会跳过这条技能）」——而文件完全合法、宿主也

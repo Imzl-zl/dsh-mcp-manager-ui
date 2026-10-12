@@ -20,7 +20,9 @@ import {
   importSkill,
   readSkillDocument,
   scanDisabledSkills,
+  setSkillInvocationFace,
   setSkillModelInvocable,
+  setSkillUserInvocable,
   SkillNotFoundError,
   removeSkill,
   resolveSkillTarget,
@@ -408,6 +410,99 @@ test('reports an unknown invocation instead of inventing one when the frontmatte
     assert.equal(document.invocation, null)
     assert.match(document.text, /正文/, '正文还是要给出去：面板要能让用户看到那份坏在哪')
     assert.equal(diagnoseSkill(document.text).ok, false, '前提：这份 frontmatter 确实是坏的')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the two invocation faces are independently writable, so no bracket is unreachable', async () => {
+  // ⚠️ 这条钉的是「面板与文件 1:1」：宿主支持**两个**调用面，而「停用」只是「两个都关」这一种组合。
+  // 如果面板只暴露一个面（以前就是这样：模型面可拨、用户面只读），用户把一条技能从
+  // 「仅手动可调用」拨到「停用」再拨回「启用」之后，会落到「两个都能用」，而**面板上没有开关
+  // 能拨回「仅手动」**——只能去编辑文件。这条用例证明三个档位都能从代码路径到达。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-faces-'))
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  const file = join(root, 'zhanggui', 'SKILL.md')
+  await writeFile(file, '---\nname: zhanggui\ndescription: demo\n---\n\nbody\n')
+  try {
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+
+    // ① 仅手动可调用：只关模型面（= 规范里 disable-model-invocation 那一档）
+    await setSkillModelInvocable(target, false)
+    assert.deepEqual(await invocationOnDisk(file), { modelInvocable: false, userInvocable: true },
+      '只关模型面 → 模型不自动发现，但用户仍能手动调用')
+
+    // ② 仅模型可调用：只关用户面（这是以前**够不到**的那一档）
+    await setSkillUserInvocable(target, false)
+    await setSkillModelInvocable(target, true)
+    assert.deepEqual(await invocationOnDisk(file), { modelInvocable: true, userInvocable: false },
+      '只关用户面 → 模型可自动调用，但用户不能手动调用')
+
+    // ③ 停用：两个面都关（= 面板的「停用」按钮做的事）
+    await setSkillUserInvocable(target, false)
+    assert.deepEqual(await invocationOnDisk(file), { modelInvocable: true, userInvocable: false })
+    await setSkillEnabled(target, false)
+    assert.deepEqual(await invocationOnDisk(file), { modelInvocable: false, userInvocable: false })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('toggling one face leaves the other byte-for-byte untouched', async () => {
+  // ⚠️ 两个开关必须互不干扰：只改一行、另一行逐字节不动（技能文件是用户手写的资产）。
+  // 这条也守住「两个字段的方向各自正确」——把 user-invocable 的缺省方向写反的话，
+  // 关它就会变成删掉那一行（而它缺省是 true，删掉等于**打开**），这里会红。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-face-isolation-'))
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  const file = join(root, 'zhanggui', 'SKILL.md')
+  const original = '---\nname: zhanggui\ndescription: demo\n---\n\nbody\n'
+  await writeFile(file, original)
+  try {
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+
+    // 只关用户面：应当**新增**一行 `user-invocable: false`（它缺省是 true，所以必须写字面量）
+    await setSkillUserInvocable(target, false)
+    const afterUserOff = await readFile(file, 'utf8')
+    assert.match(afterUserOff, /^user-invocable: false$/m, '关掉一个缺省为 true 的字段必须写字面量 false')
+    assert.doesNotMatch(afterUserOff, /disable-model-invocation/, '不得顺手动另一个面')
+
+    // 再关模型面：现在两行都在
+    await setSkillModelInvocable(target, false)
+    const both = await readFile(file, 'utf8')
+    assert.match(both, /^disable-model-invocation: true$/m)
+    assert.match(both, /^user-invocable: false$/m)
+
+    // 只打开用户面：删掉 user-invocable 那一行（缺省即 true），模型面那行**必须原样留着**
+    await setSkillUserInvocable(target, true)
+    const afterUserOn = await readFile(file, 'utf8')
+    assert.doesNotMatch(afterUserOn, /user-invocable/, '打开缺省为 true 的字段 = 删掉那一行')
+    assert.match(afterUserOn, /^disable-model-invocation: true$/m, '另一个面必须原样留着')
+
+    // 全部打开 → 逐字节还原原文（开关不留痕迹）
+    await setSkillModelInvocable(target, true)
+    assert.equal(await readFile(file, 'utf8'), original, '两个面都打开后必须逐字节还原原文')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unknown invocation face is refused rather than writing a made-up field', async () => {
+  // 面名来自 wire：拼错时必须拒绝，不能按名字拼一个宿主不认的键写进用户的 frontmatter。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-face-unknown-'))
+  await mkdir(join(root, 'zhanggui'), { recursive: true })
+  const file = join(root, 'zhanggui', 'SKILL.md')
+  const original = '---\nname: zhanggui\ndescription: demo\n---\n\nbody\n'
+  await writeFile(file, original)
+  try {
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+    await assert.rejects(
+      () => setSkillInvocationFace(target, 'modelInvocableTypo', false),
+      /未知的调用面/,
+      '未知面名必须被拒绝',
+    )
+    await assert.rejects(() => setSkillInvocationFace(target, 'constructor', false), /未知的调用面/,
+      '原型链上的名字也不算合法面名')
+    assert.equal(await readFile(file, 'utf8'), original, '被拒后文件必须逐字节不变')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

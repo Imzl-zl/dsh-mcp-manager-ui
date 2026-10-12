@@ -132,12 +132,15 @@ test('client descriptors carry both codec channels, including the skills namespa
       assert.equal(typeof codec.create().parse, 'function', subject + ' 的 create() 没有返回可用 schema')
     }
     // 反向下限：skills 的 descriptor 确实在里面，否则上面的循环对它们空转也会「通过」。
-    // 数量必须与 lib/typert.js 的 skills 条目数一致（typert-manifest 会独立核对那一边）。
-    // 12 = 13 − 2 + 1：内置精选目录（market）与 skills.sh 补充搜索（searchRemote）随市场只留
-    // skillhub.cn 一起下线，三条契约边同时删；setModelInvocable（面板的「模型自动调用」开关）
-    // 随后补上一条。数字仍然精确，所以少登记一条客户端 descriptor 依旧会红。
+    //
+    // ⚠️ 这里刻意用**下界**而不是精确数字（跨行教训 12：常驻的计数类断言用下界）。
+    // 精确数字曾经用于抓「少登记一条 descriptor」，但那个职责已经由
+    // package-contract 的三边同序用例**更精确地**承担了（它把 host 的 @Remote 清单、
+    // lib/typert.js 的 invocations 与客户端的 descriptor 三者逐项比对：
+    // 少一条就长度不等、错序就位置不等，两种都会红）。这里再用精确数字只会让
+    // 「每加一个技能面方法就要改这个数字」——而它比真实契约更容易过期。
     const skills = contribution.descriptors.filter((descriptor) => descriptor.namespace === 'skillsManager')
-    assert.equal(skills.length, 12, `客户端的 skills descriptor 应为 12 条，实际 ${skills.length}`)
+    assert.ok(skills.length >= 13, `客户端的 skills descriptor 只读到 ${skills.length} 条（至少应有 13 条）`)
     await dispose()
   } finally {
     cleanup()
