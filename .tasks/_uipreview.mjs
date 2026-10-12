@@ -28,6 +28,22 @@ for (const f of ['base.css', 'design-platform.css', 'corner-shape.css', 'brand-f
   hostCss += `\n/* ===== host: ${f} ===== */\n` + await readFile(join(HOST, f), 'utf8')
 }
 
+/**
+ * 嵌进来的宿主 CSS 是**第三方代码**（deepseek-harness，MIT，Copyright (c) 2026 DeepSeek）。
+ * 生成物里必须带上它的版权与许可声明——MIT 要求「substantial portions」随附声明，
+ * 而这里内联的是整份 design-platform.css（约 130KB），显然算 substantial。
+ * 同时也说清它只是**预览用**：真机里这些样式由宿主的 ui-theme 插件注入，本插件一行都不碰。
+ */
+const HOST_CSS_ATTRIBUTION = `/*
+ * Third-party CSS, included verbatim for OFFLINE PREVIEW ONLY.
+ * Source: deepseek-harness @deepseek-ai/dsh-client-ui-theme (packages/client/ui-theme/src/styles)
+ * License: MIT — Copyright (c) 2026 DeepSeek
+ *
+ * 真机上这些样式由宿主的 ui-theme 插件注入；本插件不复制也不消费这份文件，
+ * 它只是为了让预览页在没有宿主的情况下也能用真令牌渲染。
+ * 重新生成：node .tasks/_uipreview.mjs
+ */`
+
 // ── ③ 真组件 → 真树（装载手法与 skills-client.test.mjs 一致）────────────────
 const exportMarker = 'exports.inject = inject;'
 const instrumented = clientSource.replace(
@@ -196,7 +212,8 @@ const out = `<!doctype html>
      第一版就是这样，量出来一切正常，其实断点根本没生效（假绿）。 -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>技能面板 UI 预览（真主题 + 真样式 + 真组件）</title>
-<style>${hostCss}</style>
+<style>${HOST_CSS_ATTRIBUTION}
+${hostCss}</style>
 <style>${panelCss}</style>
 <style>
   .pv-wrap{padding:16px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111)}

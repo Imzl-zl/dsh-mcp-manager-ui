@@ -13,6 +13,11 @@ node_modules/
 # 人读的结论在 .tasks/mcp-servers-report.md，那份是要提交的。
 .tasks/*-dump.json
 
+# UI 预览页的**生成物**：`node .tasks/_uipreview.mjs` 一秒重建，且它内联了宿主的
+# design-platform.css（约 130KB 第三方代码）。提交它会在每次改样式后立刻过期，
+# 还把别人的一份 CSS 长期留在本仓库里 —— 要提交的是**生成器**（.tasks/_uipreview.mjs）。
+.tasks/_uipreview.html
+
 # 一次性筛选/实跑用的临时脚本。`tmp` 前缀就是「别提交」的意思，免得哪天误 add。
 .tmp-*
 
