@@ -744,6 +744,58 @@ test('detail reports the invocation parsed from the very bytes it returns as the
   }
 })
 
+test('the host picks up a disabled skill without a restart (the docs must not tell users to restart)', async () => {
+  // ⚠️ 这条钉的是**用户可见文案的前提**：docs/skills.md 与详情页的提示都说「不必重启 DSH」，
+  // 而旧文案写的是「重启 DSH 最稳妥」——那句话会让用户白重启一次。
+  //
+  // 断言必须问**真宿主**：文件监听（chokidar，depth 1）是宿主的行为，替身测不出它。
+  // 实测这个窗口是 100~300ms（受 watcher 的 200ms stabilityThreshold 支配），
+  // 这里给 5s 余量——用例要证明的是「会自动生效」，不是「多快生效」（钉死时间会变成 flaky）。
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SkillRegistry, isModelInvocable } = await import('@deepseek-ai/dsh-skill')
+  const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+
+  const base = await mkdtemp(join(tmpdir(), 'dsh-live-refresh-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  const dshHome = join(base, 'dsh-home')
+  await mkdir(join(root, 'the-skill'), { recursive: true })
+  const file = join(root, 'the-skill', 'SKILL.md')
+  await writeFile(file, '---\nname: the-skill\ndescription: 演示\n---\n\n正文\n')
+
+  // ⚠️ `watch: true` 是真机默认（presets 都没关它，profile 也没覆盖）——这正是这条用例的前提。
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  const fiber = ctx.plugin({
+    apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+  }, { dshHome, agentsHome, watch: true })
+  await fiber
+  try {
+    const hostCtx = {
+      get: (n) => ctx.get(n),
+      loader: { entries: () => [{ options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome, agentsHome } } }] },
+    }
+    const modelHas = async () => (await ctx.skills.list({})).filter(isModelInvocable).some((s) => s.name === 'the-skill')
+    assert.equal(await modelHas(), true, '前提：停用前模型目录里有它')
+
+    // 用**面板自己的写路径**停用（不是手改文件）
+    const row = (await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, {})).skills[0]
+    await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx },
+      { ...row, projectPath: row.cwd, enabled: false })
+
+    let elapsed = null
+    for (let i = 0; i < 50; i += 1) {
+      if (!(await modelHas())) { elapsed = i * 100; break }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    assert.notEqual(elapsed, null,
+      '宿主必须**自己**发现这次改动（文件监听）——若这条红了，文档里「不必重启」的说法就不成立，要么改实现要么改文案')
+  } finally {
+    await fiber.dispose?.()
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
 test('setModelInvocable writes the referenced file and refuses a read-only root', async () => {
   // 面板的开关走这条 RPC。落点只认引用（与 setEnabled 同一条纪律）：客户端送 root，服务端拿
   // 自己算出来的目标核对；bundled 根一律拒。
