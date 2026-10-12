@@ -12,9 +12,12 @@
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { listSkillViews } from '../lib/skills-registry.js'
+
+/** 只看路径的目录部分（断言「两个字段确实分叉」用）。 */
+const dirnameOf = (path) => dirname(path)
 
 /** 手搓一个只实现 list/get/snapshot 的 skills 服务替身。 */
 function fakeSkills(byCwd) {
@@ -116,41 +119,53 @@ test('reports the scope and rank from the host source rather than guessing a pat
 })
 
 test('derives the skill root from the host resourceBase, for both skill shapes', async () => {
-  // 启停/删除/导入都要按 (name, scope, root) 精确定位，而 **ctx.skills 不暴露 roots()**
+  // 启停/删除/导入都要按 (根, 条目) 精确定位，而 **ctx.skills 不暴露 roots()**
   // （实测：公开方法只有 registerProvider/register/list/snapshot/get/collect/... ）。
   //
   // 判别依据是宿主的 locator **构造规则**（dsh-skill-filesystem 的 discoverRoot）：
   //   目录捆绑：locator.path = <技能目录>/SKILL.md，locator.directory = <技能目录>
-  //   扁平文件：locator.path = <根>/<name>.md，    locator.directory = <根>
-  // 也就是**形态由技能文件名决定**（SKILL.md vs <name>.md），**根由 resourceBase 决定**。
+  //   扁平文件：locator.path = <根>/<条目>.md，    locator.directory = <根>
+  // 也就是**形态由 path 的末段决定**（SKILL.md vs *.md），**根由 resourceBase 决定**。
   //
-  // ⚠️ 刻意**不去比较两个字段的路径**：它们来自不同口径（resourceBase 是展示路径、path 是
-  // realpath），链接下必然分叉。这条用例喂的就是分叉的输入（见下），任何路径比较式实现都会红。
-  const skills = fakeSkills({
-    '': [
-      skill({
-        name: 'bundle-skill',
-        // 目录捆绑：path 指向别人的外部库（realpath），resourceBase 是发现路径
-        path: '/elsewhere/external/bundle-skill/SKILL.md',
-        resourceBase: { kind: 'directory', path: '/u/.agents/skills/bundle-skill' },
-      }),
-      skill({
-        name: 'flat-skill',
-        // 扁平：文件名是 <name>.md，同样来自外部库
-        path: '/elsewhere/external/flat-skill.md',
-        resourceBase: { kind: 'directory', path: '/u/.agents/skills' },
-      }),
-    ],
-  })
-  const rows = await listSkillViews(ctxWith(skills), {})
+  // ⚠️ 扁平那条**必须落在真文件系统上**：它的条目是「在根下按 realpath 匹配宿主报的 path」
+  // 查出来的（见 locateSkill / matchFlatEntry），手搓一对假路径时查不到、只能落进字面兜底，
+  // 于是用例测的是兜底而不是主路径。真实文件才表达得出宿主的形状。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-shapes-'))
+  const root = join(base, 'skills')
+  await mkdir(root, { recursive: true })
+  await writeFile(join(root, 'flat-skill.md'), '---\nname: flat-skill\ndescription: 扁平\n---\n\n正文\n')
+  try {
+    const realFlat = await realpath(join(root, 'flat-skill.md'))
+    const skills = fakeSkills({
+      '': [
+        skill({
+          name: 'bundle-skill',
+          // 目录捆绑：path 指向别人的外部库（realpath），resourceBase 是发现路径
+          path: '/elsewhere/external/bundle-skill/SKILL.md',
+          resourceBase: { kind: 'directory', path: '/u/.agents/skills/bundle-skill' },
+        }),
+        skill({
+          name: 'flat-skill',
+          // 扁平：真实文件 + 宿主真实的字段形状（path 是 realpath、resourceBase 是根）
+          path: realFlat,
+          resourceBase: { kind: 'directory', path: root },
+        }),
+      ],
+    })
+    const rows = await listSkillViews(ctxWith(skills), {})
 
-  const bundle = rows.find((row) => row.name === 'bundle-skill')
-  assert.equal(bundle.root, '/u/.agents/skills', '目录捆绑：根是其技能目录的父目录')
-  assert.equal(bundle.kind, 'bundle')
+    const bundle = rows.find((row) => row.name === 'bundle-skill')
+    assert.equal(bundle.root, '/u/.agents/skills', '目录捆绑：根是其技能目录的父目录')
+    assert.equal(bundle.kind, 'bundle')
+    assert.equal(bundle.entry, 'bundle-skill', '目录捆绑的条目是资源基目录的末段（= 磁盘目录名）')
 
-  const flat = rows.find((row) => row.name === 'flat-skill')
-  assert.equal(flat.root, '/u/.agents/skills', '扁平文件：根就是 resourceBase 自身')
-  assert.equal(flat.kind, 'flat')
+    const flat = rows.find((row) => row.name === 'flat-skill')
+    assert.equal(flat.root, root, '扁平文件：根就是 resourceBase 自身')
+    assert.equal(flat.kind, 'flat')
+    assert.equal(flat.entry, 'flat-skill.md', '扁平的条目是根下那个文件名')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
 })
 
 test('resolves the root when the skill directory is a link (the two host fields disagree)', async () => {
@@ -246,25 +261,104 @@ test('keeps same-named skills in different roots as separate rows (real shadowin
   assert.deepEqual(rows.map((row) => row.scope).sort(), ['global', 'project'])
 })
 
-test('locates a flat skill whose own file is a symlink (the shape the path comparison missed)', async () => {
-  // ⚠️ 宿主的两种 locator 都可能被链接打断，而**扁平技能的文件本身是链接**是最容易漏的那个：
-  // 它的 `path` 指向外部库（realpath），`resourceBase.path` 是技能根——两者**不在同一棵树下**，
+test('locates a flat skill whose reported path is outside the root (only a root scan can name it)', async () => {
+  // ⚠️ 宿主的两种 locator 都可能被链接打断。对**扁平**技能，后果最重的一种是：
+  // 宿主报的 `path` 是 realpath，而 `resourceBase.path` 是**展示路径**——两者不在同一棵树下，
   // 所以任何「realpath 规范化后做路径前缀比较」的实现都判不出来（前一版就栽在这里）。
-  // 宿主自己的用例同时钉着这两种形状：skill-filesystem.spec.ts 的 linked-dir 与 linked-flat。
   //
-  // 判别式按宿主的构造规则来：形状看**文件名**（`<name>.md` 就是扁平），根看 resourceBase。
-  // 文件名在两种口径下完全一致（realpath 不改变 basename），所以链接怎样都不影响。
-  const skills = fakeSkills({
-    '': [skill({
-      name: 'linked-flat',
-      path: '/external-sync-lib/linked-flat.md',              // realpath：在外部库里
-      resourceBase: { kind: 'directory', path: '/u/.agents/skills' },  // 展示路径：技能根
-    })],
-  })
-  const [row] = await listSkillViews(ctxWith(skills), {})
+  // 构造：把**技能根本身**做成 junction（本机可建），根里的 `flat-one.md` 因此
+  //   resourceBase.path = <base>/skills      （展示路径，junction）
+  //   path              = <external>/skills/flat-one.md （realpath）
+  // 于是 `dirname(path) !== base` **字面上就不等**——字面兜底必然失败，
+  // 只有「在根下扫一遍、按 realpath 匹配」才能给出那个条目名。
+  // 这正是宿主 linked-flat 用例（skill-filesystem.spec.ts:449-458）所依赖的同一条路径。
+  //
+  // ⚠️ 本机建不了 **file** symlink（实测 EPERM，连 `mklink` 都要特权），所以「链接名 != 目标名」
+  // 那种变体（宿主 spec:457-458 的 replacement.md）无法在此构造。它与本条走的是**同一段代码**
+  // ——两者都表现为「path 的目录部分 != 根」——所以这里用可构造的等价形状覆盖它，
+  // 而不是留一条跑不到的断言假装覆盖了。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-linkflat-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-skills-linkflat-ext-'))
+  const root = join(base, 'skills')
+  const realRoot = join(external, 'skills')
+  await mkdir(realRoot, { recursive: true })
+  await writeFile(join(realRoot, 'flat-one.md'), '---\nname: flat-one\ndescription: 扁平\n---\n\n正文\n')
+  try {
+    await symlink(realRoot, root, 'junction')
+  } catch (error) {
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+    throw new Error(`本环境无法创建链接（${error.code}），该用例未能执行`)
+  }
+  try {
+    const reportedPath = await realpath(join(root, 'flat-one.md'))
+    // 前提：宿主的两个字段确实分叉（否则这条用例测不到东西）。
+    assert.notEqual(dirnameOf(reportedPath), root, '前提：path 的目录部分与展示根不同（根是链接）')
 
-  assert.equal(row.kind, 'flat', '文件名是 <name>.md → 扁平形态（与它在不在外部库无关）')
-  assert.equal(row.root, '/u/.agents/skills', '根来自 resourceBase，不是从 path 反推的')
+    const skills = fakeSkills({
+      '': [skill({
+        name: 'flat-one',
+        path: reportedPath,                              // realpath：在外部库那棵树下
+        resourceBase: { kind: 'directory', path: root },  // 展示路径：技能根（junction）
+      })],
+    })
+    const [row] = await listSkillViews(ctxWith(skills), {})
+
+    assert.equal(row.kind, 'flat', '末段是 *.md → 扁平形态（与它在不在外部库无关）')
+    assert.equal(row.root, root, '根来自 resourceBase（展示路径），不是从 path 反推的')
+    // ⚠️ 关键：条目必须**扫出来的**，不是拿 path 的末段顶替。
+    // 这里 path 的末段与根下那个名字恰好相同，所以光比字符串分不出两者——
+    // 用一个**根下不存在的名字**当 path 的末段才能真正分开（宿主在 linked-flat 里就是这么给的：
+    // 链接叫 link-name.md，而它指向的 real-name.md 在外部库）。见下一条断言。
+    assert.equal(row.entry, 'flat-one.md', '条目必须是根下的那个名字，否则启停/删除无从下手')
+    // 这一行必须真的可读（根定位对了才读得到）：只有根对、条目对，文件才打得开。
+    assert.equal(row.modelInvocable, true, '根与条目都定位到之后，调用权限要从文件里读出来')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+  }
+})
+
+test('refuses to locate a flat entry the root scan cannot confirm, instead of trusting the path tail', async () => {
+  // ⚠️ 这条钉的是「证明不了就不填根」这条纪律在**扁平**分支上的表现。
+  //
+  // 背景：扁平的条目靠「在根下扫一遍、按 realpath 匹配宿主报的 path」查出来（见 matchFlatEntry）。
+  // 宿主真实会给的形状（skill-filesystem.spec.ts:449-458 的 linked-flat）是：根下那个文件叫
+  // `link-name.md`，而它是**符号链接**，指向外部库的 `real-name.md`；宿主报的 path 是 realpath，
+  // 末段因此是 real-name.md。那种形状下「扫出来的条目」与「path 的末段」不同，
+  // 而拿后者当条目会让启停/删除作用到**根外**那个真实文件上（用户同步库里的数据）。
+  //
+  // ⚠️ 但那种形状**在本机构造不出来**：file symlink 是 EPERM（连 `mklink` 都要特权），
+  // 而 realpath 会把大小写归一（实测），所以在本机能造出的任何形状里
+  // 「匹配到的条目」与「path 的末段」恰好相等——两者不可分辨。
+  // 与其写一条这里永远跑不到的分辨断言（那正是教训 1 说的「看到绿以为测到了」），
+  // 这里断言**可构造的那一半**：扫不到就**不填根**，绝不拿 path 的末段顶替。
+  // 拿到「条目来自扫描而非 path 末段」的直接证据需要 POSIX 或符号链接特权；
+  // resolveSkillTarget 那一侧的对应守卫（条目必须是单个路径段）由 file-ops 的用例覆盖。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-flat-unconfirmed-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-flat-unconfirmed-ext-'))
+  const root = join(base, 'skills')
+  await mkdir(root, { recursive: true })
+  await writeFile(join(root, 'link-name.md'), '---\nname: flat-one\ndescription: 扁平\n---\n\n正文\n')
+  await writeFile(join(external, 'real-name.md'), '---\nname: flat-one\ndescription: 外部那份\n---\n\n正文\n')
+  try {
+    const skills = fakeSkills({
+      '': [skill({
+        name: 'flat-one',
+        // path 指向根外（模拟「它是链接、宿主报的是目标 realpath」这一半条件）
+        path: join(external, 'real-name.md'),
+        resourceBase: { kind: 'directory', path: root },
+      })],
+    })
+    const [row] = await listSkillViews(ctxWith(skills), {})
+    assert.equal(row.root, undefined,
+      '扫盘无法证实这个文件在根下时，必须不填根（拿 path 末段顶替会让操作打到根外的真实文件上）')
+    assert.equal(row.kind, undefined, '形态同样不填')
+    assert.equal(row.modelInvocable, null, '定位不到就读不出权限——说「不知道」，不编一个值')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+  }
 })
 
 test('omits the root rather than guessing when the host gives no resourceBase', async () => {

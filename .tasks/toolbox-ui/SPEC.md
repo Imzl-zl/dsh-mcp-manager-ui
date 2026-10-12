@@ -48,11 +48,20 @@ Retired-ids: D3, D4
 
 1. **宿主基线 `0.2.0-rc.2`**，peer 下限维持 `>=0.1.5-rc.1 <0.2.0`（D10 不用 panellist 槽位，故无需抬高下限）。
 2. **skills 侧根目录由宿主决定，本插件只读不猜**：`<projectRoot>/.dsh/skills`(100) · `<projectRoot>/.agents/skills`(200) · custom(300) · `<dshHome>/skills`(400，跳过 `.system`) · `<agentsHome>/skills`(500) · bundled(600，只读)。
-3. **禁用 = `SKILL.md` ↔ `SKILL.md.disabled` 重命名。**
-   - *证据*：DSH 无 `disabled` 字段（MCP 有、skills 没有）；`isRelevantWatchEvent` 对目录捆绑只看 `segments[1] === "SKILL.md"`（`dsh-skill-filesystem/lib/index.js`），改名触发 unlink → provider 失效 → 下次查询刷新；扁平文件规则要求 `name.endsWith(".md")`，`x.md.disabled` 不匹配、不会被误扫。
-   - *缺口与做法*：**禁用后技能从宿主目录消失**，所以面板无法从 `ctx.skills.list()` 得知「存在但被禁用」——必须**自行扫描各 root 下的 `SKILL.md.disabled` / `<name>.md.disabled`**，再与宿主目录做差集。这是「管理」相对「模型目录」的第二个独有价值（第一个是非法条目诊断）。`dsh-atomic-write` 只导出 `writeFileAtomic` 与 `withFileLock`、**没有 rename**，启停直接用 `node:fs/promises` 的 `rename`。
-   - *待扫的根来自能力，不来自观察*：根集合必须从 `skillTargetsView` 取（宿主支持的全部位置），**不得从可见行反推**——某个根里的技能全被停用时可见行里没有那个根，于是它永远不被扫，面板零显示也无法恢复（与「启用判据写反」叠加就是永久失联）。禁用行还必须带上 `source` 与项目路径：客户端的分组、作用域标签与药丸全靠它们，缺了就并成一个无名组。
+3. **停用 = 写宿主原生的两个调用面字段**（`disable-model-invocation: true` + `user-invocable: false`），**不改文件名**。
+   - *证据*：DSH 无 `disabled` 字段（MCP 有、skills 没有），但有这两个策略字段（`dsh-skill-filesystem:1007-1023`）；两者同时关掉 = 模型面与用户面都拿不到它。这正是 VS Code / Copilot 官方文档里叫 “Disabled skills” 的那一档（<https://code.visualstudio.com/docs/agent-customization/agent-skills>）。宿主自己的用例把 `{false,false}` 命名为 `trusted-only`，是一等状态。宿主 `list` 是**调用无关**的，所以两个面都关掉的技能**照样出现在目录里**。
+   - *做法*：`setSkillEnabled` 复用 `setFrontmatterBoolean` 写两个字段（字段名与缺省方向只在 `INVOCATION_FIELDS` 声明一次：`disable-model-invocation` 缺省 false 且与 `modelInvocable` **反向**，`user-invocable` 缺省 true 且同向——任一层反了都会静默写出语义相反的文件）。「启用」= 两者都回到缺省，因此开→关→开**逐字节还原**原文。
+   - *为什么不再改名*（2026-10-12 改，见 `AUDIT-skills-contract.md`）：① `SKILL.md.disabled` 不是任何规范认可的形态，而 `~/.agents/skills` 是 Agent Skills 标准的共享位置（VS Code / Codex 都读它）——改名等于为了本面板的一个开关在**别的工具里**把用户的技能弄坏；② 状态只存在于文件名里 → 面板必须自己扫盘 → **第二真值来源**，是「同一身份两行」「链接技能停用后消失」这些缺陷的出处；③ 恢复要能算出改名目标，而目标不能按技能名推。改用原生字段后这三类问题**在结构上消失**：宿主照样报告被停用的技能，面板不需要扫盘。
+   - *代价（如实记）*：「启用」会把两个调用面都恢复成可调用，用户手工设过的 `disable-model-invocation: true` 会被一次往返重置。这是「两档合成一个开关」的固有代价，所以详情页把两个面**各自显示**出来（「模型自动调用」有就地开关；`user-invocable` 只显示值——**没有**用户面开关，文案不得承诺）。
+   - *旧机制残留（迁移读取）*：`scanDisabledSkills` 保留，但只用于把 1.6.x 用户磁盘上（我们自己写下的）`.disabled` 文件列出来并允许恢复，**不是**第二个真值来源，下一个大版本可整体删除。
+     ⚠️ 残留的「停用」在**文件名**里，所以它的 `enabled` **恒为 false**（不从文件内容派生），而「启用」必须走 **rename**（`SKILL.md.disabled` → `SKILL.md`）——写 frontmatter 字段对它毫无意义（宿主看不见那个文件），只会得到「报成功但什么都没发生」。
 4. **frontmatter 按 DSH 源码逐字校验**：`name` 必须匹配 `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`；必需 `name`+`description`；可选 **`whenToUse`（驼峰）**、`metadata`、`disable-model-invocation`、`user-invocable`。**不是**外部规范的 `when_to_use`（那是 Claude Code 的字段）；DSH 明确拒绝驼峰式 `disableModelInvocation`。**issue 顺序照抄宿主校验顺序**，使 `issues[0]` 恒等于宿主跳过的那个原因。
+
+4b. **形态判定一律看磁盘，且校验不得比宿主更严**（2026-10-12 新增，审查拦下的**整页级**故障）。
+   - *要求*：`resolveSkillTarget` 的形态（bundle / flat）由**磁盘事实**决定——`<根>/<条目>/SKILL.md` 存在即目录捆绑，否则那条路径本身；wire 上的 `kind` 只当提示（报错不影响拼哪条路径，越界由 `entry` + `root` 保证）。`entry` 只校验「单个路径段」。
+   - *证据*：曾经加过「拒绝 `kind: bundle` + 条目以 `.md` 结尾」，理由是「宿主会把 `.md` 结尾的目录当扁平技能」——**理由反了**：宿主 `discoverRoot` 是**目录分支优先**（`entry.type === 'directory' ? <目录>/SKILL.md : entry.type === 'file' && name.endsWith('.md') ? …`），所以 `odd.md/` 是**合法技能**。它让 `resolveSkillTarget` 抛错 → `list()` 整体 reject → **技能页整块打不开**，连健康技能都管不了（真机实测）。
+   - *纪律*：① **判据不得比宿主更严**（磁盘条目名不归宿主管，收窄 = 重造「宿主认可、面板操作不了」）；② **列表类 RPC 不许被单条数据的错误整死**——单点容错做在读那一行的地方（迁移支线的权限推导即如此）。⚠️ 量级不同：同一条校验在单条操作上是「这一行不可用」，在列表上是「**整页**不可用」。
+   - *刻意不拦的*：`:`（Windows 的 NTFS 备用数据流语法）——POSIX 上它是合法文件名、宿主照收，拦掉就会重犯上面这条；放行并未越过已有边界（仍是单段、仍在宿主报告过的根内）。权衡写进了代码注释。
 5. **契约两侧必须同步**：`lib/typert.js` 的 `TYPERT` 与 `lib/client.js` 的 `*_CONTRIBUTION` 由 `test/client-lifecycle.test.mjs` 逐字段 deepEqual 绑定；codec 必须**同时**写 `schema` 与 `create()`（宿主 0.1.5-rc.x 查 `schema`、0.1.6-alpha.2 起查 `create()`，少写任一即在那一侧加载被拒）。
 6. **样式闸门**：新增样式必须并入 `*_CSS` 常量（`extractPanelCss` 已支持多常量）；禁字面色值、禁自造圆角刻度；别名层唯一宿主为 `body`；全圆角同规则补 `corner-shape:round`；等宽只用 `--ds-font-family-code`；抬升面（`--dsw-elevation-*` / `--dsw-shadow-lv*`）**不得再叠中性边框**（elevation 自带 0.5px stroke）；品牌色是单色（`--dsw-alias-brand-primary` 浅 `#0f1115` / 深 `#f9fafb`），蓝色是 `--dsw-alias-state-business-primary`，别混；**每个被渲染出来的类都必须有样式**（有扫描器，拼错类名的表现是「这块没排版」，不像报错那样显眼）。
    - 已有 `@media (prefers-reduced-motion:reduce)` 动效降级并有用例守着，**保留**；`.dsh-mcp-dot.loading` 的呼吸是刻意不关的例外。
@@ -84,7 +93,7 @@ Retired-ids: D3, D4
     - 压缩包按**魔数**识别（下载 URL 可以不带扩展名），支持 zip(stored/deflate)/tar/tar.gz；防 zip slip、拒符号链接与硬链接、按**实际解出字节**卡总量（头部声明值是攻击者可控的），限额 10 MiB/文件、25 MiB 总量、1000 条目；**先解到系统 tmp** 再挑技能根（暂存放技能根内会被宿主扫成一条技能）。技能根取**最浅**的 `SKILL.md`，同层多个则**拒绝**（多技能包静默挑一个等于猜）。目录导入同样拒绝符号链接/junction（`fs.cp` 默认保留链接），**树根自身也要查**（只从内部走会漏掉「调用方给的路径就是 junction」那种情形）。
     - **限额必须发生在解压过程内**：`inflateRawSync` / `gunzipSync` 都带 `maxOutputLength`。限额检查原本在解压**之后**，于是 0.2 MiB 的 deflate 包能先分配 256 MiB 再被拒（实测 RSS +520 MiB）——压缩比是现成的 DoS 通道。镜像地，压缩包**输入**大小必须在 `readFile` 之前用 `stat` 卡住（32 MiB）。
     - **tar 必须认 PAX / GNU 扩展头**：`git archive`、GitHub codeload tarball、部分 `npm pack` 产物的第一个块就是 `pax_global_header`（typeFlag `g`）。`x`/`g` 当元数据消费（`path=` 记录可给出超长条目名）、`L` 应用到下一条目、`K` 跳过；只对真正的链接/设备/FIFO 保持拒绝。夹具必须能造出这种包，否则「支持 tar」是假绿。
-    - **所有写入都在锁内 + 原子提交**：`setSkillEnabled` / `removeSkill` / `importSkill` 一律 `withFileLock(join(root, name))`（同一把键，同名操作彼此串行）——并发同名导入曾双双通过「目标空闲」检查，随后一条的失败清理删掉另一条正在写的目录。落盘用「根内**对宿主不可见**的暂存名 → rename」：扁平用不带 `.md` 后缀的临时名（宿主只认 `*.md`），目录捆绑用 `<root>/.dsh-import-<随机>/skill` 两层结构（宿主判定技能看 `<dir>/SKILL.md`，外层没有）。
+    - **所有写入都在锁内 + 原子提交**：`setSkillEnabled` / `removeSkill` / `setSkillModelInvocable` / `importSkill` 一律 `withFileLock(lockKeyOf(target))`（**同一把键**＝`<根>/<条目>`，同一目标上的操作彼此串行）——并发同名导入曾双双通过「目标空闲」检查，随后一条的失败清理删掉另一条正在写的目录。锁键与**创建**用同一个算法：导入那一刻还没有实体，只能用展示路径算键，所以操作侧也必须用展示路径（改用 realpath 会让「创建」与「后续操作」在链接技能上分叉、互相插队）。落盘用「根内**对宿主不可见**的暂存名 → rename」：扁平用不带 `.md` 后缀的临时名（宿主只认 `*.md`），目录捆绑用 `<root>/.dsh-import-<随机>/skill` 两层结构（宿主判定技能看 `<dir>/SKILL.md`，外层没有）。
 21. **样式注入只发生一次，且拼接顺序有意义**：`MCP_CSS` 与 `SKILLS_CSS` 合并为**一次** `__injectCss` 调用——那个函数的 id 与 `data-plugin-css` 写死，同 id 二次调用会复用同一个 `<style>` 并覆写 `textContent`，skills 样式会静默冲掉 MCP 面板样式。
     - 两张表按 MCP → SKILLS 顺序拼接，**同特异性下 `SKILLS_CSS` 天然压过 `MCP_CSS`**：任何「覆盖块」必须放在 `SKILLS_CSS` 的最末尾，并且这个位置约束要写在注释里。两次真机事故都出自这里（`.dsh-mcp-pane-off` 被后面的 `.dsh-mcp-card{display:flex}` 压掉、外壳对齐块接在 `MCP_CSS` 末尾导致圆角与选中背景不生效）。
     - 改完必须到真机上看 `getComputedStyle` 的实际值，不能只看源码顺序合理。
@@ -97,9 +106,15 @@ Retired-ids: D3, D4
 26. **wire 只送引用，落点由服务端解析**：`setEnabled` / `removeSkill` / `importSkill` / `skillHubInstall` 的载荷只带一个引用 `{source, root, projectPath}`；服务端拿**自己算出来的**目标集合（`resolveTargetReference` → `skillTargetsView`）核对，命不中就拒，`writable` 一律以服务端那份为准（载荷里那个不再读）。外部源安装还必须在 wire 上带 `acknowledged: true`。
     - *为什么*：`root`/`writable` 直接取自载荷时，「写入限定在技能根内」「bundled 只读」「勾选后才可装」这三条**只由客户端保证**——一个 `removeSkill {name:'<任意 kebab-case 名>', root:'<任意目录>'}` 就能递归删掉 `<任意目录>/<名>`（例如整个仓库），`importSkill {root:'<bundled 路径>', writable:true}` 能写进只读根，而确认勾选框只是 UI 上的一个 `disabled` 表达式。判据必须在**持有真值的那一侧**。
     - *纪律*：新增变更类 RPC 一律照此办理——载荷里出现绝对路径或 `writable` 就是回归。
-    - *读也按引用*：`detail` 同样按引用定位到**那个根**再读文件（`resolveTargetReference` → `resolveSkillTarget` → `readSkillFile`），不走 `ctx.skills.get(name)`——那个按 rank 返回生效者，点「被遮蔽」那一行会读到别人的正文（与 D8 的精确模型冲突）。顺带：停用时定位结果是 `.disabled` 路径，所以已停用技能的正文也读得出来。
+    - *读也按引用*：`detail` 同样按引用定位到**那个根**再读文件（`resolveTargetReference` → `resolveSkillTarget` → `readSkillDocument`），不走 `ctx.skills.get(name)`——那个按 rank 返回生效者，点「被遮蔽」那一行会读到别人的正文（与 D8 的精确模型冲突）。
 27. **同一件事只能有一个身份函数**：技能行的身份＝`source + cwd + name`（客户端的 `skillIdentity`），安装目标的身份＝`source + root`（`installTargetId`）。React key、分组键、诊断判据、detail 引用、落点查找全部从这两处派生，**不允许出现第三种写法**。
-    - *为什么*：曾经有四种（行 key `scope:source:name`、分组 `rank\0source\0cwd`、诊断去重 `scope:name`、安装目标 `source`），每一种都要重新记得「同名跨作用域是合法配置」这条事实，漏掉一个就是静默错——诊断列表因为 `scope:name` 撞车而恒为空（调用方只好把输入清空），行的 key 少了 cwd 会让两个工作区的同名技能撞成一行，安装目标只用 source 会把两个工作区合成一项并装进第一个。
+    - *为什么*：曾经有四种（行 key `scope:source:name`、分组 `rank\0source\0cwd`、诊断去重 `scope:name`、安装目标 `source`），每一种都要重新记得「同名跨作用域是合法配置」这条事实，漏掉一个就是静默错——诊断列表因为 `scope:name` 撞车而恒为空（调用方只好把输入清空），行的 key 少了 cwd 会让两个工作区的同名技能撞成一行，安装目标只用 source 会把两个工作区合一项并装进第一个。
+28. **定位一律以宿主给的真实位置为准，技能名不参与定位**（2026-10-12 新增，替代「按技能名拼路径」）。
+    - *证据*：宿主允许磁盘条目名与 frontmatter 的 `name` 不一致（实测：磁盘目录叫 `dir-name`、里面那个文件写 `name: dir-alias`，宿主照收——技能名取自 frontmatter 的 `parsed.name`）；而两个路径字段口径不同（`resourceBase.path` 是展示路径、`path` 是 realpath），链接下必然分叉。
+    - *做法*：一次操作 = `(根引用, 条目)`。**根**由服务端用**自己算出的**目标集合核对（约束 26）；**条目**是根下的直接子条目——目录捆绑取 `resourceBase.path` 的末段（宿主固定构造 `<目录>/SKILL.md`），扁平在根下按 realpath **查**出宿主所报 `path` 对应的那个名字。条目只校验「单个路径段」，**不**收窄到 kebab-case（磁盘条目名不归宿主管）。认不出就**不填根**——猜错会让启停/删除作用在错误的目录上，是本层最危险的失败模式。
+    - *写盘用展示路径*：`<根>/<条目>`，**绝不用 realpath**——技能实体常在用户的同步库（junction），对 realpath 改名/删除就是动用户的数据，而删错方向是本套动作里唯一不可逆的一步。
+    - *为什么是结构修复而不是补丁*：同一根因此前已连爆三次（「目录是链接」→「单文件是链接」→「名字不一致」），每次都只是换一处判据。真正的不变量是**身份与定位分家**：`name` 只用于显示与 wire 上的指认，位置永远来自宿主报告的字段。
+    - *真机证据*：六种形态（目录/扁平 × 普通/链接 × 名字一致/不一致）里**四种**在旧实现下完全不可操作（宿主侧一切正常）；`node .tasks/_accept.mjs` 对照 npm 1.6.5 **8/20** vs 工作树 **19/19**。审查全文见 `.tasks/toolbox-ui/AUDIT-skills-contract.md`。
 
 **Non-goals:**
 

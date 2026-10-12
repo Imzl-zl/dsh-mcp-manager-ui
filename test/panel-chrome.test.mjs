@@ -303,9 +303,10 @@ test('失败横幅把首条原因画出来（挂载失败与工具无法隔离�
 
 test('能力层计数：技能数由面板回传（skills + disabled 之和），MCP 面不显示数字', async () => {
   const internals = loadClientInternals()
+  // 宿主只回**一个**数组：停用不再是「在另一个数组里」，而是行上的派生态（enabled）。
   const callSkills = async (method) => (method === 'market'
     ? { ok: true, skills: [], categoryOrder: [], categoryLabels: {} }
-    : { ok: true, skills: [{ name: 'a' }, { name: 'b' }], disabled: [{ name: 'c' }] })
+    : { ok: true, skills: [{ name: 'a' }, { name: 'b' }, { name: 'c', enabled: false }] })
   const first = await renderMcpTab(internals, callSkills)
   assert.deepEqual(
     ofType(first.tree, internals.Notice).filter((node) => String(node.props.title ?? '').includes('skills 服务未就绪')),
@@ -326,7 +327,7 @@ test('能力层计数：技能数由面板回传（skills + disabled 之和）�
   assert.equal(summaries.length > 0, true, 'SkillsPanel 必须把结果回传给外壳')
   const last = summaries[summaries.length - 1]
   assert.equal(last.state, 'ready')
-  assert.equal(last.count, 3, '计数是 skills 与 disabled 两个数组之和')
+  assert.equal(last.count, 3, '计数就是行数（已停用的技能也是技能：面板里看得见、也点得动）')
   assert.equal(last.scopeTabs[0].count, 3, '作用域药丸「全部」的数字来自同一批行')
 
   // 回传之后外壳要把它显示出来（这一步验的是接线：onSummary → 能力层计数）。

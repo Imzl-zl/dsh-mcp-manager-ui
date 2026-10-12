@@ -43,8 +43,9 @@ See every installed skill's **real scope** and cross-scope shadowing, enable/dis
 **Skills**
 
 - Real scope and cross-scope shadowing: the same name in different scopes is a legal configuration; the panel lists each copy and marks which one wins
-- Enable/disable (`.disabled`), remove, read the body and diagnostics — the reason a skill "does not take effect" is right there in the panel
+- Enable/disable (by writing the two invocation fields in the skill file, **without touching the file itself**), remove, read the body and diagnostics — the reason a skill "does not take effect" is right there in the panel
 - **Model auto-invocation switch**: edits `disable-model-invocation` in `SKILL.md`; turning it off deletes that line (off → on round-trips byte-for-byte). The state always comes from the skill file itself — when it cannot be read the panel says "unknown" instead of guessing
+- **Located by its real position on disk** (never by skill name): skills whose file or directory name differs from the frontmatter `name` can still be read, toggled and removed
 - Market backed by [skillhub.cn](https://skillhub.cn): publisher verification and security-scan findings are disclosed before install, followed by one **explicit confirmation** (validated server-side)
 
 **Shared**
@@ -57,10 +58,10 @@ See every installed skill's **real scope** and cross-scope shadowing, enable/dis
 
 ```sh
 # Recommended: from npm — `dsh plugin update` then upgrades within ^1.x
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.5
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.6
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag)
-dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.5
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.6
 ```
 
 Then **restart `dsh web`**. To uninstall (your existing MCP entries stay):

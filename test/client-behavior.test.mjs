@@ -367,7 +367,7 @@ test('the selected skill row is derived from the current rows, never held', () =
   const { selectedSkillRow } = internals
 
   // 真机缺陷（2026-10-11）：选中存的是**行对象**，列表重新取数后详情仍渲染那个旧对象——
-  // 刚在面板里停用一个技能时，详情还写「已启用」（磁盘上已是 SKILL.md.disabled），
+  // 刚在面板里停用一个技能时，详情还写着旧状态（磁盘上那个文件的两个字段已经改了），
   // 点「刷新」也不变，只有重新选中那一行才对。派生之后没有旧对象可留。
   const key = 'user-dsh\u0000\u0000dsh-only'
   const stale = { key, name: 'dsh-only', enabled: true }

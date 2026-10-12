@@ -43,8 +43,9 @@
 **技能面**
 
 - 真实作用域与同名遮蔽：同名技能跨作用域是合法配置，面板逐条列出并标出哪一份生效
-- 启停（`.disabled`）、删除、读正文与诊断——「技能不生效」的原因直接摆在面板里
+- 启停（写技能文件里的两个调用面字段，**不动文件本身**）、删除、读正文与诊断——「技能不生效」的原因直接摆在面板里
 - **「模型自动调用」开关**：直接改 `SKILL.md` 的 `disable-model-invocation`，关掉=删掉那一行（开→关能逐字节还原原文）；状态一律取自技能文件本身，读不出来就说「未知」而不是猜一个值
+- **定位按磁盘上的真实位置**（不按技能名）：文件/目录名与 frontmatter 的 `name` 不一致的技能照样能读、能启停、能删
 - 市场接 [skillhub.cn](https://skillhub.cn)：安装前披露发布方认证与安全扫描结论，并要一次**显式确认**（该确认在服务端校验）
 
 **公共**
@@ -57,10 +58,10 @@
 
 ```sh
 # 推荐：npm 安装 —— 之后 `dsh plugin update` 在 ^1.x 内自动升小版本
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.5
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.6
 
 # 或固定 GitHub release tag（不自动跨版本，升级要换 tag 重新 add）
-dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.5
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.6
 ```
 
 装完**重启 `dsh web`**。卸载（不会删除 profile 里已有的 MCP 条目）：

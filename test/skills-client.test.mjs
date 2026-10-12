@@ -193,6 +193,9 @@ const skill = (over = {}) => ({
   description: '端到端拥有一个开发请求',
   modelInvocable: true,
   userInvocable: true,
+  // 定位的另一半：根 + 条目（磁盘条目名，可能与 name 不同）+ 形态。
+  entry: 'zhanggui',
+  kind: 'bundle',
   source: 'user-agents',
   scope: 'global',
   root: '/home/u/.agents/skills',
@@ -340,21 +343,28 @@ test('a failed body read renders as a failure, never as an endless spinner', asy
   assert.match(loadingTree, /加载中/, 'loading 态才该显示加载中')
 })
 
-test('detail is asked with the full row reference, so the exact root is read', () => {
+test('detail is asked with the full row reference, so the exact root and disk entry are read', () => {
   // ⚠️ 真机缺陷（第一版）：detail 只传 name → 宿主按 rank 返回**生效者**，
   // 点「被遮蔽」那一行看到的是别人的正文；只传 name 时项目级技能还查不到
-  // （宿主不传 cwd 只扫用户级/bundled 根）。现在送整条引用：name + source + root + 项目路径。
+  // （宿主不传 cwd 只扫用户级/bundled 根）。现在送整条引用。
+  //
+  // ⚠️ 而且必须带 **entry + kind**（磁盘条目与形态），不能只带 name：宿主允许磁盘条目名与
+  // frontmatter 的 `name` 不一致（实测 `dir-name/SKILL.md` 里写 `name: dir-alias` 照收），
+  // 而服务端要按磁盘上的真实位置定位。少了它们，那类技能在面板里所有操作都会失败。
   const internals = loadClientInternals()
   const projectRow = skill({ source: 'project-agents', scope: 'project', cwd: 'C:\\Users\\u\\Desktop\\公众号', root: 'C:\\Users\\u\\Desktop\\公众号\\.agents\\skills' })
   assert.deepEqual(
     list(Object.keys(internals.skillDetailRequest(projectRow)).sort()),
-    ['name', 'projectPath', 'root', 'source'],
-    '必须送整条引用（多送无益、少送会读错根）',
+    ['entry', 'kind', 'name', 'projectPath', 'root', 'source'],
+    '必须送整条引用（多送无益、少送会读错根或定位不到条目）',
   )
   const request = internals.skillDetailRequest(projectRow)
   assert.equal(request.source, 'project-agents')
   assert.equal(request.root, 'C:\\Users\\u\\Desktop\\公众号\\.agents\\skills', '必须带这一行自己的根')
   assert.equal(request.projectPath, 'C:\\Users\\u\\Desktop\\公众号')
+  // 条目与形态也必须在：它们是定位的另一半（根 + 条目 = 一个确定的位置）。
+  assert.equal(request.entry, projectRow.entry)
+  assert.equal(request.kind, projectRow.kind)
 })
 
 test('scope labels name the project, not just the scope kind', () => {
@@ -739,7 +749,7 @@ test('shadowed entries are reported relative to the model-visible catalog', () =
   // 名字唯一时没有任何遮蔽。
   assert.equal(internals.shadowedSkills([skill()]).length, 0)
 
-  // 已停用的行不参与：它的文件是 SKILL.md.disabled，模型看不到它，说它遮蔽/被遮蔽都是假的。
+  // 已停用的行不参与：两个调用面都关掉了，模型和用户都看不到它，说它遮蔽/被遮蔽都是假的。
   const parked = { ...skill({ source: 'project-agents', scope: 'project' }), enabled: false }
   assert.equal(internals.shadowedSkills([skill(), parked]).length, 0,
     '已停用的行不该参与遮蔽判定（它根本没进模型目录）')

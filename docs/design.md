@@ -349,18 +349,48 @@ document.head.appendChild(tag)
   一个 contribution 天然支持多 namespace。同理 `SKILLS_CSS` 必须与 `MCP_CSS` **合并成一次**
   `__injectCss` 调用（那个函数的 id 写死，二次调用会覆写同一 `<style>`）。
 
-### 技能的「根目录」从哪来
+### 技能的「位置」从哪来（根 + 磁盘条目）
 
 `ctx.skills` **不暴露 `roots()`**（公开面只有 list/get/snapshot/collect/register），而启停与删除
-必须按 `(name, scope, root)` 精确定位。所以根目录从 summary 的 `resourceBase` 反推，判别式是
-**`path` 是否恰为 `<base>/SKILL.md`**（目录捆绑）还是 `dirname(path) === base`（扁平文件）。
-推不出来就**不填**——猜错会让启停/删除作用在错误的目录上，是本层最危险的失败模式。
+必须精确到**一个文件**。所以位置从 summary 的 `resourceBase` 与 `path` 反推——但要分成两件事：
 
-### 禁用为什么是改名
+- **根**：目录捆绑取 `dirname(resourceBase.path)`，扁平取 `resourceBase.path` 本身。
+  这是宿主给的**展示路径**，也正是写盘要用的那个。
+- **磁盘条目**：目录捆绑取 `resourceBase.path` 的末段（宿主固定构造 `directory = <根>/<条目>`，
+  所以末段就是磁盘目录名）；扁平则在根下**扫一遍、按 realpath 匹配宿主报的 `path`** 查出那个名字。
 
-DSH 的技能没有 `disabled` 字段（MCP 有、技能没有），所以停用只能把 `SKILL.md` 改名为
-`SKILL.md.disabled`。代价是技能从宿主目录里**消失**（宿主按固定路径读取，读不到就跳过），
-因此「已禁用」必须由本插件**自己扫描** `.disabled` 才能展示与恢复。
+⚠️ **技能名（frontmatter 的 `name`）不参与定位**。宿主允许磁盘条目名与它不一致，按名字拼路径会让
+这类技能在面板里所有操作都失败。两个路径字段的**口径也不同**（`resourceBase.path` 是展示路径、
+`path` 是 realpath），链接下必然分叉，所以不能拿它们互相做路径比较。
+推不出位置就**不填**——猜错会让启停/删除作用在错误的目录上，是本层最危险的失败模式。
+
+### 启停为什么写 frontmatter，而不是改名
+
+DSH 的技能没有 `disabled` 字段（MCP 有、技能没有）。但宿主原生的**两个调用面字段**组合起来
+就是「停用」，而且这正是 VS Code / Copilot 官方文档里叫 “Disabled skills” 的那一档：
+
+```
+disable-model-invocation: true   # 模型不自动调用
+user-invocable: false            # 你也不能手动调用
+```
+
+于是「停用」= 写这两个字段，「启用」= 都回到缺省。好处是**结构性的**：
+
+- 技能仍在磁盘原处，宿主**照样报告它**（`list` 是调用无关的）→ 面板不必自己扫盘
+  → 没有第二真值来源，也就没有「同一身份两行」「链接目录扫不到」那一类缺陷；
+- 不再产生 `SKILL.md.disabled` 这个**任何规范都不认识**的形态。用户的技能常在
+  `~/.agents/skills`——Agent Skills 标准的共享位置，VS Code / Codex 都扫它；
+  把它改名等于为了本面板的一个开关，在**别的工具里**把用户的技能弄坏。
+
+⚠️ 代价（写在这里免得下次当成 bug）：**「启用」会把两个调用面都恢复成可调用**。
+用户原本若手工设过 `disable-model-invocation: true`，一次「停用→启用」往返会重置它。
+这是「两档合成一个开关」的固有代价，所以详情页把两个面**各自显示**出来
+（「模型自动调用」有就地开关；`user-invocable` 只显示当前值，改它要编辑技能文件——
+面板目前没有用户面开关，切勿在文案里承诺它）。
+
+⚠️ 1.6.x 用的是「改名成 `SKILL.md.disabled`」那套自创机制。`scanDisabledSkills` 保留为
+**一次性迁移读取**：把用户磁盘上（我们自己写下的）那些残留列出来并允许恢复，
+它在下一个大版本可以整体删除——它不是第二个真值来源。
 
 ### 许可门禁为什么逐技能判定（2026-10-10 已下线）
 
@@ -418,8 +448,8 @@ DSH 已经有一个接 skillhub 的第三方插件（`@cocofhu/skillhub`），�
 - `lib/env-expression.js`：受限 `!!js` 表达式的唯一实现（生成 / 校验 / 抽取 / 反转 / 求值）
 - `lib/import-admission.js`：导入结果的写盘前准入（同作用域 `serverName` 唯一、环境变量引用归一为总值形式）
 - `lib/mcp-observability.js`：连接状态判定与 mcp-client 日志格式化
-- `lib/skills-registry.js`：宿主 `ctx.skills` 的投影（source/作用域/根目录推导）与目录指纹
-- `lib/skills-file-ops.js`：技能文件动作（启停 = 改名 `SKILL.md` ↔ `SKILL.md.disabled`、删除、导入、扫描已禁用），按 `(name, scope, root)` 精确定位、找不到即报错不回退
+- `lib/skills-registry.js`：宿主 `ctx.skills` 的投影（source / 作用域 / 根 + 磁盘条目推导）、安装目标能力表、物理位置去重
+- `lib/skills-file-ops.js`：技能文件动作（启停 = 写 frontmatter 两个调用面字段、删除、导入、旧机制残留的迁移读取），按 `(根, 磁盘条目)` 精确定位、找不到即报错不回退
 - `lib/skills-archive.js`：压缩包安全解包（防 zip slip、拒符号链接、按**实际解出字节**卡限额）
 - `lib/skills-frontmatter.js`：frontmatter 校验与逐条诊断（判定逐字照抄宿主，宿主只 warn+skip，用户看不到）
 - `lib/client.js`：响应式 Web UI、Remote 客户端和生命周期清理

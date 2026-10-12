@@ -1,13 +1,14 @@
-// 宿主侧 skills 文件动作：启停、删除、导入、扫描已禁用。
+// 宿主侧 skills 文件动作：启停、删除、导入、迁移扫描。
 //
 // 这一层**真的动用户的文件**，所以纪律比其它层严：
-//   - 按 (name, scope, root) 精确定位；找不到就报错，**绝不回退**到别的作用域
-//     （否则同名技能会被误删/误停用——dsh-skill-explorer 记录的正是这个坑）。
+//   - 按 (根, 磁盘条目) 精确定位；找不到就报错，**绝不回退**到别的作用域
+//     （否则同名技能会被误删/误停用）。
 //   - bundled 根只读，拒绝写入。
-//   - 启停用 rename（dsh-atomic-write 没有 rename，只有 writeFileAtomic/withFileLock）。
+//   - 启停写的是 frontmatter 的**两个调用面字段**（宿主原生），不搬文件。
 //
-// 宿主看不到已禁用的技能（SKILL.md 改名后按固定路径读不到 → 静默跳过），
-// 所以「已禁用」必须由本层自己扫 .disabled 得到。
+// ⚠️ 定位**不按技能名**：宿主允许磁盘条目名与 frontmatter 的 name 不一致
+// （实测 `dir-name/SKILL.md` 里写 `name: dir-alias` 照收），按名字拼路径会让这类技能
+// 在面板里所有操作都失败。`resolveSkillTarget` 因此收 `entry`（磁盘条目名）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, symlink, truncate } from 'node:fs/promises'
@@ -29,91 +30,210 @@ import { diagnoseSkill } from '../lib/skills-frontmatter.js'
 import { MAX_ARCHIVE_BYTES } from '../lib/skills-archive.js'
 import { makeTar, makeZip } from '../scripts/archive-fixtures.mjs'
 
-/** 建一个临时技能根，含目录捆绑与扁平两种形态。 */
+/**
+ * 建一个临时技能根，含目录捆绑与扁平两种形态。
+ *
+ * ⚠️ 特意让其中一条技能的**磁盘条目名与 frontmatter 的 name 不一致**
+ * （目录 `disk-dir/` 里写 `name: dir-alias`）：那正是真机上整行不可操作的形状
+ * （宿主照收，而按名字拼路径的实现定位不到）。定位层的用例都从这里取目标。
+ */
 async function makeRoot() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-skills-'))
   const bundle = join(root, 'zhanggui')
   await mkdir(bundle, { recursive: true })
   await writeFile(join(bundle, 'SKILL.md'), '---\nname: zhanggui\ndescription: demo\n---\n\nbody\n')
   await writeFile(join(root, 'flat-one.md'), '---\nname: flat-one\ndescription: flat demo\n---\n\nflat body\n')
+  const aliased = join(root, 'disk-dir')
+  await mkdir(aliased, { recursive: true })
+  await writeFile(join(aliased, 'SKILL.md'), '---\nname: dir-alias\ndescription: 磁盘名与技能名不同\n---\n\nalias body\n')
   return root
 }
 
-test('disables a directory bundle by renaming SKILL.md and re-enables it back', async () => {
-  const root = await makeRoot()
+/** 读一个技能文件里的两个调用面字段（断言「盘上真的改成了停用/启用」用）。 */
+async function invocationOnDisk(path) {
+  const { invocation } = await readSkillDocument({ path })
+  return invocation
+}
+
+test('enable RESTORES a migration leftover by renaming it back, not by writing its fields', async () => {
+  // ⚠️ 真机缺陷（本版修，审查 C2）：迁移残留的「停用」状态在**文件名**里（`.disabled`），
+  // 不在 frontmatter 里。而 setSkillEnabled 现在只写字段、**从不 rename**——于是点「启用」
+  // 改的是那个 `.disabled` 文件的内容，宿主永远看不见：**UI 报成功，SKILL.md 却没出现**。
+  // 那是本仓库反复列为最贵的一类失败（点了没反应 + 假成功）。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-migrate-restore-'))
+  await mkdir(join(root, 'parked'), { recursive: true })
+  const body = '---\nname: parked\ndescription: 旧机制停用\ndisable-model-invocation: true\n---\n\n正文\n'
+  await writeFile(join(root, 'parked', 'SKILL.md.disabled'), body)
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    assert.equal(target.kind, 'bundle')
+    const target = await resolveSkillTarget({ entry: 'parked', kind: 'bundle', scope: 'global', root })
+    assert.equal(target.migratedDisabled, true, '前提：定位到的是旧机制残留')
+    assert.equal(target.path, join(root, 'parked', 'SKILL.md.disabled'))
 
-    await setSkillEnabled(target, false)
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), false, '禁用后 SKILL.md 应不存在')
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), true, '禁用后应有 .disabled')
-
-    // ⚠️ 必须先**重新定位**再启用：宿主的每个 RPC 都是重新 resolve 的（lib/index.js 的 setEnabled），
-    // 而停用后定位结果的 path **本身带 .disabled**。首版这里复用了上面那个 target（启用态 path），
-    // 恰好绕过「拿 target.path 当基准」的方向 bug —— 于是「启用」在真机上永远 no-op，测试却一直绿。
-    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    assert.equal(disabled.disabled, true, '停用后重新定位应报告 disabled')
-    await setSkillEnabled(disabled, true)
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true, '启用后应恢复 SKILL.md')
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), false, '启用后不应残留 .disabled')
+    const result = await setSkillEnabled(target, true)
+    assert.equal(result.changed, true)
+    // ⚠️ 断言落在**盘上**：真正的 `SKILL.md` 必须出现、`.disabled` 必须消失。
+    // 只断言返回值会漏掉「报成功却什么都没发生」——那正是这个缺陷的形状。
+    assert.equal(existsSync(join(root, 'parked', 'SKILL.md')), true, '启用必须把文件名改回来（宿主才看得见）')
+    assert.equal(existsSync(join(root, 'parked', 'SKILL.md.disabled')), false, '残留名必须消失')
+    assert.equal(await readFile(join(root, 'parked', 'SKILL.md'), 'utf8'), body, '内容不得被改动')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('enable/disable is idempotent in both directions and never produces .disabled.disabled', async () => {
-  // 回归闸：`SKILL.md.disabled.disabled` 既不被 scanDisabledSkills 认出、也不被宿主看到，
-  // 技能会**双向消失**且只能手工改名救回。陈旧列表 / 两个标签页 / RPC 重试都会走到这里。
+test('restoring a leftover refuses to overwrite an existing SKILL.md', async () => {
+  // 两份都在（用户手工改回来过、或并发恢复）：**不得覆盖**——那是用户的文件。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-migrate-conflict-'))
+  await mkdir(join(root, 'parked'), { recursive: true })
+  const live = '---\nname: parked\ndescription: 现行那份\n---\n\n现行正文\n'
+  await writeFile(join(root, 'parked', 'SKILL.md.disabled'), '---\nname: parked\ndescription: 残留\n---\n\n残留正文\n')
+  try {
+    // 先造出「只有 .disabled」的状态，再手工放一份 SKILL.md（模拟冲突）
+    await writeFile(join(root, 'parked', 'SKILL.md'), live)
+    // 定位会优先命中 SKILL.md（启用态），所以直接构造残留目标来测冲突分支
+    await assert.rejects(
+      () => setSkillEnabled({
+        entry: 'parked', kind: 'bundle', scope: 'global', root, writable: true,
+        path: join(root, 'parked', 'SKILL.md.disabled'), migratedDisabled: true,
+      }, true),
+      /已存在/,
+      '目标名被占用时必须拒绝，而不是覆盖用户的文件',
+    )
+    assert.equal(await readFile(join(root, 'parked', 'SKILL.md'), 'utf8'), live, '现行那份必须原封不动')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('disabling a restored skill then re-enabling round-trips byte-for-byte', async () => {
+  // 恢复之后它就与普通技能无异：停用走字段、启用走字段，往返逐字节还原。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-migrate-roundtrip-'))
+  await mkdir(join(root, 'parked'), { recursive: true })
+  const body = '---\nname: parked\ndescription: x\n---\n\n正文\n'
+  await writeFile(join(root, 'parked', 'SKILL.md.disabled'), body)
+  try {
+    const leftover = await resolveSkillTarget({ entry: 'parked', kind: 'bundle', scope: 'global', root })
+    await setSkillEnabled(leftover, true)                     // 先恢复
+    const restored = await resolveSkillTarget({ entry: 'parked', kind: 'bundle', scope: 'global', root })
+    assert.equal(restored.migratedDisabled, undefined, '恢复之后不再是残留')
+    await setSkillEnabled(restored, false)                    // 新机制停用
+    assert.deepEqual(await invocationOnDisk(join(root, 'parked', 'SKILL.md')),
+      { modelInvocable: false, userInvocable: false })
+    await setSkillEnabled(restored, true)
+    assert.equal(await readFile(join(root, 'parked', 'SKILL.md'), 'utf8'), body, '往返必须逐字节还原')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+test('disables a directory bundle by writing both invocation fields, and re-enables it back', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    assert.equal((await setSkillEnabled(target, false)).changed, true, '首次停用应真的改名')
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+    assert.equal(target.kind, 'bundle')
+
+    const off = await setSkillEnabled(target, false)
+    assert.equal(off.changed, true, '首次停用应真的改了文件')
+    // ⚠️ 断言落在**盘上的真相**：宿主的两个调用面字段都被写成了「不可调用」。
+    // 只看返回值会漏掉「写错字段 / 写错方向」这类错误——那正是本层最贵的一类。
+    const disabled = await invocationOnDisk(join(root, 'zhanggui', 'SKILL.md'))
+    assert.deepEqual(disabled, { modelInvocable: false, userInvocable: false },
+      '停用 = 宿主原生的两个调用面字段都关掉（VS Code 官方定义的 Disabled skills）')
+    // 文件本身还在原地：停用**不搬文件**（旧机制改名成 .disabled 会让技能在别的工具里坏掉）。
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true, '停用不得改名，文件必须留在原地')
+    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), false, '不得再产生 .disabled')
+
+    const on = await setSkillEnabled(target, true)
+    assert.equal(on.changed, true, '再次启用应真的改了文件')
+    assert.deepEqual(await invocationOnDisk(join(root, 'zhanggui', 'SKILL.md')),
+      { modelInvocable: true, userInvocable: true }, '启用 = 两个调用面都回到可调用')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('enable/disable is idempotent in both directions and never leaves a key behind', async () => {
+  // 陈旧列表 / 两个标签页 / RPC 重试都会重复点同一个开关。
+  // ⚠️ 幂等还有一层更细的要求：**不要写与缺省同向的字面量**。
+  // 启用态就是两个字段都缺席（宿主的默认值），留一个 `user-invocable: true` 在文件里
+  // 会让「开→关→开」不再逐字节还原原文——用户的文件被我们的开关弄脏了。
+  const root = await makeRoot()
+  const original = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
+  try {
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+    assert.equal((await setSkillEnabled(target, false)).changed, true, '首次停用应真的改文件')
 
     // 对陈旧行再点一次「停用」：必须是 no-op。
     assert.equal((await setSkillEnabled(target, false)).changed, false, '重复停用应是 no-op')
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled')), true)
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md.disabled.disabled')), false,
-      '不得产生 .disabled.disabled —— 那会让技能对宿主与面板双向消失')
 
-    // 对已启用的行再点一次「启用」同样是 no-op。
-    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    await setSkillEnabled(disabled, true)
-    assert.equal((await setSkillEnabled(disabled, true)).changed, false, '重复启用应是 no-op')
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true)
+    assert.equal((await setSkillEnabled(target, true)).changed, true, '启用应改回来')
+    assert.equal((await setSkillEnabled(target, true)).changed, false, '重复启用应是 no-op')
+    // 往返之后逐字节还原：开关不留痕迹。
+    assert.equal(await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8'), original,
+      '停用再启用必须逐字节还原原文（缺省方向的值不该被写成字面量）')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('disables a flat skill file by renaming it, and the host never counts it as a skill', async () => {
+test('disables a flat skill by writing the two fields, keeping the file in place', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'flat-one', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'flat-one.md', kind: 'flat', scope: 'global', root })
     assert.equal(target.kind, 'flat')
 
     await setSkillEnabled(target, false)
-    const names = await readdir(root)
-    assert.equal(names.includes('flat-one.md'), false)
-    assert.equal(names.includes('flat-one.md.disabled'), true)
-    // 宿主按 name.endsWith('.md') 判定扁平技能，故 .md.disabled 不会被扫成技能。
-    assert.equal('flat-one.md.disabled'.endsWith('.md'), false)
+    // 扁平技能同样不搬文件：宿主按 `*.md` 发现它，改名会把它从**所有**工具里抹掉。
+    assert.equal((await readdir(root)).includes('flat-one.md'), true, '扁平技能也不得改名')
+    assert.deepEqual(await invocationOnDisk(join(root, 'flat-one.md')),
+      { modelInvocable: false, userInvocable: false })
 
     await setSkillEnabled(target, true)
-    assert.equal((await readdir(root)).includes('flat-one.md'), true)
+    assert.deepEqual(await invocationOnDisk(join(root, 'flat-one.md')),
+      { modelInvocable: true, userInvocable: true })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('refuses to operate when the named skill is absent from the given scope', async () => {
+test('operates on a skill whose disk entry name differs from its frontmatter name', async () => {
+  // ⚠️ 真机缺陷（本轮审计的核心）：宿主允许磁盘条目名 != frontmatter 的 name，
+  // 而按名字拼路径的实现对这类技能**所有操作都失败**（真机实测 6 种形态里 4 种不可操作）。
+  // 这里对同一条技能走完「读正文 → 停用 → 启用 → 删除」全流程，每一步都断言盘上的结果。
+  const root = await makeRoot()
+  try {
+    const target = await resolveSkillTarget({ entry: 'disk-dir', kind: 'bundle', scope: 'global', root })
+
+    // ① 读正文与权限：名字不一致不影响（按条目读）
+    const document = await readSkillDocument(target)
+    assert.match(document.text, /alias body/)
+    assert.equal(diagnoseSkill(document.text).name, 'dir-alias', '前提：文件里的技能名是 dir-alias')
+
+    // ② 停用：写到那个真实文件上
+    assert.equal((await setSkillEnabled(target, false)).changed, true)
+    assert.deepEqual(await invocationOnDisk(join(root, 'disk-dir', 'SKILL.md')),
+      { modelInvocable: false, userInvocable: false })
+
+    // ③ 启用
+    assert.equal((await setSkillEnabled(target, true)).changed, true)
+    assert.deepEqual(await invocationOnDisk(join(root, 'disk-dir', 'SKILL.md')),
+      { modelInvocable: true, userInvocable: true })
+
+    // ④ 删除：删的是那个真实目录
+    await removeSkill(target)
+    assert.equal(existsSync(join(root, 'disk-dir')), false, '删除必须作用在真实条目上')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('refuses to operate when the entry is absent from the given scope', async () => {
   // 这是本层最重要的一条：找不到就报错，绝不「回退」到别的作用域或别的形态。
   const root = await makeRoot()
   try {
     await assert.rejects(
-      () => resolveSkillTarget({ name: 'does-not-exist', scope: 'global', root }),
+      () => resolveSkillTarget({ entry: 'does-not-exist', kind: 'bundle', scope: 'global', root }),
       /does-not-exist/,
-      '不存在的技能必须抛错，而不是返回一个猜测的目标',
+      '不存在的条目必须抛错，而不是返回一个猜测的目标',
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -126,21 +246,59 @@ test('reports absence with a distinguishable error code, not a bare message', as
   const root = await makeRoot()
   try {
     await assert.rejects(
-      () => resolveSkillTarget({ name: 'ghost', scope: 'global', root }),
+      () => resolveSkillTarget({ entry: 'ghost', kind: 'bundle', scope: 'global', root }),
       (error) => {
         assert.equal(error.code, 'SKILL_NOT_FOUND')
         assert.equal(error instanceof SkillNotFoundError, true, '必须是可 instanceof 的专用类型')
         return true
       },
     )
-    // 非法名字是**另一类**错误：它是坏输入，不是「不存在」，不得混为一谈。
-    await assert.rejects(
-      () => resolveSkillTarget({ name: 'Bad_Name', scope: 'global', root }),
-      (error) => {
-        assert.notEqual(error.code, 'SKILL_NOT_FOUND', '非法名字不得被当成「技能不存在」')
-        return true
-      },
-    )
+    // 非法条目是**另一类**错误：它是坏输入，不是「不存在」，不得混为一谈。
+    // ⚠️ 判据是「单个路径段」而不是 kebab-case：磁盘条目名不归宿主管
+    // （宿主只要求目录里有 SKILL.md、文件以 .md 结尾），收窄会重新制造「合法的技能操作不了」。
+    for (const entry of ['../escape', 'a/b', 'a\\b', '']) {
+      await assert.rejects(
+        () => resolveSkillTarget({ entry, kind: 'bundle', scope: 'global', root }),
+        /非法/,
+        `条目 ${JSON.stringify(entry)} 必须被拒绝`,
+      )
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the shape comes from DISK, so an .md-named directory is a valid bundle and kind is only a hint', async () => {
+  // ⚠️ 真机缺陷（本版修）：曾经这里拒绝「kind=bundle 且 entry 以 .md 结尾」，理由是
+  // 「宿主会把 .md 结尾的目录当扁平技能」——**那个理由是反的**。宿主的 discoverRoot 是
+  // **目录分支优先**（`entry.type === 'directory' ? <目录>/SKILL.md : entry.type === 'file'
+  // && name.endsWith('.md') ? …`，skill-filesystem 的 :735-739），所以名叫 `odd.md` 的
+  // **目录**是完全合法的技能，宿主照收。
+  // 后果极重：那条误拒让 `list()` 整个 reject → **面板技能页整块打不开**，连健康的技能都管不了。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-shape-'))
+  await mkdir(join(root, 'odd.md'), { recursive: true })
+  await writeFile(join(root, 'odd.md', 'SKILL.md'), '---\nname: odd\ndescription: x\n---\n\n正文\n')
+  await writeFile(join(root, 'plain.md'), '---\nname: plain\ndescription: x\n---\n\n正文\n')
+  try {
+    // ① 名叫 `odd.md` 的**目录**：形态必须由磁盘决定为 bundle
+    const odd = await resolveSkillTarget({ entry: 'odd.md', kind: 'bundle', scope: 'global', root })
+    assert.equal(odd.kind, 'bundle', '磁盘上是目录 → 目录捆绑（名字以 .md 结尾不影响）')
+    assert.equal(odd.path, join(root, 'odd.md', 'SKILL.md'))
+
+    // ② **声明与磁盘不符时以磁盘为准**：同一个条目报 kind=flat，也必须解析成 bundle。
+    // （wire 上的 kind 只是提示；判据不能退回到「信调用方声明」。）
+    const oddMislabelled = await resolveSkillTarget({ entry: 'odd.md', kind: 'flat', scope: 'global', root })
+    assert.equal(oddMislabelled.kind, 'bundle', '声明说 flat、磁盘上是目录 → 听磁盘的')
+
+    // ③ 反向：真正的扁平文件报 kind=bundle 也以磁盘为准
+    const plain = await resolveSkillTarget({ entry: 'plain.md', kind: 'flat', scope: 'global', root })
+    assert.equal(plain.kind, 'flat')
+    const plainMislabelled = await resolveSkillTarget({ entry: 'plain.md', kind: 'bundle', scope: 'global', root })
+    assert.equal(plainMislabelled.kind, 'flat', '声明说 bundle、磁盘上是文件 → 听磁盘的')
+
+    // ④ 读正文要真的读得到（kind 对了才拼得出路径）
+    const document = await readSkillDocument(odd)
+    assert.match(document.text, /正文/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -149,31 +307,43 @@ test('reports absence with a distinguishable error code, not a bare message', as
 test('refuses to write into a bundled root', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     await assert.rejects(
       () => setSkillEnabled({ ...target, writable: false }, false),
       /只读|read-only/,
       'bundled 根只读：部署内置的技能不可启停',
     )
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), true, '拒绝后不得改动文件')
+    assert.deepEqual(await invocationOnDisk(join(root, 'zhanggui', 'SKILL.md')),
+      { modelInvocable: true, userInvocable: true }, '拒绝后不得改动文件')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('scans disabled skills that the host catalog cannot see', async () => {
-  // 宿主按固定路径读 SKILL.md，改名后读不到 → 技能从宿主目录消失。
-  // 所以「已禁用」只能由本层扫描得到，否则面板无法展示它们、也无法提供「启用」。
+test('scanDisabledSkills reads the OLD rename convention, for migration only', async () => {
+  // ⚠️ 这个函数已经不是「已停用技能」的来源了：新机制把状态写在 frontmatter 里，
+  // 宿主照样报得出那些技能，面板不需要扫盘（扫盘正是上一版的第二真值来源）。
+  // 它现在只负责一件事：把 1.6.x 用户磁盘上**我们自己写进去的** .disabled 文件找出来，
+  // 否则那些技能永远回不来。用户恢复之后就走新机制。
   const root = await makeRoot()
   try {
-    await setSkillEnabled(await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root }), false)
-    await setSkillEnabled(await resolveSkillTarget({ name: 'flat-one', scope: 'global', root }), false)
+    // 手工造出旧机制的两种残留（不是通过 setSkillEnabled —— 它已经不产生这种文件了）。
+    await writeFile(join(root, 'zhanggui', 'SKILL.md.disabled'),
+      await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8'))
+    await rm(join(root, 'zhanggui', 'SKILL.md'))
+    await writeFile(join(root, 'flat-one.md.disabled'),
+      await readFile(join(root, 'flat-one.md'), 'utf8'))
+    await rm(join(root, 'flat-one.md'))
 
     const disabled = await scanDisabledSkills({ root, scope: 'global' })
-    assert.deepEqual(disabled.map((row) => row.name).sort(), ['flat-one', 'zhanggui'])
-    assert.equal(disabled.every((row) => row.scope === 'global'), true)
-    // 必须带上可操作的目标，否则面板拿到名字也没法启用。
-    assert.equal(disabled.every((row) => typeof row.kind === 'string'), true)
+    assert.deepEqual(disabled.map((row) => row.entry).sort(), ['flat-one.md', 'zhanggui'],
+      '两种旧形态都要扫得到（否则用户再也启用不回来）')
+    assert.equal(disabled.every((row) => row.migrated === true), true, '必须标成迁移读取，好让面板区别对待')
+    // 条目与形态必须自洽到「能直接拿去 resolve」——否则扫出来也没法恢复。
+    for (const row of disabled) {
+      const target = await resolveSkillTarget({ entry: row.entry, kind: row.kind, scope: 'global', root })
+      assert.equal(existsSync(target.path), true, `${row.entry} 扫出来的目标必须真的存在`)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -186,7 +356,7 @@ test('scans a disabled skill whose directory is a link (the host would never see
   // 于是链接技能一旦停用就掉进扁平分支、两边都不匹配 → **扫不到 → 从面板彻底消失**。
   // 用户那边看到的是：「点一下停用，这条技能没了，也没法再启用」——而磁盘上其实改名成功了。
   //
-  // 判据必须落在物理位置（stat 跟随链接后的真相）上，与 locateSkill 的处理是同一个原则。
+  // 旧机制下这类残留仍然可能存在（1.6.x 写下的），所以迁移读取必须照样覆盖它。
   const root = await mkdtemp(join(tmpdir(), 'dsh-scan-link-'))
   const external = await mkdtemp(join(tmpdir(), 'dsh-scan-link-ext-'))
   try {
@@ -201,17 +371,11 @@ test('scans a disabled skill whose directory is a link (the host would never see
     }
 
     const disabled = await scanDisabledSkills({ root, scope: 'global' })
-    const linked = disabled.find((row) => row.name === 'linked-skill')
+    const linked = disabled.find((row) => row.entry === 'linked-skill')
     assert.notEqual(linked, undefined,
-      '链接目录里的停用技能必须扫得到——否则用户停用后就再也看不见、也启用不回来')
+      '链接目录里的旧态残留必须扫得到——否则用户再也看不见、也启用不回来')
     assert.equal(linked.kind, 'bundle', '形态按跟随链接后的真相判定（它是个目录捆绑）')
     assert.equal(existsSync(linked.path), true, '给出的路径必须真的存在，否则「启用」会失败')
-
-    // 真的能启用回来（扫到的目标要是可用的）
-    await setSkillEnabled({ ...linked, writable: true, root }, true)
-    assert.equal(existsSync(join(external, 'linked-skill', 'SKILL.md')), true,
-      '启用必须改回外部库那份真实文件')
-    assert.equal(existsSync(join(external, 'linked-skill', 'SKILL.md.disabled')), false)
   } finally {
     await rm(root, { recursive: true, force: true })
     await rm(external, { recursive: true, force: true })
@@ -223,7 +387,7 @@ test('reads a skill body and its on-disk invocation in the same read', async () 
   // 面板于是显示一份正文、配一个不属于它的权限。所以读技能只有这一个入口。
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     const document = await readSkillDocument(target)
     assert.match(document.text, /body/)
     assert.deepEqual(document.invocation, { modelInvocable: true, userInvocable: true },
@@ -239,7 +403,7 @@ test('reports an unknown invocation instead of inventing one when the frontmatte
   const root = await mkdtemp(join(tmpdir(), 'dsh-skills-broken-'))
   await writeFile(join(root, 'broken.md'), '---\nname: [unclosed\ndescription: y\n---\n\n正文\n')
   try {
-    const target = await resolveSkillTarget({ name: 'broken', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'broken.md', kind: 'flat', scope: 'global', root })
     const document = await readSkillDocument(target)
     assert.equal(document.invocation, null)
     assert.match(document.text, /正文/, '正文还是要给出去：面板要能让用户看到那份坏在哪')
@@ -252,34 +416,38 @@ test('reports an unknown invocation instead of inventing one when the frontmatte
 test('removes a skill bundle and a flat file, and reports what it removed', async () => {
   const root = await makeRoot()
   try {
-    const bundle = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    await removeSkill(bundle)
+    const bundle = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+    const removedBundle = await removeSkill(bundle)
     assert.equal(existsSync(join(root, 'zhanggui')), false, '目录捆绑应整个删掉')
+    assert.equal(removedBundle.removed, join(root, 'zhanggui'), '要报告删掉了什么（面板据此提示用户）')
 
-    await removeSkill(await resolveSkillTarget({ name: 'flat-one', scope: 'global', root }))
+    const flat = await resolveSkillTarget({ entry: 'flat-one.md', kind: 'flat', scope: 'global', root })
+    await removeSkill(flat)
     assert.equal(existsSync(join(root, 'flat-one.md')), false)
 
-    assert.deepEqual(await readdir(root), [], '两个技能都删掉后根目录应为空')
+    // 只该少掉这两条：夹具里还有第三条（disk-dir），删错范围会连它一起带走。
+    assert.deepEqual((await readdir(root)).sort(), ['disk-dir'], '只删点名的那一条，别人不许动')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('a name that looks like a path is refused at resolve time, so nothing outside the root is touched', async () => {
-  // 外部输入在系统边界必须校验：技能名来自面板/远端目录，不能让它跳出根目录。
+test('an entry that looks like a path is refused at resolve time, so nothing outside the root is touched', async () => {
+  // 外部输入在系统边界必须校验：条目名来自面板（原本来自宿主报告的路径，但 wire 上仍可被伪造），
+  // 不能让它跳出根目录。
   //
-  // 注意这条只覆盖**本层**的解析（`resolveSkillTarget` 拒绝非法名）。「调用方能不能凭空
+  // 注意这条只覆盖**本层**的解析（`resolveSkillTarget` 拒绝越界条目）。「调用方能不能凭空
   // 指定一个根」是另一层的事——那是 RPC 层的 `resolveTargetReference`（载荷里的 root 必须
   // 能对上宿主自己算出来的目标），由 test/skillhub-install.test.mjs 的信任边界用例覆盖。
   const root = await makeRoot()
   const outside = join(root, '..', 'must-survive.txt')
   await writeFile(outside, 'keep me')
   try {
-    for (const name of ['../must-survive', '..\\must-survive', '/etc/passwd', 'a/b']) {
+    for (const entry of ['../must-survive', '..\\must-survive', '/etc/passwd', 'a/b', 'a\\b', '..']) {
       await assert.rejects(
-        () => resolveSkillTarget({ name, scope: 'global', root }),
-        /非法|invalid/,
-        `名字 ${name} 必须被拒绝`,
+        () => resolveSkillTarget({ entry, kind: 'bundle', scope: 'global', root }),
+        /非法/,
+        `条目 ${entry} 必须被拒绝`,
       )
     }
     assert.equal(existsSync(outside), true, '越界目标必须原封不动')
@@ -326,7 +494,7 @@ test('imports a single .md file as a flat skill named by its frontmatter', async
     assert.equal(existsSync(join(root, 'flat-import.md')), true, '应按 frontmatter 名落成扁平文件')
     assert.equal(existsSync(join(root, 'whatever-name.md')), false)
     // 本层自己的定位必须能立刻找到它——否则导入完面板就点不动了。
-    const target = await resolveSkillTarget({ name: 'flat-import', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'flat-import.md', kind: 'flat', scope: 'global', root })
     assert.equal(target.kind, 'flat')
     assert.match((await readSkillDocument(target)).text, /扁平导入/)
   } finally {
@@ -348,7 +516,7 @@ test('imports a directory bundle with its resources', async () => {
     // resources 必须一起带过去，否则技能正文里引用的脚本/文档会缺。
     assert.equal(await readFile(join(root, 'imported-bundle', 'references', 'note.md'), 'utf8'), 'note')
 
-    const target = await resolveSkillTarget({ name: 'imported-bundle', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'imported-bundle', kind: 'bundle', scope: 'global', root })
     assert.equal(target.kind, 'bundle')
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -759,7 +927,7 @@ test('refuses a bundle whose root is itself a link/junction', async () => {
 test('writes the model-invocation switch into the file the caller pointed at', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     const result = await setSkillModelInvocable(target, false)
     assert.equal(result.changed, true)
     assert.equal(result.modelInvocable, false)
@@ -779,7 +947,7 @@ test('writes the model-invocation switch into the file the caller pointed at', a
 test('the switch is idempotent and leaves no temporary file behind', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     assert.equal((await setSkillModelInvocable(target, false)).changed, true)
     assert.equal((await setSkillModelInvocable(target, false)).changed, false, '已经是目标态就该是 no-op')
     assert.deepEqual(await readdir(join(root, 'zhanggui')), ['SKILL.md'], '原子写不得留下临时文件')
@@ -793,7 +961,7 @@ test('concurrent identical switches write once, because read-modify-write is ser
   // 先到者的结果（否则两次都会声称「我改了」——那就是读-改-写没有串行起来）。
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     const results = await Promise.all([
       setSkillModelInvocable(target, false),
       setSkillModelInvocable(target, false),
@@ -809,7 +977,7 @@ test('concurrent identical switches write once, because read-modify-write is ser
 test('refuses to write the switch into a bundled root', async () => {
   const root = await makeRoot()
   try {
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     const before = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
     await assert.rejects(
       () => setSkillModelInvocable({ ...target, writable: false }, false),
@@ -822,19 +990,25 @@ test('refuses to write the switch into a bundled root', async () => {
   }
 })
 
-test('works on a disabled skill, because it is the same file', async () => {
-  // 已停用的技能在磁盘上是 SKILL.md.disabled。权限是**文件里的字段**，与启用态无关，
-  // 所以照样可改；但绝不能顺手把技能启用回来。
+test('the model switch works on a disabled skill, because it is the same file', async () => {
+  // 停用后技能**还在原路径**（停用写的是两个 frontmatter 字段，不搬文件），
+  // 所以「模型自动调用」这个开关照样作用在同一个文件上；但它绝不能顺手把技能启用回来——
+  // 两个字段各管一件事，把 user-invocable 悄悄改回 true 就等于用户没点过「启用」却启用了。
   const root = await makeRoot()
   try {
-    await setSkillEnabled(await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root }), false)
-    const disabled = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
-    assert.equal(disabled.disabled, true, '前提：技能确实处于停用态')
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
+    await setSkillEnabled(target, false)
+    assert.deepEqual(await invocationOnDisk(join(root, 'zhanggui', 'SKILL.md')),
+      { modelInvocable: false, userInvocable: false }, '前提：技能确实处于停用态')
 
-    assert.equal((await setSkillModelInvocable(disabled, false)).changed, true)
-    assert.equal(existsSync(join(root, 'zhanggui', 'SKILL.md')), false, '不得把技能启用回来')
-    const text = await readFile(join(root, 'zhanggui', 'SKILL.md.disabled'), 'utf8')
-    assert.equal(diagnoseSkill(text).invocation.modelInvocable, false)
+    // 目标态本来就是「模型不可调用」→ 幂等，不该再写一次。
+    assert.equal((await setSkillModelInvocable(target, false)).changed, false, '已是目标态就该 no-op')
+
+    // 反向：单独把模型面打开，用户面必须**保持关着**（停用态不被顺手解除）。
+    assert.equal((await setSkillModelInvocable(target, true)).changed, true)
+    assert.deepEqual(await invocationOnDisk(join(root, 'zhanggui', 'SKILL.md')),
+      { modelInvocable: true, userInvocable: false },
+      '只动模型面：用户面必须原样保持不可调用')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -848,7 +1022,7 @@ test('a refused rewrite leaves the file byte-identical, because half a write is 
     const file = join(root, 'zhanggui', 'SKILL.md')
     await writeFile(file, '---\nname: zhanggui\ndescription: demo\ndisable-model-invocation: >-\n  true\n---\n\nbody\n')
     const before = await readFile(file)
-    const target = await resolveSkillTarget({ name: 'zhanggui', scope: 'global', root })
+    const target = await resolveSkillTarget({ entry: 'zhanggui', kind: 'bundle', scope: 'global', root })
     await assert.rejects(
       () => setSkillModelInvocable(target, true),
       /disable-model-invocation/,

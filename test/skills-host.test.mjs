@@ -313,24 +313,65 @@ test('merges project skills per workspace without duplicating globals', async ()
   assert.equal(result.skills.filter((row) => row.name === 'zhanggui').length, 1)
 })
 
-test('surfaces disabled skills even when a whole root is disabled', async () => {
-  // SPEC 约束 3：禁用后技能从宿主目录**消失**（改名后按固定路径读不到），
-  // 所以必须自行扫描各 root 的 .disabled，否则面板无法展示它们、也无法提供「启用」。
-  //
-  // ⚠️ 待扫的根必须来自**能力**（skillTargetsView），不能从可见行反推：
-  // 某个根里的技能**全被停用**时，可见行里根本没有那个根 → 它永远不被扫 → 面板零显示、
-  // 也救不回来（首版就是这么写的；这条用例把「可见行为空」设成前提来钉住它）。
-  // 顺带钉住：禁用行必须带 source —— 客户端的分组/作用域标签/药丸全靠它。
+test('lists a disabled skill even when a whole root is disabled', async () => {
+  // ⚠️ 新机制下这条用例的**含义变了**，值得说清楚：停用是写 frontmatter 的两个调用面字段，
+  // 所以宿主**照样报得出**这条技能（list 是调用无关的）——面板根本不需要扫盘。
+  // 旧版必须自己扫 .disabled，因为改名后宿主看不见它；那正是第二真值来源。
+  // 现在这里断言的是：一条两面都关掉的技能仍然出现在列表里，且 enabled=false 由**文件**推出。
   const base = await mkdtemp(join(tmpdir(), 'dsh-skills-host-'))
   const agentsHome = join(base, 'agents-home')
   const skillsRoot = join(agentsHome, 'skills')
   await mkdir(join(skillsRoot, 'visible'), { recursive: true })
   await writeFile(join(skillsRoot, 'visible', 'SKILL.md'), '---\nname: visible\ndescription: v\n---\n\n正文\n')
-  await mkdir(join(skillsRoot, 'hidden'), { recursive: true })
-  await writeFile(join(skillsRoot, 'hidden', 'SKILL.md.disabled'), '---\nname: hidden\ndescription: h\n---\n\n正文\n')
+  await mkdir(join(skillsRoot, 'switched-off'), { recursive: true })
+  await writeFile(join(skillsRoot, 'switched-off', 'SKILL.md'),
+    '---\nname: switched-off\ndescription: h\ndisable-model-invocation: true\nuser-invocable: false\n---\n\n正文\n')
+  try {
+    const { Context } = await import('@deepseek-ai/cordis')
+    const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+    const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+    const ctx = new Context()
+    await ctx.plugin(SkillRegistry)
+    const fiber = ctx.plugin({
+      apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+    }, { dshHome: join(base, 'dsh-home'), agentsHome, watch: false })
+    await fiber
+
+    const hostCtx = { get: (name) => ctx.get(name) }
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, {})
+    const rows = result.skills
+    assert.deepEqual(rows.map((row) => row.name).sort(), ['switched-off', 'visible'],
+      '两个面都关掉的技能必须**照样在列表里**（宿主报得出它，面板不必扫盘）')
+    const off = rows.find((row) => row.name === 'switched-off')
+    assert.equal(off.enabled, false, 'enabled 由文件里的两个字段派生')
+    assert.equal(off.modelInvocable, false)
+    assert.equal(off.userInvocable, false)
+    // 定位信息必须齐（否则那一行照样操作不了）：根、形态、磁盘条目。
+    assert.equal(off.entry, 'switched-off')
+    assert.equal(off.kind, 'bundle')
+    assert.equal(off.root, skillsRoot)
+    await fiber.dispose?.()
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('an old .disabled leftover is surfaced once, and never doubles a host-visible row', async () => {
+  // 旧机制（1.6.x 的改名）留下的条目：**一次性迁移读取**，不是第二个真值来源。
+  // 两种情形都要成立：
+  //   ① 宿主看不见它（文件确实还叫 .disabled）→ 面板必须补一行出来，否则技能永远回不来；
+  //   ② 它同时也能被宿主看见（用户手工把 SKILL.md 改回来了、或两边都存在）
+  //      → 必须仍然**只有一个身份一行**，否则客户端按身份做行 key 会出现重复 key
+  //      （生产版不报警告，只是静默重复渲染）。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-migrate-'))
+  const agentsHome = join(base, 'agents-home')
+  const skillsRoot = join(agentsHome, 'skills')
+  await mkdir(join(skillsRoot, 'parked'), { recursive: true })
+  await writeFile(join(skillsRoot, 'parked', 'SKILL.md.disabled'),
+    '---\nname: parked\ndescription: 旧机制停用\n---\n\n正文\n')
   try {
     const ctx = {
-      // 宿主目录里一个技能都看不见（全被停用了）
+      // 宿主目录里看不到它（旧机制就是靠改名让它消失的）
       get: (name) => (name === 'skills' ? { list: async () => [] } : undefined),
       loader: {
         entries: () => [{
@@ -342,58 +383,21 @@ test('surfaces disabled skills even when a whole root is disabled', async () => 
       },
     }
     const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
-    assert.deepEqual(result.skills, [], '宿主目录里看不到任何技能（前提）')
-    assert.deepEqual(result.disabled.map((row) => row.name), ['hidden'], '全停用的根也必须被扫到')
-    const [row] = result.disabled
-    assert.equal(row.root, skillsRoot, '禁用行必须带它所在的根，否则无法启用')
-    assert.equal(row.source, 'user-agents', '禁用行必须带来源：客户端的分组与作用域标签靠它')
-    assert.equal(row.disabled, true)
-  } finally {
-    await rm(base, { recursive: true, force: true })
-  }
-})
-
-test('a stale enabled row and the freshly scanned .disabled file are ONE row (the disabled one)', async () => {
-  // 真机复现的缺陷（2026-10-11）：面板刚把 SKILL.md 改名成 .disabled，宿主的发现缓存**仍然
-  // 报「已启用」**，而我们现场扫盘已经看到 .disabled —— 同一个身份在 `skills` 与 `disabled`
-  // 里各出现一次。客户端按 `source\0cwd\0name` 生成行 key，两行 key 相同 → React 重复 key：
-  // **生产版不报警告**，只是把那一行重复渲染（实测 3 份）、把「被遮蔽」徽章挂到邻居身上，
-  // 详情里的状态也停在旧值。所以契约是「一个身份一行，停用件优先」，在这两个数组的产出处成立。
-  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-stale-'))
-  const agentsHome = join(base, 'agents-home')
-  const skillsRoot = join(agentsHome, 'skills')
-  const skillDir = join(skillsRoot, 'zhanggui')
-  await mkdir(skillDir, { recursive: true })
-  await writeFile(join(skillDir, 'SKILL.md.disabled'), '---\nname: zhanggui\ndescription: 磁盘上是停用那份\n---\n\n正文\n')
-  try {
-    const staleRow = {
-      name: 'zhanggui',
-      description: '缓存里那份（其实已经改名了）',
-      source: 'user-agents',
-      path: join(skillDir, 'SKILL.md'),
-    }
-    const ctx = {
-      // 陈旧视图：宿主缓存仍把它当**已启用**返回 —— 这正是缺陷的输入
-      get: (name) => (name === 'skills' ? { list: async () => [staleRow] } : undefined),
-      loader: {
-        entries: () => [{
-          options: {
-            name: '@deepseek-ai/dsh-skill-filesystem',
-            config: { dshHome: join(base, 'dsh-home'), agentsHome },
-          },
-        }],
-      },
-    }
-    const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
-    assert.deepEqual(result.skills.map((row) => row.name), [],
-      '缓存里那条陈旧行必须被剔掉：它和停用件是同一个身份，同时出现就是客户端重复 key 的来源')
-    assert.deepEqual(result.disabled.map((row) => row.name), ['zhanggui'], '停用件才是磁盘上的真相，必须留下')
-    // 契约本身：两个数组的身份**互不相交**（客户端行 key 就是这个身份）。
-    const keys = [...result.skills, ...result.disabled].map((row) => skillRowKey(row))
+    const parked = result.skills.filter((row) => row.name === 'parked')
+    assert.equal(parked.length, 1, '旧机制残留必须被列出来（否则用户再也启用不回来）')
+    assert.equal(parked[0].enabled, false)
+    assert.equal(parked[0].migrated, true, '要标明它是旧机制的残留，好让面板区别对待')
+    assert.equal(parked[0].entry, 'parked', '条目必须是可操作的那个（启用态那一段）')
+    assert.equal(parked[0].kind, 'bundle')
+    assert.equal(parked[0].root, skillsRoot, '必须带根，否则无法恢复')
+    assert.equal(parked[0].source, 'user-agents', '必须带来源：客户端的分组与作用域标签靠它')
+    // 契约本身：一个身份一行（客户端行 key 就是这个身份）。
+    const keys = result.skills.map((row) => skillRowKey(row))
     assert.equal(new Set(keys).size, keys.length, `同一个身份只能出现一次，实际：${JSON.stringify(keys)}`)
     // 元组钉死：与客户端 lib/client.js 的 skillIdentity 必须是同一个字面量
     // （client-behavior 那条用例钉的是同一串）。
-    assert.equal(skillRowKey(staleRow), 'user-agents\u0000\u0000zhanggui',
+    assert.equal(skillRowKey({ source: 'user-agents', cwd: undefined, name: 'parked' }),
+      'user-agents\u0000\u0000parked',
       '身份元组变了就要同时改客户端 skillIdentity —— 否则去重失效、重复 key 回归')
   } finally {
     await rm(base, { recursive: true, force: true })
@@ -424,15 +428,18 @@ test('reads one skill body from the referenced root, on demand', async () => {  
         }],
       },
     }
-    const found = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-agents', root: agentsRoot })
+    const found = await SkillsManagerGateway.prototype.detail.call({ ctx },
+      { entry: 'zhanggui', kind: 'bundle', name: 'zhanggui', source: 'user-agents', root: agentsRoot })
     assert.equal(found.skill.name, 'zhanggui')
     assert.match(found.skill.content, /正文/)
     assert.equal(found.skill.source, 'user-agents')
-    const other = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-dsh', root: dshRoot })
+    const other = await SkillsManagerGateway.prototype.detail.call({ ctx },
+      { entry: 'zhanggui', kind: 'bundle', name: 'zhanggui', source: 'user-dsh', root: dshRoot })
     assert.match(other.skill.content, /另一个根/, '读的必须是引用指向的那个根，不是 rank 胜者')
     // 找不到要**报错**而不是返回空对象：面板要区分「没有这个技能」与「读失败」。
     await assert.rejects(
-      () => SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'nope', source: 'user-agents', root: agentsRoot }),
+      () => SkillsManagerGateway.prototype.detail.call({ ctx },
+        { entry: 'nope', kind: 'bundle', name: 'nope', source: 'user-agents', root: agentsRoot }),
       /nope/,
     )
   } finally {
@@ -494,9 +501,9 @@ test('importSkill lands in the referenced root and refuses a read-only one', asy
 // 所以行的权限从**那个文件本身**解析，与 detail 读的正文同源；读不到就是 null（不知道），
 // 不编一个布尔值出来。
 
-/** 造一个宿主 summary：面板行靠 path + resourceBase 反推根与形态（见 locateSkill）。 */
-function hostSummary({ name, root, source = 'user-agents', invocation }) {
-  const directory = join(root, name)
+/** 造一个宿主 summary：面板行靠 path + resourceBase 反推根、形态与磁盘条目（见 locateSkill）。 */
+function hostSummary({ name, root, source = 'user-agents', invocation, entry = name }) {
+  const directory = join(root, entry)
   return {
     name,
     description: '宿主缓存里的描述',
@@ -539,24 +546,161 @@ test('list reports the invocation that is on disk, not the one the host cache st
   }
 })
 
-test('list reports the real invocation of a disabled skill instead of claiming it cannot be called', async () => {
-  // 已停用的技能在宿主目录里根本不存在（改名成 .disabled），所以它**只有**我们能读到的这份文件。
+test('the derived enabled flag follows BOTH invocation faces, across all four states', async () => {
+  // ⚠️ 这条补的是审查发现的**零覆盖缺口**（变异「enabled 只看 modelInvocable、漏掉 userInvocable」
+  // 跑全量仍然全绿）。漏掉 userInvocable 会把「仅用户可调用」这一档误判成「已停用」——
+  // 而那一档正是用户最常用的一档（模型别自动用，我手动点名时才用）。
+  //
+  // 四态表（宿主原生两个字段的全部组合）：
+  //   都不写                      → 模型可调用 + 用户可调用 → enabled = true
+  //   disable-model-invocation    → 仅用户可调用           → enabled = **true**（不是停用！）
+  //   user-invocable: false       → 仅模型可调用           → enabled = true
+  //   两个都写                    → 两个面都关掉           → enabled = **false**（= 停用）
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+  const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+
+  const base = await mkdtemp(join(tmpdir(), 'dsh-four-states-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  const cases = [
+    ['both-open', '', true, true, true],
+    ['user-only', 'disable-model-invocation: true\n', false, true, true],
+    ['model-only', 'user-invocable: false\n', true, false, true],
+    ['switched-off', 'disable-model-invocation: true\nuser-invocable: false\n', false, false, false],
+  ]
+  for (const [name, extra] of cases) {
+    await mkdir(join(root, name), { recursive: true })
+    await writeFile(join(root, name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\n${extra}---\n\n正文\n`)
+  }
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  const fiber = ctx.plugin({
+    apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+  }, { dshHome: join(base, 'dsh-home'), agentsHome, watch: false })
+  await fiber
+  try {
+    const hostCtx = { get: (n) => ctx.get(n) }
+    const result = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, {})
+    const byName = new Map(result.skills.map((row) => [row.name, row]))
+    for (const [name, , modelInvocable, userInvocable, enabled] of cases) {
+      const row = byName.get(name)
+      assert.notEqual(row, undefined, `${name} 必须出现在列表里`)
+      assert.equal(row.modelInvocable, modelInvocable, `${name} 的模型面`)
+      assert.equal(row.userInvocable, userInvocable, `${name} 的用户面`)
+      assert.equal(row.enabled, enabled,
+        `${name} 的 enabled 必须由**两个面**共同决定（只看模型面会把 user-only 误判成已停用）`)
+    }
+    // 另一条不可省的检查：**只有**「两个面都关」才算停用，所以恰好一条为 false。
+    assert.deepEqual(result.skills.filter((row) => row.enabled === false).map((row) => row.name), ['switched-off'])
+  } finally {
+    await fiber.dispose?.()
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('detail reports the same enabled verdict as list, for both normal and migrated rows', async () => {
+  // ⚠️ 补审查发现的第二处零覆盖：`detail` 的 `enabled` 改回恒 true 曾跑全量仍绿。
+  // 两个 RPC 对同一个概念给相反结论就是第二判据——而迁移行正是最容易分叉的那一类：
+  // 它的「停用」在**文件名**里，照文件内容派生会把它说成「已启用」（真机实测过）。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-detail-enabled-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'normal'), { recursive: true })
+  await writeFile(join(root, 'normal', 'SKILL.md'), '---\nname: normal\ndescription: x\n---\n\n正文\n')
+  await mkdir(join(root, 'off'), { recursive: true })
+  await writeFile(join(root, 'off', 'SKILL.md'),
+    '---\nname: off\ndescription: x\ndisable-model-invocation: true\nuser-invocable: false\n---\n\n正文\n')
+  // 旧机制残留：注意它**文件内容里**写着 disable-model-invocation: true（用户当年关过模型面），
+  // 照内容派生会得到「一个面关着 → 不算停用」→ enabled=true（错），它在磁盘上的形态就是停用。
+  await mkdir(join(root, 'parked'), { recursive: true })
+  await writeFile(join(root, 'parked', 'SKILL.md.disabled'),
+    '---\nname: parked\ndescription: 旧机制停用\ndisable-model-invocation: true\n---\n\n正文\n')
+  try {
+    // ⚠️ 用**真宿主**而不是替身：这条要同时覆盖「宿主看得见的两种」与「只有我们看得见的残留」，
+    // 替身 `list: async () => []` 会把前两种一起抹掉，于是循环只剩一行、证明不了「两处判据一致」。
+    const { Context } = await import('@deepseek-ai/cordis')
+    const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+    const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+    const live = new Context()
+    await live.plugin(SkillRegistry)
+    const fiber = live.plugin({
+      apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+    }, { dshHome: join(base, 'dsh-home'), agentsHome, watch: false })
+    await fiber
+    const ctx = {
+      get: (name) => live.get(name),
+      loader: {
+        entries: () => [{
+          options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome: join(base, 'dsh-home'), agentsHome } },
+        }],
+      },
+    }
+    const listed = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
+    for (const row of listed.skills) {
+      const detail = await SkillsManagerGateway.prototype.detail.call({ ctx }, {
+        name: row.name, entry: row.entry, kind: row.kind, source: row.source, root: row.root, projectPath: row.cwd,
+      })
+      assert.equal(detail.skill.enabled, row.enabled,
+        `${row.name}：detail 与 list 的 enabled 必须一致（两个 RPC 给相反结论就是第二判据）`)
+      assert.equal(detail.skill.migrated, row.migrated === true, `${row.name} 的 migrated 也要一致`)
+    }
+    // 前提检查：这一批里确实三种都有，否则上面的循环证明不了什么。
+    assert.deepEqual(listed.skills.map((row) => [row.name, row.enabled]).sort(),
+      [['normal', true], ['off', false], ['parked', false]],
+      '前提：正常 / 两个面都关 / 旧机制残留 三种都要在场')
+    await fiber.dispose?.()
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('a migrated row reports the name from its frontmatter, not the disk entry name', async () => {
+  // ⚠️ 补审查发现的第三处零覆盖（变异「迁移行取磁盘条目名」曾跑全量仍绿）。
+  // 旧机制的条目名同样不保证等于技能名，而面板显示的名字必须是技能名（宿主就是这么认定的）。
+  const base = await mkdtemp(join(tmpdir(), 'dsh-migrated-name-'))
+  const agentsHome = join(base, 'agents-home')
+  const root = join(agentsHome, 'skills')
+  await mkdir(join(root, 'disk-parked'), { recursive: true })
+  await writeFile(join(root, 'disk-parked', 'SKILL.md.disabled'),
+    '---\nname: alias-parked\ndescription: 磁盘名与技能名不同\n---\n\n正文\n')
+  try {
+    const ctx = {
+      get: (name) => (name === 'skills' ? { list: async () => [] } : undefined),
+      loader: {
+        entries: () => [{
+          options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome: join(base, 'dsh-home'), agentsHome } },
+        }],
+      },
+    }
+    const [row] = (await SkillsManagerGateway.prototype.list.call({ ctx }, {})).skills
+    assert.equal(row.name, 'alias-parked', '显示名必须取自 frontmatter（宿主认定的技能名）')
+    assert.equal(row.entry, 'disk-parked', '条目仍是磁盘上的那个名字（定位要用它）')
+    assert.equal(row.description, '磁盘名与技能名不同', '描述同样取自那个文件')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+test('list reports the real invocation of a migrated leftover instead of claiming it cannot be called', async () => {
+  // 旧机制残留（`.disabled`）在宿主目录里不存在，所以它**只有**我们能读到的这份文件。
   // 之前这些行完全没有 invocation 字段，客户端于是把它渲染成「模型不可调用 / 用户不可调用」——
-  // 一个凭空的断言。停用与调用权限是两件事：停用的技能照样可以声明自己允许被调用。
+  // 一个凭空的断言。停用与调用权限是两件事：残留的文件照样可以声明自己允许被调用。
   const base = await mkdtemp(join(tmpdir(), 'dsh-invocation-disabled-'))
   const agentsHome = join(base, 'agents-home')
   const root = join(agentsHome, 'skills')
   await mkdir(join(root, 'paused'), { recursive: true })
   await writeFile(join(root, 'paused', 'SKILL.md.disabled'),
-    '---\nname: paused\ndescription: 停用但只是不给用户手动调用\nuser-invocable: false\n---\n\n正文\n')
+    '---\nname: paused\ndescription: 旧机制停用，但只是不给用户手动调用\nuser-invocable: false\n---\n\n正文\n')
   try {
     const ctx = hostWith([], { base, agentsHome })
     const result = await SkillsManagerGateway.prototype.list.call({ ctx }, {})
-    assert.deepEqual(result.skills, [])
-    assert.deepEqual(result.disabled.map((row) => row.name), ['paused'])
-    const [row] = result.disabled
+    const rows = result.skills.filter((row) => row.name === 'paused')
+    assert.equal(rows.length, 1, '旧机制残留必须列出来（宿主看不见它，只有我们能补）')
+    const [row] = rows
+    assert.equal(row.migrated, true)
     assert.equal(row.modelInvocable, true, '文件没禁止模型调用，就不许说它不可调用')
     assert.equal(row.userInvocable, false)
+    assert.equal(row.enabled, false, 'enabled 是派生的：两个面没都关，所以严格说它不算「已停用」')
   } finally {
     await rm(base, { recursive: true, force: true })
   }
@@ -589,10 +733,12 @@ test('detail reports the invocation parsed from the very bytes it returns as the
     '---\nname: zhanggui\ndescription: 演示\ndisable-model-invocation: true\n---\n\n# 掌柜\n\n正文\n')
   try {
     const ctx = hostWith([], { base, agentsHome })
-    const found = await SkillsManagerGateway.prototype.detail.call({ ctx }, { name: 'zhanggui', source: 'user-agents', root })
+    const found = await SkillsManagerGateway.prototype.detail.call({ ctx },
+      { entry: 'zhanggui', kind: 'bundle', source: 'user-agents', root })
     assert.match(found.skill.content, /正文/)
     assert.equal(found.skill.modelInvocable, false, '正文与权限必须来自同一次读')
     assert.equal(found.skill.userInvocable, true)
+    assert.equal(found.skill.entry, 'zhanggui', '详情要回带可操作的条目（客户端据此继续操作）')
   } finally {
     await rm(base, { recursive: true, force: true })
   }
@@ -618,7 +764,8 @@ test('setModelInvocable writes the referenced file and refuses a read-only root'
   const ctx = { get: () => undefined, loader: { entries: loaderEntries } }
   try {
     const result = await SkillsManagerGateway.prototype.setModelInvocable.call({ ctx }, {
-      name: 'zhanggui',
+      entry: 'zhanggui',
+      kind: 'bundle',
       source: 'user-agents',
       root,
       modelInvocable: false,
@@ -627,11 +774,14 @@ test('setModelInvocable writes the referenced file and refuses a read-only root'
     assert.equal(result.modelInvocable, false)
     const text = await readFile(join(root, 'zhanggui', 'SKILL.md'), 'utf8')
     assert.equal(diagnoseSkill(text).invocation.modelInvocable, false, '写盘结果必须被宿主读成「不可调用」')
+    assert.equal(diagnoseSkill(text).invocation.userInvocable, true,
+      '只动模型面：用户面必须原样（不许顺手改成不可调用）')
 
     const before = await readFile(join(bundled, 'builtin', 'SKILL.md'), 'utf8')
     await assert.rejects(
       () => SkillsManagerGateway.prototype.setModelInvocable.call({ ctx }, {
-        name: 'builtin',
+        entry: 'builtin',
+        kind: 'bundle',
         source: 'bundled',
         root: bundled,
         modelInvocable: false,
@@ -711,51 +861,52 @@ test('the user-reported shape: linked skill dirs + DSH_HOME inside the workspace
     // ① 每个技能只占一行（不是每工作区一份）
     assert.deepEqual(listed.skills.map((row) => row.name).sort(), [...names].sort(),
       `既不能重复列出、也不能丢：实际 ${listed.skills.length} 行`)
-    // ② 每一行都定位到根，且能读出调用权限（链接目录下这两件事以前都做不到）
+    // ② 每一行都定位到**根 + 磁盘条目**，且能读出调用权限（链接目录下这三件事以前都做不到）
     for (const row of listed.skills) {
       assert.notEqual(row.root, undefined, `${row.name} 必须定位到根（链接目录也不例外）`)
+      assert.equal(row.entry, row.name, `${row.name} 的条目必须是链接的展示名（磁盘上就是它）`)
+      assert.equal(row.kind, 'bundle')
       assert.equal(row.modelInvocable, true, `${row.name} 的调用权限要从文件里读出来`)
     }
-    // ③ 最关键：每一行都**真的能操作**。客户端送的是行上的 cwd（见 lib/client.js 的 setEnabled）。
+    // ③ 最关键：每一行都**真的能操作**。客户端送的是行上的引用（见 lib/client.js 的 toggleRow）。
     for (const row of listed.skills) {
       const off = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
-        name: row.name, source: row.source, root: row.root, projectPath: row.cwd, enabled: false,
+        name: row.name, entry: row.entry, kind: row.kind, source: row.source, root: row.root, projectPath: row.cwd, enabled: false,
       })
       assert.equal(off.changed, true, `${row.name} 必须能被停用（此前这里报「缺少技能目标引用」）`)
-      // 磁盘上确实改了名，而且改在外部库那份文件上（链接要跟过去）
-      assert.equal(existsSync(join(external, row.name, 'SKILL.md.disabled')), true,
-        `${row.name} 的停用必须落到真实文件上`)
+      // ⚠️ 断言落在**盘上的真相**：停用写的是宿主两个原生字段，而且写在**外部库那份真实文件**上
+      // （链接要跟过去）。文件本身**不得改名**——改名会让技能在 VS Code/Codex 里坏掉。
+      const parkedText = await readFile(join(external, row.name, 'SKILL.md'), 'utf8')
+      assert.deepEqual(diagnoseSkill(parkedText).invocation, { modelInvocable: false, userInvocable: false },
+        `${row.name} 的停用必须落到真实文件的两个字段上`)
+      assert.equal(existsSync(join(external, row.name, 'SKILL.md.disabled')), false,
+        `${row.name} 不得被改名（旧机制才会留下 .disabled）`)
       const back = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
-        name: row.name, source: row.source, root: row.root, projectPath: row.cwd, enabled: true,
+        name: row.name, entry: row.entry, kind: row.kind, source: row.source, root: row.root, projectPath: row.cwd, enabled: true,
       })
       assert.equal(back.changed, true, `${row.name} 必须能再启用回来`)
     }
     // ④ 正文也读得出（"用不了"的另一半）
     const first = listed.skills[0]
     const detail = await SkillsManagerGateway.prototype.detail.call({ ctx: hostCtx }, {
-      name: first.name, source: first.source, root: first.root, projectPath: first.cwd,
+      name: first.name, entry: first.entry, kind: first.kind, source: first.source, root: first.root, projectPath: first.cwd,
     })
     assert.match(detail.skill.content, new RegExp(`${first.name} 正文`), '正文必须读得出')
 
-    // ⑤ 停用一条后它必须**还看得见**，而且能启用回来。
-    // ⚠️ 这一条抓的是上面那个缺陷的第三个实例：`scanDisabledSkills` 原先用 `readdir` 的
-    // `Dirent.isDirectory()` 判「目录捆绑」，而**链接目录的 Dirent 报 isDirectory=false**
-    // （isSymbolicLink=true，实测）。于是链接技能一旦停用就掉进扁平分支、扫不到 →
-    // **从面板彻底消失，再也点不到「启用」**（磁盘上其实已经改名成功）。
-    // 对用户来说就是"点一下停用，这条技能没了"。
+    // ⑤ 停用一条后它**照样在列表里**、只是状态变了——这正是新机制相对旧机制的结构性好处：
+    // 宿主 list 是调用无关的，所以面板不需要扫盘、也就没有「同一身份两行」的可能。
     const victim = listed.skills[0]
     await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
-      name: victim.name, source: victim.source, root: victim.root, projectPath: victim.cwd, enabled: false,
+      name: victim.name, entry: victim.entry, kind: victim.kind, source: victim.source, root: victim.root, projectPath: victim.cwd, enabled: false,
     })
     const afterDisable = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, { workspaces: [workspace, nested] })
-    const parked = afterDisable.disabled.filter((row) => row.name === victim.name)
-    assert.equal(parked.length, 1, `${victim.name} 停用后必须出现在「已停用」里（否则用户再也启用不回来）`)
-    assert.equal(afterDisable.skills.filter((row) => row.name === victim.name).length, 0,
-      `${victim.name} 停用后不该仍在「已启用」里`)
-    assert.equal(afterDisable.skills.length + afterDisable.disabled.length, names.length,
-      '停用不该让条目凭空消失：总数要守恒')
+    assert.equal(afterDisable.skills.length, names.length,
+      '停用不该让条目凭空消失：宿主照样报得出它（面板因此不必扫盘）')
+    const parked = afterDisable.skills.filter((row) => row.name === victim.name)
+    assert.equal(parked.length, 1, `${victim.name} 停用后必须仍然只有一行`)
+    assert.equal(parked[0].enabled, false, `${victim.name} 的 enabled 必须由文件里的两个字段派生为 false`)
     const revived = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
-      name: parked[0].name, source: parked[0].source, root: parked[0].root, projectPath: parked[0].cwd, enabled: true,
+      name: parked[0].name, entry: parked[0].entry, kind: parked[0].kind, source: parked[0].source, root: parked[0].root, projectPath: parked[0].cwd, enabled: true,
     })
     assert.equal(revived.changed, true, `${victim.name} 必须能点「启用」恢复`)
 
@@ -763,15 +914,120 @@ test('the user-reported shape: linked skill dirs + DSH_HOME inside the workspace
     // 删错方向就是删掉用户自己的数据——这是本套动作里唯一不可逆的一步。
     const doomed = afterDisable.skills[0]
     await SkillsManagerGateway.prototype.removeSkill.call({ ctx: hostCtx }, {
-      name: doomed.name, source: doomed.source, root: doomed.root, projectPath: doomed.cwd,
+      name: doomed.name, entry: doomed.entry, kind: doomed.kind, source: doomed.source, root: doomed.root, projectPath: doomed.cwd,
     })
     assert.equal(existsSync(join(skillsRoot, doomed.name)), false, `${doomed.name} 的链接必须被删掉`)
     assert.equal(existsSync(join(external, doomed.name, 'SKILL.md')), true,
       `${doomed.name} 在外部库里的真实内容不能被删（那是用户的数据，不是我们的副本）`)
 
-    // ⑦ 两个数组仍互斥（一个身份一行）
-    const keys = [...afterDisable.skills, ...afterDisable.disabled].map((row) => skillRowKey(row))
+    // ⑦ 一个身份一行（客户端行 key 就是这个身份）
+    const keys = afterDisable.skills.map((row) => skillRowKey(row))
     assert.equal(new Set(keys).size, keys.length, `同一个身份只能出现一次，实际：${JSON.stringify(keys)}`)
+  } finally {
+    await fiber.dispose?.()
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+  }
+})
+
+test('the user shape with MISMATCHED disk names: every operation works and only the link is touched', async () => {
+  // ⚠️ 本轮审计的核心缺陷（真机实测 6 种形态里 4 种不可操作）：
+  // 宿主**允许**磁盘条目名与 frontmatter 的 `name` 不一致（`disk-name/SKILL.md` 里写
+  // `name: skill-alias` 照收，技能名来自 frontmatter）。而面板曾经按**技能名**拼磁盘路径
+  // （`join(root, name, 'SKILL.md')`），于是这类技能读正文/启停/删除**全部失败**。
+  //
+  // 这条把「用户完整形状」（DSH_HOME 在工作区里 × 技能全是 junction × 两个工作区）
+  // 与「名字不一致」**叠在一起**——两个条件各自都已被证明能单独制造缺陷，叠加才是真机的样子。
+  // 并且必须用**真宿主包**：`path`（realpath）与 `resourceBase.path`（展示路径）的口径差异
+  // 只有真 provider 才产得出来（教训 13：手搓 summary 是我以为的宿主形状）。
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+  const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+
+  const base = await mkdtemp(join(tmpdir(), 'dsh-alias-shape-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-alias-shape-ext-'))
+  const workspace = join(base, 'DSH')
+  const nested = join(workspace, 'temp')
+  await mkdir(join(workspace, '.git'), { recursive: true })
+  await mkdir(nested, { recursive: true })
+  const dshHome = join(workspace, '.dsh')
+  const skillsRoot = join(dshHome, 'skills')
+  const agentsHome = join(base, 'agents-home')
+  await mkdir(skillsRoot, { recursive: true })
+
+  // 每条技能：**磁盘目录名 != frontmatter 的 name**，且本体在外部库里（junction）。
+  const skills = [
+    { disk: 'disk-alpha', name: 'alpha-alias' },
+    { disk: 'disk-beta', name: 'beta-alias' },
+  ]
+  for (const skill of skills) {
+    await mkdir(join(external, skill.disk), { recursive: true })
+    await writeFile(join(external, skill.disk, 'SKILL.md'),
+      `---\nname: ${skill.name}\ndescription: ${skill.name} 的说明\n---\n\n${skill.name} 正文。\n`)
+    try {
+      await symlink(join(external, skill.disk), join(skillsRoot, skill.disk), 'junction')
+    } catch (error) {
+      await rm(base, { recursive: true, force: true })
+      await rm(external, { recursive: true, force: true })
+      throw new Error(`本环境无法创建链接（${error.code}），该用例未能执行`)
+    }
+  }
+
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  const fiber = ctx.plugin({
+    apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+  }, { dshHome, agentsHome, watch: false })
+  await fiber
+  const hostCtx = {
+    get: (name) => ctx.get(name),
+    loader: {
+      entries: () => [{
+        options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome, agentsHome } },
+      }],
+    },
+  }
+  try {
+    const listed = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, { workspaces: [workspace, nested] })
+    // 宿主报的名字是 frontmatter 里的那个（不是磁盘名）——这正是当初误用它的原因。
+    assert.deepEqual(listed.skills.map((row) => row.name).sort(), ['alpha-alias', 'beta-alias'],
+      '宿主按 frontmatter 取名')
+    // 而面板必须给出**磁盘条目**，才能定位。
+    assert.deepEqual(listed.skills.map((row) => row.entry).sort(), ['disk-alpha', 'disk-beta'],
+      '面板必须从宿主字段还原出磁盘条目名（不是拿技能名）')
+
+    for (const row of listed.skills) {
+      const reference = {
+        name: row.name, entry: row.entry, kind: row.kind, source: row.source, root: row.root, projectPath: row.cwd,
+      }
+      // ① 读正文：以前这里直接报「找不到技能 <别名>」
+      const detail = await SkillsManagerGateway.prototype.detail.call({ ctx: hostCtx }, reference)
+      assert.match(detail.skill.content, new RegExp(`${row.name} 正文`), `${row.name} 的正文必须读得出`)
+      assert.equal(detail.skill.name, row.name, '详情回带的技能名取自文件本身')
+      // ② 停用 → 落到外部库那份真实文件的两个字段上
+      const off = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, { ...reference, enabled: false })
+      assert.equal(off.changed, true, `${row.name} 必须能停用`)
+      const parkedText = await readFile(join(external, row.entry, 'SKILL.md'), 'utf8')
+      assert.deepEqual(diagnoseSkill(parkedText).invocation, { modelInvocable: false, userInvocable: false },
+        `${row.name} 的停用必须落在真实文件的字段上`)
+      // ③ 停用后仍在列表里（新机制：宿主照样报得出它），并且能启用回来
+      const afterOff = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, { workspaces: [workspace, nested] })
+      assert.equal(afterOff.skills.filter((r) => r.name === row.name).length, 1, `${row.name} 停用后仍在列表里`)
+      assert.equal(afterOff.skills.find((r) => r.name === row.name).enabled, false)
+      const on = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, { ...reference, enabled: true })
+      assert.equal(on.changed, true, `${row.name} 必须能启用回来`)
+    }
+
+    // ④ 删除：删的是**链接**，外部库那份真实内容必须一个字节不少。
+    const doomed = listed.skills.find((row) => row.name === 'alpha-alias')
+    await SkillsManagerGateway.prototype.removeSkill.call({ ctx: hostCtx }, {
+      name: doomed.name, entry: doomed.entry, kind: doomed.kind, source: doomed.source, root: doomed.root, projectPath: doomed.cwd,
+    })
+    assert.equal(existsSync(join(skillsRoot, doomed.entry)), false, '链接必须被删掉')
+    assert.equal(existsSync(join(external, doomed.entry, 'SKILL.md')), true,
+      '外部库里的真实内容不能被删（那是用户的数据）')
+    // 另一条技能不受影响：删错范围会连它一起带走
+    assert.equal(existsSync(join(skillsRoot, 'disk-beta')), true, '只删点名的那一条')
   } finally {
     await fiber.dispose?.()
     await rm(base, { recursive: true, force: true })
