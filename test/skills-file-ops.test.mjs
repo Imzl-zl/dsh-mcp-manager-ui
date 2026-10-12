@@ -179,6 +179,45 @@ test('scans disabled skills that the host catalog cannot see', async () => {
   }
 })
 
+test('scans a disabled skill whose directory is a link (the host would never see it again)', async () => {
+  // ⚠️ 真机缺陷（与 issue #5 同一根因的第三个实例，2026-10-11 复现）：
+  // 技能目录是指向外部同步库的符号链接/junction 时，`readdir` 的 `Dirent.isDirectory()`
+  // 报 **false**（而是 isSymbolicLink=true）。原先的扫描用这个判据挑「目录捆绑」，
+  // 于是链接技能一旦停用就掉进扁平分支、两边都不匹配 → **扫不到 → 从面板彻底消失**。
+  // 用户那边看到的是：「点一下停用，这条技能没了，也没法再启用」——而磁盘上其实改名成功了。
+  //
+  // 判据必须落在物理位置（stat 跟随链接后的真相）上，与 locateSkill 的处理是同一个原则。
+  const root = await mkdtemp(join(tmpdir(), 'dsh-scan-link-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-scan-link-ext-'))
+  try {
+    // 本体在外部库，根下只放 junction
+    await mkdir(join(external, 'linked-skill'), { recursive: true })
+    await writeFile(join(external, 'linked-skill', 'SKILL.md.disabled'),
+      '---\nname: linked-skill\ndescription: 链接技能\n---\n\n正文\n')
+    try {
+      await symlink(join(external, 'linked-skill'), join(root, 'linked-skill'), 'junction')
+    } catch (error) {
+      throw new Error(`本环境无法创建链接（${error.code}），该用例未能执行`)
+    }
+
+    const disabled = await scanDisabledSkills({ root, scope: 'global' })
+    const linked = disabled.find((row) => row.name === 'linked-skill')
+    assert.notEqual(linked, undefined,
+      '链接目录里的停用技能必须扫得到——否则用户停用后就再也看不见、也启用不回来')
+    assert.equal(linked.kind, 'bundle', '形态按跟随链接后的真相判定（它是个目录捆绑）')
+    assert.equal(existsSync(linked.path), true, '给出的路径必须真的存在，否则「启用」会失败')
+
+    // 真的能启用回来（扫到的目标要是可用的）
+    await setSkillEnabled({ ...linked, writable: true, root }, true)
+    assert.equal(existsSync(join(external, 'linked-skill', 'SKILL.md')), true,
+      '启用必须改回外部库那份真实文件')
+    assert.equal(existsSync(join(external, 'linked-skill', 'SKILL.md.disabled')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
+  }
+})
+
 test('reads a skill body and its on-disk invocation in the same read', async () => {
   // 正文与调用权限**必须同源**：分两次读会读到两个不同的版本（改动正好落在两次读之间），
   // 面板于是显示一份正文、配一个不属于它的权限。所以读技能只有这一个入口。

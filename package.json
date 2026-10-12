@@ -1,6 +1,6 @@
 {
   "name": "dsh-toolbox-ui",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "Responsive MCP management UI and skills manager for DeepSeek Harness Web — floating panel, JSON import, profile-backed Host Remote management, and a skill market with a hard license gate.",
   "repository": {
     "type": "git",
@@ -56,6 +56,7 @@
     "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-scope": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-skill": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-loader": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.0-rc.2"

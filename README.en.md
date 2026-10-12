@@ -57,10 +57,10 @@ See every installed skill's **real scope** and cross-scope shadowing, enable/dis
 
 ```sh
 # Recommended: from npm — `dsh plugin update` then upgrades within ^1.x
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.4
+dsh plugin --profile web add dsh-toolbox-ui@^1.6.5
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag)
-dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.4
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.5
 ```
 
 Then **restart `dsh web`**. To uninstall (your existing MCP entries stay):

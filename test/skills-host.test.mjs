@@ -18,7 +18,7 @@
 //    （官方 ctx.remote.skills.list 需要真实 sessionId，会激活冷 Agent，故本插件走自己的 RPC）。
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, symlink } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -641,6 +641,141 @@ test('setModelInvocable writes the referenced file and refuses a read-only root'
     assert.equal(await readFile(join(bundled, 'builtin', 'SKILL.md'), 'utf8'), before, '内置根不得被写入')
   } finally {
     await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('the user-reported shape: linked skill dirs + DSH_HOME inside the workspace stay fully operable', async () => {
+  // ⚠️ 这条来自 issue #5 后续反馈，抓到的是**两个条件叠加**才出现的缺陷：
+  //    ① `DSH_HOME` 就在工作区里（工作区自己是 git 根）→ 项目级根与全局根是同一个物理目录；
+  //    ② 技能目录全是指向外部同步库的**符号链接/junction**。
+  // 单独测任一条都发现不了：单独测 ① 只是"行重复"，单独测 ② 只是"根定位不到"。
+  // 叠加起来是：宿主把每条技能按**每个工作区**各报一份（实测 5 条 → 15 行），
+  // 而每一份的根都定位不到 → 全部 `root === undefined` → **点哪个都报「缺少技能目标引用」**。
+  // 也就是「面板列得满满当当，但一个都用不了」——用户的原话。
+  //
+  // ⚠️⚠️ 这条**必须用真 provider**（@deepseek-ai/dsh-skill-filesystem）。理由是本缺陷的
+  // 根因就在那个包的两个字段口径不同（`resourceBase.path` 是展示路径、`path` 是 realpath），
+  // 而手搓 summary 是我"以为"的宿主形状——上一轮的用例全是手搓的，于是整类缺陷都测不到。
+  // 这个包原先不在 devDependencies 里，正是"测试网够不着这一层"的原因；已补上。
+  //
+  // 断言必须落在**可操作性**上（真的去改盘），不能只断言"列出了几行"——那正是上一轮的漏法。
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+  const fsProvider = await import('@deepseek-ai/dsh-skill-filesystem')
+
+  const base = await mkdtemp(join(tmpdir(), 'dsh-user-shape-'))
+  const external = await mkdtemp(join(tmpdir(), 'dsh-user-shape-ext-'))
+  const workspace = join(base, 'DSH')
+  const nested = join(workspace, 'temp')
+  await mkdir(join(workspace, '.git'), { recursive: true })
+  await mkdir(nested, { recursive: true })
+  // DSH_HOME 落在工作区里 → project-dsh 根 == user-dsh 根（同一个物理目录）
+  const dshHome = join(workspace, '.dsh')
+  const skillsRoot = join(dshHome, 'skills')
+  const agentsHome = join(base, 'agents-home')
+  await mkdir(skillsRoot, { recursive: true })
+
+  const names = ['alpha', 'beta', 'gamma']
+  for (const name of names) {
+    // 技能本体在外部库里，技能根下只放 junction（用户 11 条技能的真实形态）
+    await mkdir(join(external, name), { recursive: true })
+    await writeFile(join(external, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${name} 的说明\n---\n\n${name} 正文。\n`)
+    try {
+      await symlink(join(external, name), join(skillsRoot, name), 'junction')
+    } catch (error) {
+      await rm(base, { recursive: true, force: true })
+      await rm(external, { recursive: true, force: true })
+      throw new Error(`本环境无法创建链接（${error.code}），该用例未能执行`)
+    }
+  }
+
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  // provider 必须带自己的 inject（它靠这个拿到 skills 服务）
+  const fiber = ctx.plugin({
+    apply: fsProvider.apply, inject: fsProvider.inject, name: fsProvider.name, Config: fsProvider.Config,
+  }, { dshHome, agentsHome, watch: false })
+  await fiber
+  const hostCtx = {
+    get: (name) => ctx.get(name),
+    loader: {
+      entries: () => [{
+        options: { name: '@deepseek-ai/dsh-skill-filesystem', config: { dshHome, agentsHome } },
+      }],
+    },
+  }
+  try {
+    const listed = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, { workspaces: [workspace, nested] })
+
+    // ① 每个技能只占一行（不是每工作区一份）
+    assert.deepEqual(listed.skills.map((row) => row.name).sort(), [...names].sort(),
+      `既不能重复列出、也不能丢：实际 ${listed.skills.length} 行`)
+    // ② 每一行都定位到根，且能读出调用权限（链接目录下这两件事以前都做不到）
+    for (const row of listed.skills) {
+      assert.notEqual(row.root, undefined, `${row.name} 必须定位到根（链接目录也不例外）`)
+      assert.equal(row.modelInvocable, true, `${row.name} 的调用权限要从文件里读出来`)
+    }
+    // ③ 最关键：每一行都**真的能操作**。客户端送的是行上的 cwd（见 lib/client.js 的 setEnabled）。
+    for (const row of listed.skills) {
+      const off = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
+        name: row.name, source: row.source, root: row.root, projectPath: row.cwd, enabled: false,
+      })
+      assert.equal(off.changed, true, `${row.name} 必须能被停用（此前这里报「缺少技能目标引用」）`)
+      // 磁盘上确实改了名，而且改在外部库那份文件上（链接要跟过去）
+      assert.equal(existsSync(join(external, row.name, 'SKILL.md.disabled')), true,
+        `${row.name} 的停用必须落到真实文件上`)
+      const back = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
+        name: row.name, source: row.source, root: row.root, projectPath: row.cwd, enabled: true,
+      })
+      assert.equal(back.changed, true, `${row.name} 必须能再启用回来`)
+    }
+    // ④ 正文也读得出（"用不了"的另一半）
+    const first = listed.skills[0]
+    const detail = await SkillsManagerGateway.prototype.detail.call({ ctx: hostCtx }, {
+      name: first.name, source: first.source, root: first.root, projectPath: first.cwd,
+    })
+    assert.match(detail.skill.content, new RegExp(`${first.name} 正文`), '正文必须读得出')
+
+    // ⑤ 停用一条后它必须**还看得见**，而且能启用回来。
+    // ⚠️ 这一条抓的是上面那个缺陷的第三个实例：`scanDisabledSkills` 原先用 `readdir` 的
+    // `Dirent.isDirectory()` 判「目录捆绑」，而**链接目录的 Dirent 报 isDirectory=false**
+    // （isSymbolicLink=true，实测）。于是链接技能一旦停用就掉进扁平分支、扫不到 →
+    // **从面板彻底消失，再也点不到「启用」**（磁盘上其实已经改名成功）。
+    // 对用户来说就是"点一下停用，这条技能没了"。
+    const victim = listed.skills[0]
+    await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
+      name: victim.name, source: victim.source, root: victim.root, projectPath: victim.cwd, enabled: false,
+    })
+    const afterDisable = await SkillsManagerGateway.prototype.list.call({ ctx: hostCtx }, { workspaces: [workspace, nested] })
+    const parked = afterDisable.disabled.filter((row) => row.name === victim.name)
+    assert.equal(parked.length, 1, `${victim.name} 停用后必须出现在「已停用」里（否则用户再也启用不回来）`)
+    assert.equal(afterDisable.skills.filter((row) => row.name === victim.name).length, 0,
+      `${victim.name} 停用后不该仍在「已启用」里`)
+    assert.equal(afterDisable.skills.length + afterDisable.disabled.length, names.length,
+      '停用不该让条目凭空消失：总数要守恒')
+    const revived = await SkillsManagerGateway.prototype.setEnabled.call({ ctx: hostCtx }, {
+      name: parked[0].name, source: parked[0].source, root: parked[0].root, projectPath: parked[0].cwd, enabled: true,
+    })
+    assert.equal(revived.changed, true, `${victim.name} 必须能点「启用」恢复`)
+
+    // ⑥ 删除：只删链接，**不能碰外部库里的真实内容**。技能本体在用户的同步库里，
+    // 删错方向就是删掉用户自己的数据——这是本套动作里唯一不可逆的一步。
+    const doomed = afterDisable.skills[0]
+    await SkillsManagerGateway.prototype.removeSkill.call({ ctx: hostCtx }, {
+      name: doomed.name, source: doomed.source, root: doomed.root, projectPath: doomed.cwd,
+    })
+    assert.equal(existsSync(join(skillsRoot, doomed.name)), false, `${doomed.name} 的链接必须被删掉`)
+    assert.equal(existsSync(join(external, doomed.name, 'SKILL.md')), true,
+      `${doomed.name} 在外部库里的真实内容不能被删（那是用户的数据，不是我们的副本）`)
+
+    // ⑦ 两个数组仍互斥（一个身份一行）
+    const keys = [...afterDisable.skills, ...afterDisable.disabled].map((row) => skillRowKey(row))
+    assert.equal(new Set(keys).size, keys.length, `同一个身份只能出现一次，实际：${JSON.stringify(keys)}`)
+  } finally {
+    await fiber.dispose?.()
+    await rm(base, { recursive: true, force: true })
+    await rm(external, { recursive: true, force: true })
   }
 })
 

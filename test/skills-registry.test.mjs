@@ -118,21 +118,26 @@ test('reports the scope and rank from the host source rather than guessing a pat
 test('derives the skill root from the host resourceBase, for both skill shapes', async () => {
   // 启停/删除/导入都要按 (name, scope, root) 精确定位，而 **ctx.skills 不暴露 roots()**
   // （实测：公开方法只有 registerProvider/register/list/snapshot/get/collect/... ）。
-  // 根目录只能从 summary 的 resourceBase 推——已用**真实 cordis Context + 真实宿主包**实测：
-  //   目录捆绑：path = <技能目录>/SKILL.md，resourceBase.path = <技能目录> → 根 = dirname(base)
-  //   扁平文件：path = <根>/<name>.md，    resourceBase.path = <根>       → 根 = base
-  // 判别式是「path 是否恰为 <base>/SKILL.md」，与宿主 discoverRoot 的两种 locator 一一对应。
-  // （首版曾用「dirname(path) === base」判别——两种情况都成立，不是判别式。）
+  //
+  // 判别依据是宿主的 locator **构造规则**（dsh-skill-filesystem 的 discoverRoot）：
+  //   目录捆绑：locator.path = <技能目录>/SKILL.md，locator.directory = <技能目录>
+  //   扁平文件：locator.path = <根>/<name>.md，    locator.directory = <根>
+  // 也就是**形态由技能文件名决定**（SKILL.md vs <name>.md），**根由 resourceBase 决定**。
+  //
+  // ⚠️ 刻意**不去比较两个字段的路径**：它们来自不同口径（resourceBase 是展示路径、path 是
+  // realpath），链接下必然分叉。这条用例喂的就是分叉的输入（见下），任何路径比较式实现都会红。
   const skills = fakeSkills({
     '': [
       skill({
         name: 'bundle-skill',
-        path: '/u/.agents/skills/bundle-skill/SKILL.md',
+        // 目录捆绑：path 指向别人的外部库（realpath），resourceBase 是发现路径
+        path: '/elsewhere/external/bundle-skill/SKILL.md',
         resourceBase: { kind: 'directory', path: '/u/.agents/skills/bundle-skill' },
       }),
       skill({
         name: 'flat-skill',
-        path: '/u/.agents/skills/flat-skill.md',
+        // 扁平：文件名是 <name>.md，同样来自外部库
+        path: '/elsewhere/external/flat-skill.md',
         resourceBase: { kind: 'directory', path: '/u/.agents/skills' },
       }),
     ],
@@ -239,6 +244,27 @@ test('keeps same-named skills in different roots as separate rows (real shadowin
 
   assert.equal(rows.filter((row) => row.name === 'zhanggui').length, 2, '不同根里的同名技能必须各占一行')
   assert.deepEqual(rows.map((row) => row.scope).sort(), ['global', 'project'])
+})
+
+test('locates a flat skill whose own file is a symlink (the shape the path comparison missed)', async () => {
+  // ⚠️ 宿主的两种 locator 都可能被链接打断，而**扁平技能的文件本身是链接**是最容易漏的那个：
+  // 它的 `path` 指向外部库（realpath），`resourceBase.path` 是技能根——两者**不在同一棵树下**，
+  // 所以任何「realpath 规范化后做路径前缀比较」的实现都判不出来（前一版就栽在这里）。
+  // 宿主自己的用例同时钉着这两种形状：skill-filesystem.spec.ts 的 linked-dir 与 linked-flat。
+  //
+  // 判别式按宿主的构造规则来：形状看**文件名**（`<name>.md` 就是扁平），根看 resourceBase。
+  // 文件名在两种口径下完全一致（realpath 不改变 basename），所以链接怎样都不影响。
+  const skills = fakeSkills({
+    '': [skill({
+      name: 'linked-flat',
+      path: '/external-sync-lib/linked-flat.md',              // realpath：在外部库里
+      resourceBase: { kind: 'directory', path: '/u/.agents/skills' },  // 展示路径：技能根
+    })],
+  })
+  const [row] = await listSkillViews(ctxWith(skills), {})
+
+  assert.equal(row.kind, 'flat', '文件名是 <name>.md → 扁平形态（与它在不在外部库无关）')
+  assert.equal(row.root, '/u/.agents/skills', '根来自 resourceBase，不是从 path 反推的')
 })
 
 test('omits the root rather than guessing when the host gives no resourceBase', async () => {
