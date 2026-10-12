@@ -749,7 +749,7 @@ test('the host picks up a disabled skill without a restart (the docs must not te
   // 而旧文案写的是「重启 DSH 最稳妥」——那句话会让用户白重启一次。
   //
   // 断言必须问**真宿主**：文件监听（chokidar，depth 1）是宿主的行为，替身测不出它。
-  // 实测这个窗口是 100~300ms（受 watcher 的 200ms stabilityThreshold 支配），
+  // 实测这个窗口约 0.25 秒（8 次采样中位数 246ms；受 watcher 的 200ms stabilityThreshold 支配），
   // 这里给 5s 余量——用例要证明的是「会自动生效」，不是「多快生效」（钉死时间会变成 flaky）。
   const { Context } = await import('@deepseek-ai/cordis')
   const { SkillRegistry, isModelInvocable } = await import('@deepseek-ai/dsh-skill')
