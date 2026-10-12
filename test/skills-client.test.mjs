@@ -635,6 +635,54 @@ test('the list row badges BOTH invocation faces, because either one can be off',
   assert.match(subOf({ modelInvocable: false, userInvocable: false, enabled: false, migrated: true }), /旧机制停用/)
 })
 
+test('the diagnostics row shows the state, never the raw root path (it overflows the sidebar)', async () => {
+  // ⚠️ 真机发现的缺陷（起隔离 DSH 实例点出来的）：诊断行原来在副标题里塞了**整条根路径**，
+  // 而那串路径在侧栏 185px 的单元格里溢出（实测 scrollWidth 237 > clientWidth 185），
+  // 且 `.dsh-mcp-item-sub` **没有** ellipsis（只有 .dsh-mcp-item-name 有），
+  // 于是那行被硬裁成「已」后面什么都没有——用户看到半截字，以为渲染坏了。
+  //
+  // ⚠️⚠️ 这条用例第一版**测错了对象**：它渲染 SkillRow，而诊断组是**内联在 SkillsPanel 里
+  // 手写的**（不走 SkillRow），于是把根路径塞回去也不会有任何用例变红（变异验证当场发现）。
+  // 所以必须渲染**真的 SkillsPanel**，让它自己产出诊断行。
+  const internals = loadClientInternals()
+  const longRoot = 'C:\\Users\\zhanglu\\AppData\\Local\\Temp\\dsh-uitest-agents\\skills'
+  // 一条**旧机制残留**：它既进「已停用」也进「需要注意」两组，正是真机上溢出的那一行。
+  const parked = {
+    name: 'legacy-parked', description: '', entry: 'legacy-parked', kind: 'bundle',
+    source: 'user-agents', scope: 'global', writable: true, root: longRoot,
+    modelInvocable: false, userInvocable: false, enabled: false, migrated: true,
+  }
+  const call = async (method) => (method === 'list'
+    ? { ok: true, skills: [parked] }
+    : { ok: true, targets: [], skills: [], total: 0, labels: {} })
+  const panelTree = internals.__render(internals.SkillsPanel, {
+    call, workspaces: [], onSummary() {}, flash() {},
+  })
+  await flushEffects(internals)
+  const tree = internals.__expand(internals.__render(internals.SkillsPanel, {
+    call, workspaces: [], onSummary() {}, flash() {},
+  }))
+
+  const subs = []
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (node.props?.className === 'dsh-mcp-item-sub') subs.push(node)
+    walk(node.props?.children)
+    walk(node.children)
+  }
+  walk(tree)
+  assert.ok(subs.length > 0, '必须先渲染出至少一个 .dsh-mcp-item-sub（否则这条用例是空转）')
+
+  for (const sub of subs) {
+    const text = textOf(sub).join(' ')
+    assert.doesNotMatch(text, /C:\\Users|AppData|dsh-uitest-agents/,
+      `副标题里不得出现根路径——它会在 185px 的侧栏里溢出并被硬裁（真机实测）。实际：${text}`)
+  }
+  // 状态本身照常说（残留与普通停用要能区分）
+  assert.match(textOf(tree).join(' '), /旧机制停用/, '状态要说出来')
+})
+
 test('the user-invocable face has its OWN switch, wired to its own action', () => {
   // ⚠️ 这条补的是变异测试找到的缺口：原来 `switchOf` 只取**第一个** switch，于是第二个
   // （用户面）**完全没有被测**——把它接回 onModelInvocable 也不会有任何用例变红。
