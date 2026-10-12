@@ -1,0 +1,1139 @@
+<!doctype html>
+<html lang="zh" data-theme="light"><head><meta charset="utf-8">
+<!-- ⚠️ 必须有 viewport meta：缺了它，移动端仿真会用 980px 的默认布局视口，
+     于是面板自己的 @media(max-width:760px/480px) 两条断点**永远不触发**——
+     第一版就是这样，量出来一切正常，其实断点根本没生效（假绿）。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>技能面板 UI 预览（真主题 + 真样式 + 真组件）</title>
+<style>
+/* ===== host: base.css ===== */
+/* Base variables referenced by the token sheets and component CSS but defined
+ * upstream (deepsuite theme/global.css) — supplied here so the composite
+ * --dsw-font-* variables resolve and motion rides the upstream curve. Code
+ * font stack deliberately omits a bare `monospace` tail (Windows CJK falls
+ * back to SimSun otherwise). */
+:root {
+  --dsh-font-family-text-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --dsw-font-family: var(--dsh-font-family-text-default);
+  --dsw-font-family-brand: 'Montserrat', var(--dsh-font-family-text-default);
+  --dsh-font-family-code-default: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas,
+    'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-font-family-code: var(--dsh-font-family-code-default);
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;
+  --dsw-radius-xs: 4px;
+  --dsw-radius-sm: 8px;
+  --dsw-radius-md: 12px;
+  --dsw-radius-lg: 16px;
+  --dsw-radius-xl: 20px;
+  --dsw-radius-panel: 28px;
+}
+
+/* User font lists (--dsh-font-family-text/-code, written on body by the theme
+ * boot script and ThemePresenter) lead the built-in stacks. An unset list
+ * falls back to the built-in stack itself; the repeated families are inert. */
+body {
+  --dsw-font-family: var(--dsh-font-family-text, var(--dsh-font-family-text-default)), var(--dsh-font-family-text-default);
+  --ds-font-family-code: var(--dsh-font-family-code, var(--dsh-font-family-code-default)), var(--dsh-font-family-code-default);
+  --dsw-alias-settings-card-fill: var(--dsw-alias-bg-layer-2);
+  --dsw-alias-settings-card-stroke: var(--dsw-alias-border-l4);
+}
+
+[data-dsh-automatic-focus]:focus,
+[data-dsh-automatic-focus]:focus:focus-visible {
+  outline: none;
+}
+
+/* ===== host: design-platform.css ===== */
+/* Figma font-weight 510 (an SF Pro variable-font weight) always renders as
+   font-weight: 500 in this UI — non-variable webfonts snap intermediate
+   weights unpredictably across platforms. */
+body {
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+  --dsw-static-amber-900: rgb(39, 36, 31);
+  --dsw-static-blue-100: rgb(219, 234, 254);
+  --dsw-static-blue-300: rgb(147, 197, 253);
+  --dsw-static-blue-400: rgb(96, 165, 250);
+  --dsw-static-blue-450: rgb(77, 147, 248);
+  --dsw-static-blue-500: rgb(59, 130, 246);
+  --dsw-static-blue-50: rgb(239, 246, 255);
+  --dsw-static-blue-50p: rgb(234, 243, 255);
+  --dsw-static-blue-600: rgb(37, 99, 235);
+  --dsw-static-blue-75: rgb(229, 240, 255);
+  --dsw-static-blue-800: rgb(30, 64, 175);
+  --dsw-static-blue-900: rgb(14, 48, 116);
+  --dsw-static-blue-950: rgb(23, 37, 84);
+  --dsw-static-deepseek-100: rgb(228, 237, 253);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  /* Brightened from the platform rgb(103, 158, 254) at the designer's request: legibility on the dark toast surface. */
+  --dsw-static-deepseek-400: rgb(122, 170, 255);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-deepseek-700-delete: rgb(47, 76, 143);
+  --dsw-static-deepseek-800: rgb(52, 65, 91);
+  --dsw-static-deepseek-900: rgb(40, 49, 66);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-green-500-a08: rgb(34 197 94 / 8%);
+  --dsw-static-green-500-a12: rgb(34 197 94 / 12%);
+  --dsw-static-green-900: rgb(35, 60, 44);
+  --dsw-static-neutral-00: rgb(255, 255, 255);
+  --dsw-static-neutral-1000: rgb(0, 0, 0);
+  --dsw-static-neutral-100: rgb(245, 245, 245);
+  --dsw-static-neutral-150: rgb(237, 237, 237);
+  --dsw-static-neutral-200: rgb(229, 229, 229);
+  --dsw-static-neutral-250: rgb(220, 220, 220);
+  --dsw-static-neutral-300: rgb(212, 212, 212);
+  --dsw-static-neutral-400: rgb(162, 164, 166);
+  --dsw-static-neutral-500: rgb(127, 130, 135);
+  --dsw-static-neutral-50: rgb(250, 250, 250);
+  --dsw-static-neutral-550: rgb(101, 103, 107);
+  --dsw-static-neutral-600: rgb(84, 85, 87);
+  --dsw-static-neutral-700: rgb(60, 60, 61);
+  --dsw-static-neutral-800: rgb(41, 41, 41);
+  --dsw-static-neutral-850: rgb(33, 33, 35);
+  --dsw-static-neutral-900: rgb(15, 15, 15);
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-red-100: rgb(254, 226, 226);
+  --dsw-static-red-400: rgb(242, 90, 90);
+  --dsw-static-red-400-a12: rgb(242 90 90 / 12%);
+  --dsw-static-red-500: rgb(239, 68, 68);
+  --dsw-static-red-50: rgb(254, 242, 242);
+  --dsw-static-red-600: rgb(236, 19, 19);
+  --dsw-static-red-600-a08: rgb(236 19 19 / 8%);
+  --dsw-static-red-900: rgb(87, 12, 12);
+}
+
+body[data-ds-dark-theme] {
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+  --dsw-static-amber-900: rgb(39, 36, 31);
+  --dsw-static-blue-100: rgb(219, 234, 254);
+  --dsw-static-blue-300: rgb(147, 197, 253);
+  --dsw-static-blue-400: rgb(96, 165, 250);
+  --dsw-static-blue-450: rgb(77, 147, 248);
+  --dsw-static-blue-500: rgb(59, 130, 246);
+  --dsw-static-blue-50: rgb(239, 246, 255);
+  --dsw-static-blue-50p: rgb(234, 243, 255);
+  --dsw-static-blue-600: rgb(37, 99, 235);
+  --dsw-static-blue-75: rgb(229, 240, 255);
+  --dsw-static-blue-800: rgb(30, 64, 175);
+  --dsw-static-blue-900: rgb(14, 48, 116);
+  --dsw-static-blue-950: rgb(23, 37, 84);
+  --dsw-static-deepseek-100: rgb(228, 237, 253);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  /* Brightened from the platform rgb(103, 158, 254) at the designer's request: legibility on the dark toast surface. */
+  --dsw-static-deepseek-400: rgb(122, 170, 255);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-deepseek-700-delete: rgb(47, 76, 143);
+  --dsw-static-deepseek-800: rgb(52, 65, 91);
+  --dsw-static-deepseek-900: rgb(40, 49, 66);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-green-500-a08: rgb(34 197 94 / 8%);
+  --dsw-static-green-500-a12: rgb(34 197 94 / 12%);
+  --dsw-static-green-900: rgb(35, 60, 44);
+  --dsw-static-neutral-00: rgb(255, 255, 255);
+  --dsw-static-neutral-1000: rgb(0, 0, 0);
+  --dsw-static-neutral-100: rgb(245, 245, 245);
+  --dsw-static-neutral-150: rgb(237, 237, 237);
+  --dsw-static-neutral-200: rgb(229, 229, 229);
+  --dsw-static-neutral-250: rgb(220, 220, 220);
+  --dsw-static-neutral-300: rgb(212, 212, 212);
+  --dsw-static-neutral-400: rgb(162, 164, 166);
+  --dsw-static-neutral-500: rgb(127, 130, 135);
+  --dsw-static-neutral-50: rgb(250, 250, 250);
+  --dsw-static-neutral-550: rgb(101, 103, 107);
+  --dsw-static-neutral-600: rgb(84, 85, 87);
+  --dsw-static-neutral-700: rgb(60, 60, 61);
+  --dsw-static-neutral-800: rgb(41, 41, 41);
+  --dsw-static-neutral-850: rgb(33, 33, 35);
+  --dsw-static-neutral-900: rgb(15, 15, 15);
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-60: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-red-100: rgb(254, 226, 226);
+  --dsw-static-red-400: rgb(242, 90, 90);
+  --dsw-static-red-400-a12: rgb(242 90 90 / 12%);
+  --dsw-static-red-500: rgb(239, 68, 68);
+  --dsw-static-red-50: rgb(254, 242, 242);
+  --dsw-static-red-600: rgb(236, 19, 19);
+  --dsw-static-red-600-a08: rgb(236 19 19 / 8%);
+  --dsw-static-red-900: rgb(87, 12, 12);
+}
+
+body {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-document-preview: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-bg-document-selection: color-mix(in srgb, var(--dsw-static-blue-500) 40%, transparent);
+  --dsw-alias-label-document-preview: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.24);
+  --dsw-alias-bg-mask-2: rgba(0, 0, 0, 0.12);
+  --dsw-alias-bg-mask-3: rgba(0, 0, 0, 0.48);
+  --dsw-alias-bg-mask-photo: rgba(0, 0, 0, 0.88);
+  --dsw-alias-bg-mask-drop: rgba(255, 255, 255, 0.7);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-multi-select: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-150);
+  --dsw-alias-bg-skeleton: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-inverted2: rgba(0, 0, 0, 0);
+  --dsw-alias-border-inverted: rgba(0, 0, 0, 0);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2-darkmode-thin: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-border-l4: rgba(0, 0, 0, 0.16);
+  --dsw-alias-brand-primary-invert: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-primary-new-colorprimary-new-color: rgb(65, 118, 230);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-text: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-button-contrast-fill: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-button-elevated-fill: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-button-floating-fill: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-button-floating-hover: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-button-ghost-active-border: var(--dsw-static-neutral-bluish-500);
+  --dsw-alias-button-ghost-active-fill: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-ghost-active-hover: var(--dsw-static-neutral-bluish-150);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-primary-dimmed: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-primary-fill: var(--dsw-alias-brand-primary);
+  --dsw-alias-button-primary-hover: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-tool-bar-fill-invisible: rgba(31, 31, 31, 0.36);
+  --dsw-alias-button-tool-bar-fill: rgba(84, 85, 87, 0.5);
+  --dsw-alias-button-tool-bar-hover: rgba(84, 85, 87, 0.6);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-interactive-bg-hover-accent: rgba(38, 49, 72, 0.14);
+  --dsw-alias-interactive-bg-hover-danger: rgba(236, 19, 19, 0.05);
+  --dsw-alias-interactive-bg-hover-solid: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-deep-diving: color-mix(in srgb, var(--dsw-static-deepseek-500) 70%, var(--dsw-static-blue-950));
+  --dsw-alias-label-deep-diving-shimmer: color-mix(in srgb, var(--dsw-static-deepseek-500) 30%, var(--dsw-static-blue-950));
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-200);
+  --dsw-alias-label-primary-bluish: var(--dsw-static-blue-900);
+  --dsw-alias-label-primary-dimmed: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-primary-inverted: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-shimmer: color-mix(in srgb, var(--dsw-static-neutral-1000) 30%, transparent);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-menu-icon: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-link: var(--dsw-static-deepseek-500);
+  --dsw-alias-markdown-citation: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-markdown-code-block-banner: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-markdown-code-block: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-markdown-code-segment-selected: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-markdown-code-segment-unselected: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-markdown-inline-code: var(--dsw-static-neutral-50);
+  --dsw-alias-markdown-placeholder: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-markdown-tag: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-scrollbar-bg-l1: var(--dsw-static-neutral-200);
+  --dsw-alias-scrollbar-bg-l2: var(--dsw-static-neutral-200);
+  --dsw-alias-scrollbar-hover-l1: var(--dsw-static-neutral-300);
+  --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-300);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-100);
+  --dsw-alias-code-diff-added: var(--dsw-static-green-500-a08);
+  --dsw-alias-code-diff-deleted: var(--dsw-static-red-600-a08);
+  --dsw-alias-file-diff-added-bg: rgb(230, 244, 231);
+  --dsw-alias-file-diff-added-gutter: rgb(237, 247, 237);
+  --dsw-alias-file-diff-added-marker: rgb(1, 162, 65);
+  --dsw-alias-file-diff-deleted-bg: rgb(252, 230, 226);
+  --dsw-alias-file-diff-deleted-gutter: rgb(253, 236, 233);
+  --dsw-alias-file-diff-deleted-marker: rgb(186, 39, 35);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+  --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
+  --dsw-alias-state-idle-primary: var(--dsw-static-neutral-300);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-secondary: var(--dsw-static-amber-400);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-100);
+  --dsw-alias-switch-thumb: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-toast-bg: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-toast-label: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-tooltip-key-bg: color-mix(in srgb, var(--dsw-alias-tooltip-bg), white 18%);
+  --dsw-alias-turn-trigger-bg: var(--dsw-alias-markdown-code-block);
+  --dsw-alias-turn-trigger-bg-hover: var(--dsw-alias-interactive-bg-hover);
+  --dsw-specific-bubble-highlight: var(--dsw-static-deepseek-200);
+  --dsw-specific-bubble: var(--dsw-static-deepseek-50);
+  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-00);
+  --dsw-specific-login-input: var(--dsw-static-neutral-bluish-50);
+  --dsw-menu-surface-fill: rgba(248, 249, 250, 0.58);
+  --dsw-alias-menu-group-header-fill: rgba(248, 249, 250, 0.94);
+  --dsw-specific-menu: var(--dsw-menu-surface-fill);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+  --dsw-specific-sidebar-nav-item-active-accent: var(--dsw-static-deepseek-100);
+  --dsw-specific-sidebar-nav-item-active: var(--dsw-static-neutral-bluish-100);
+  --dsw-specific-sidebar-nav-item-hover: var(--dsw-static-neutral-bluish-75);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-60);
+
+  background-color: var(--dsw-alias-bg-base);
+}
+
+body[data-ds-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-document-preview: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-document-selection: color-mix(in srgb, var(--dsw-static-blue-500) 40%, transparent);
+  --dsw-alias-label-document-preview: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.5);
+  --dsw-alias-bg-mask-2: rgba(0, 0, 0, 0.2);
+  --dsw-alias-bg-mask-3: rgba(0, 0, 0, 0.48);
+  --dsw-alias-bg-mask-photo: rgba(0, 0, 0, 0.88);
+  --dsw-alias-bg-mask-drop: rgba(39, 39, 48, 0.7);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-multi-select: var(--dsw-static-neutral-850);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-bg-skeleton: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-inverted2: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-inverted: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
+  --dsw-alias-brand-primary-invert: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-primary-new-colorprimary-new-color: var(--dsw-static-deepseek-450);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-text: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-button-contrast-fill: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-button-elevated-fill: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-floating-fill: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-button-floating-hover: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-button-ghost-active-border: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-button-ghost-active-fill: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-ghost-active-hover: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-primary-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-primary-fill: var(--dsw-alias-brand-primary);
+  --dsw-alias-button-primary-hover: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-tool-bar-fill-invisible: rgba(31, 31, 31, 0.36);
+  --dsw-alias-button-tool-bar-fill: rgba(84, 85, 87, 0.5);
+  --dsw-alias-button-tool-bar-hover: rgba(84, 85, 87, 0.6);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-interactive-bg-hover-accent: rgba(255, 255, 255, 0.24);
+  --dsw-alias-interactive-bg-hover-danger: rgba(242, 90, 90, 0.15);
+  --dsw-alias-interactive-bg-hover-solid: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-deep-diving: color-mix(in srgb, var(--dsw-static-deepseek-450) 55%, var(--dsw-static-neutral-bluish-400));
+  --dsw-alias-label-deep-diving-shimmer: color-mix(in srgb, var(--dsw-static-blue-300) 65%, var(--dsw-static-deepseek-400));
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-label-primary-bluish: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-dimmed: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-inverted: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-shimmer: color-mix(in srgb, var(--dsw-static-neutral-00) 45%, transparent);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-menu-icon: var(--dsw-alias-label-primary-dimmed);
+  --dsw-alias-link: var(--dsw-static-deepseek-400);
+  --dsw-alias-markdown-citation: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-markdown-code-block-banner: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-markdown-code-block: var(--dsw-static-neutral-bluish-900);
+  --dsw-alias-markdown-code-segment-selected: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-markdown-code-segment-unselected: var(--dsw-static-neutral-bluish-900);
+  --dsw-alias-markdown-inline-code: var(--dsw-static-neutral-800);
+  --dsw-alias-markdown-placeholder: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-markdown-tag: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-scrollbar-bg-l1: var(--dsw-static-neutral-700);
+  --dsw-alias-scrollbar-bg-l2: var(--dsw-static-neutral-600);
+  --dsw-alias-scrollbar-hover-l1: var(--dsw-static-neutral-600);
+  --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-550);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-800);
+  --dsw-alias-code-diff-added: var(--dsw-static-green-500-a12);
+  --dsw-alias-code-diff-deleted: var(--dsw-static-red-400-a12);
+  --dsw-alias-file-diff-added-bg: rgb(31, 49, 36);
+  --dsw-alias-file-diff-added-gutter: rgb(19, 32, 22);
+  --dsw-alias-file-diff-added-marker: rgb(65, 201, 119);
+  --dsw-alias-file-diff-deleted-bg: rgb(60, 31, 27);
+  --dsw-alias-file-diff-deleted-gutter: rgb(40, 19, 14);
+  --dsw-alias-file-diff-deleted-marker: rgb(250, 66, 62);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-400);
+  --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
+  --dsw-alias-state-idle-primary: var(--dsw-static-neutral-600);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-secondary: var(--dsw-static-amber-400);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-900);
+  --dsw-alias-switch-thumb: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-toast-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-toast-label: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-turn-trigger-bg: var(--dsw-alias-interactive-bg-hover);
+  --dsw-alias-turn-trigger-bg-hover: var(--dsw-alias-interactive-bg-active);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-tooltip-key-bg: color-mix(in srgb, var(--dsw-alias-tooltip-bg), white 18%);
+  --dsw-specific-bubble-highlight: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-bubble: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-login-input: var(--dsw-static-neutral-bluish-900);
+  --dsw-menu-surface-fill: rgba(67, 69, 74, 0.45);
+  --dsw-alias-menu-group-header-fill: rgba(48, 49, 54, 0.94);
+  --dsw-specific-menu: var(--dsw-menu-surface-fill);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+  --dsw-specific-sidebar-nav-item-active-accent: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-nav-item-active: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-sidebar-nav-item-hover: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-800);
+}
+
+/* Overlays without MenuSurface's opaque backing cannot blur page content over
+ * native vibrancy reliably, so their fill stays nearly opaque on macOS. */
+html[data-platform='darwin'] body {
+  --dsw-specific-menu: rgba(248, 249, 250, 0.94);
+}
+
+html[data-platform='darwin'] body[data-ds-dark-theme] {
+  --dsw-specific-menu: rgba(48, 49, 54, 0.94);
+}
+
+/* ===== host: corner-shape.css ===== */
+/* Smooth corner curvature for every rounded surface. Inside the support
+ * guard, all corners curve along superellipse(1.5) — between a circular arc
+ * (round = superellipse(1)) and a squircle (superellipse(2)) — instead of the
+ * default arc; engines without corner-shape keep circular corners because the
+ * token and the rule exist only inside the guard.
+ *
+ * corner-shape does not inherit, so the universal selector applies the token
+ * to elements and their ::before/::after; other pseudo-elements (for example
+ * the ::-webkit-scrollbar parts) stay circular.
+ *
+ * Full-round shapes opt out where they are declared: a superellipse deforms a
+ * circle into a squircle and squares off capsule ends, so every effectively
+ * uncapped radius (50%, 100%, or a pill radius far above the box size) pairs
+ * `corner-shape: round` with its `border-radius` in the owning component
+ * sheet. The corner-shape stylesheet spec enforces that pairing. */
+@supports (corner-shape: superellipse(1.5)) {
+  :root {
+    --dsw-corner-shape: superellipse(1.5);
+  }
+
+  *,
+  *::before,
+  *::after {
+    corner-shape: var(--dsw-corner-shape);
+  }
+}
+
+/* ===== host: brand-font.css ===== */
+/* Montserrat; SIL Open Font License in Montserrat-OFL.txt. */
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./montserrat-regular.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(./montserrat-light.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./montserrat-medium.woff2) format('woff2');
+}
+</style>
+<style>body{--mcp-accent:var(--dsw-alias-brand-primary);--mcp-ok:var(--dsw-alias-state-success-primary);--mcp-err:var(--dsw-alias-state-error-primary);--mcp-warn:var(--dsw-alias-state-warn-primary);--mcp-info:var(--dsw-alias-state-business-primary);--mcp-mut:var(--dsw-alias-label-secondary);--mcp-bg-1:var(--dsw-alias-bg-layer-1);--mcp-bg-2:var(--dsw-alias-bg-layer-2);--mcp-bg-3:var(--dsw-alias-bg-layer-3);--mcp-line:var(--dsw-alias-border-l2);--mcp-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);--mcp-r-xs:var(--dsw-radius-xs);--mcp-r-sm:var(--dsw-radius-sm);--mcp-r-md:var(--dsw-radius-md);--mcp-r-lg:var(--dsw-radius-lg);--mcp-r-xl:var(--dsw-radius-xl);--mcp-r-panel:var(--dsw-radius-panel)}
+.dsh-mcp-wrap,.dsh-mcp-panel-overlay,.dsh-mcp-overlay,.dsh-mcp-fab,.dsh-mcp-footer-action,.dsh-mcp-toast{color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family,inherit)}
+.dsh-mcp-wrap{box-sizing:border-box;display:flex;flex-direction:column;height:100%;min-height:0;gap:14px;padding:4px 2px;font-size:13px;-webkit-font-smoothing:antialiased}
+.dsh-mcp-wrap ::-webkit-scrollbar{width:8px;height:8px}
+.dsh-mcp-wrap ::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l2);border-radius:999px;corner-shape:round;border:2px solid transparent;background-clip:padding-box}
+.dsh-mcp-wrap ::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-scrollbar-hover-l2);border:2px solid transparent;background-clip:padding-box}
+.dsh-mcp-wrap ::-webkit-scrollbar-track{background:transparent}
+/* 标题栏四列钉死：标题 | 能力层 | 操作区（占满剩余，**内容右对齐**）| 关闭。
+   原型就是这样排的：能力层贴着标题在左，功能按钮贴右，中间那列吃掉空白。
+   曾经两个错法各来过一次：
+     · flex + space-between：关闭跟着操作区宽度走，MCP 面 6 个按钮、技能面 1 个，
+       一切面「关闭」横移几百像素（用户原话：「切换之后这个位置来回换位置」）；
+     · 能力层与按钮组塞进同一列且左对齐：整排按钮挤在标题旁边，中间空一大块，
+       与原型明显不同（用户第二次指出：「顶部这个你不还是在左边」）。
+   现在四列各自锚定：切面只让第三列的内容变化，关闭永远在第四列。 */
+.dsh-mcp-head{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:10px}
+.dsh-mcp-title{flex:none;white-space:nowrap;font-size:15px;font-weight:650;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+.dsh-mcp-title::before{content:"";width:4px;height:16px;border-radius:2px;background:var(--mcp-accent)}
+.dsh-mcp-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
+.dsh-mcp-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-sm);padding:6px 12px;background:var(--dsw-alias-button-elevated-fill);color:var(--dsw-alias-label-primary);font-size:12px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background .15s,border-color .15s}
+.dsh-mcp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l3)}
+.dsh-mcp-btn:active{background:var(--dsw-alias-interactive-bg-active)}
+.dsh-mcp-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.dsh-mcp-btn.primary{background:var(--dsw-alias-button-primary-fill);border-color:transparent;color:var(--dsw-alias-label-primary-inverted)}
+.dsh-mcp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover)}
+.dsh-mcp-btn.danger{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.dsh-mcp-btn.danger:hover{background:var(--dsw-alias-interactive-bg-hover-danger);border-color:var(--dsw-alias-state-error-primary)}
+/* 尺寸/形态修饰。放在 .dsh-mcp-btn 之后、且都是 (0,2,0)：与基础规则冲突的那些属性
+   （padding / border-color / background）在这里一次性定死，别在别处再补一条同名的。 */
+.dsh-mcp-btn.icon{width:30px;height:30px;padding:0}
+.dsh-mcp-btn.sm{padding:3px 8px;font-size:11px}
+.dsh-mcp-btn.ghost{border-color:transparent;background:transparent}
+.dsh-mcp-btn.ghost:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:transparent}
+.dsh-mcp-btn.sel{background:var(--dsw-alias-interactive-bg-hover-accent);border-color:var(--mcp-accent);color:var(--dsw-alias-label-primary)}
+
+/* 分段控件：浅槽 + 选中项填实。能力层与模式层共用同一个控件、同一套尺寸——
+   「切换管哪个能力」和「切换看到哪一面」是同一类决定，长得一样才不用重新学。
+   它压过 .dsh-mcp-btn 的边框/内边距，特异性 (0,2,0)，位置在此之后。 */
+.dsh-mcp-seg{display:inline-flex;gap:2px;padding:2px;flex:none;border-radius:var(--mcp-r-md);background:var(--mcp-bg-3)}
+.dsh-mcp-seg .dsh-mcp-btn{border-color:transparent;background:transparent;padding:5px 12px;font-size:12.5px}
+.dsh-mcp-seg .dsh-mcp-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-seg .dsh-mcp-btn.sel{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-inverted);font-weight:600}
+.dsh-mcp-seg-count{font-size:10px;font-weight:500;padding:0 5px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover);color:var(--mcp-mut);line-height:15px}
+.dsh-mcp-seg .dsh-mcp-btn.sel .dsh-mcp-seg-count{background:var(--dsw-alias-interactive-bg-hover-accent);color:var(--dsw-alias-label-primary-inverted)}
+
+/* ── 第二行：模式分段 | 作用域药丸 | 连接状态 ─────────────────────────────
+   两个能力面共用这一条、共用这个三列节奏（与标题栏同款 grid）。
+   三列钉死还有一个理由：右侧那句状态的长短会变（「宿主已连接」↔「skills 服务未就绪」），
+   不钉死它就会推着中间的药丸左右晃——这正是标题栏关闭按钮当初漂移的同一个成因。 */
+.dsh-mcp-sub{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;flex:none}
+.dsh-mcp-sub-scope{min-width:0;display:flex;align-items:center}
+/* ⚠️ 作用域条必须**吃掉中间那一列的剩余宽度**。
+   .dsh-mcp-tabs-wrap 自己是 flex:none（它原来是 .dsh-mcp-wrap 这个**列**容器的直接子元素，
+   靠 stretch 拿满宽度）。搬进第二行的 grid 之后，中间那列是 minmax(0,1fr)、而它在这个
+   flex 行里 flex:none → 收缩到内容宽度，里面的 .dsh-mcp-tabs 的 clientWidth 于是只剩 47px，
+   真机上整条只剩一个「…8」按钮（点得到、但作用域一个都看不见）。
+   这条是位置与归属变更带来的回归，只有真机 getComputedStyle/clientWidth 看得见。
+   （本注释里原本用反引号包了类名——那直接把 MCP_CSS 这个模板字符串**提前截断**了，
+     后面的 CSS 全被当成 JS 解析，真机表现是「插件加载失败：mcp is not defined」。
+     有 test/panel-css-invariants 的用例守着：样式常量正文里不得出现反引号。） */
+.dsh-mcp-sub-scope .dsh-mcp-tabs-wrap{flex:1 1 auto;min-width:0}
+.dsh-mcp-runtime{display:inline-flex;align-items:center;gap:5px;flex:none;white-space:nowrap;font-size:11.5px;color:var(--dsw-alias-label-tertiary)}
+.dsh-mcp-runtime svg{color:var(--mcp-ok)}
+.dsh-mcp-runtime.err{color:var(--mcp-err)}
+.dsh-mcp-runtime.err svg{color:var(--mcp-err)}
+
+/* ── 列表底栏：统计文本 + 排序/刷新图标组 ────────────────────────────────
+   原型的「批量」要一个多选启停的 Host RPC，这一版不做——画一个点了没反应的按钮更糟。 */
+.dsh-mcp-side-foot{flex:none;display:flex;align-items:center;gap:6px;border-top:1px solid var(--mcp-line);padding-top:8px;font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.dsh-mcp-foot-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dsh-mcp-foot-spacer{flex:1}
+.dsh-mcp-foot-btn{box-sizing:border-box;width:24px;height:24px;flex:none;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:var(--mcp-r-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;transition:background .12s,color .12s}
+.dsh-mcp-foot-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-mcp-foot-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* 下拉菜单：「⋯ 更多」与底栏排序共用一个原语。 */
+.dsh-mcp-dd{position:relative;display:inline-flex}
+.dsh-mcp-dd-pop{position:absolute;top:calc(100% + 5px);right:0;z-index:60;display:flex;flex-direction:column;gap:2px;min-width:186px;padding:6px;border-radius:var(--mcp-r-lg);background:var(--mcp-bg-2);box-shadow:var(--dsw-elevation-panel)}
+.dsh-mcp-dd-pop .dsh-mcp-btn{box-sizing:border-box;width:100%;justify-content:flex-start;border-color:transparent;background:transparent}
+.dsh-mcp-dd-pop .dsh-mcp-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-dd-pop .dsh-mcp-btn.sel{background:var(--dsw-alias-interactive-bg-hover-accent);border-color:transparent;color:var(--dsw-alias-label-primary);font-weight:600}
+.dsh-mcp-dd-pop .dsh-mcp-btn.danger{color:var(--mcp-err)}
+.dsh-mcp-dd-pop .dsh-mcp-btn.danger:hover{background:var(--dsw-alias-interactive-bg-hover-danger)}
+.dsh-mcp-dd-sep{height:1px;margin:4px 2px;background:var(--mcp-line)}
+/* 底栏的排序按钮在最左，弹层右对齐会跑出卡片外。 */
+.dsh-mcp-foot-dd .dsh-mcp-btn.icon{width:24px;height:24px;border-color:transparent;background:transparent;color:var(--dsw-alias-label-tertiary)}
+.dsh-mcp-foot-dd .dsh-mcp-btn.icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-mcp-foot-dd .dsh-mcp-dd-pop{right:auto;left:0}
+/* 详情操作栏的「⋯」：靠右，与主/次行为同高。 */
+.dsh-mcp-d-more{flex:none}
+.dsh-mcp-body{display:flex;gap:12px;flex:1;min-height:0}
+.dsh-mcp-side{width:288px;min-width:248px;min-height:0;display:flex;flex-direction:column;gap:8px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);background:var(--mcp-bg-2);padding:10px;overflow:hidden}
+.dsh-mcp-side.embedded{width:auto;min-width:0;flex:1 1 auto;border:0;border-radius:0;background:transparent;padding:0;overflow:visible}
+.dsh-mcp-search{position:relative}
+.dsh-mcp-search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.5}
+.dsh-mcp-search input{width:100%;box-sizing:border-box;padding:8px 10px 8px 30px;border-radius:var(--mcp-r-md);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font-size:12px;outline:none;transition:border-color .15s,box-shadow .15s}
+.dsh-mcp-search input::placeholder{color:var(--mcp-mut)}
+.dsh-mcp-search input:focus{border-color:var(--mcp-accent);box-shadow:none}
+.dsh-mcp-list{flex:1 1 auto;min-height:52px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin:0 -4px;padding:0 4px}
+.dsh-mcp-item{position:relative;display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:var(--mcp-r-md);cursor:pointer;border:1px solid transparent;transition:background .13s,border-color .13s}
+.dsh-mcp-item:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l2)}
+.dsh-mcp-item.sel{background:var(--dsw-alias-interactive-bg-hover-accent);border-color:var(--mcp-accent)}
+.dsh-mcp-item.sel::before{content:"";position:absolute;left:-1px;top:20%;bottom:20%;width:3px;border-radius:3px;background:var(--mcp-accent)}
+.dsh-mcp-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--mcp-mut);box-shadow:none;corner-shape:round}
+.dsh-mcp-dot.connected{background:var(--mcp-ok);box-shadow:0 0 4px color-mix(in srgb,var(--mcp-ok) 55%,transparent)}
+.dsh-mcp-dot.failed{background:var(--mcp-err);box-shadow:0 0 6px color-mix(in srgb,var(--mcp-err) 55%,transparent)}
+.dsh-mcp-dot.loading{background:var(--mcp-warn);animation:mcpBlink 1.1s infinite}
+@keyframes mcpBlink{50%{opacity:.35}}
+.dsh-mcp-item-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dsh-mcp-item-name{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.1px}
+.dsh-mcp-item-sub{font-size:10.5px;color:var(--mcp-mut);display:flex;gap:6px;align-items:center}
+.dsh-mcp-badge{display:inline-flex;align-items:center;padding:1.5px 7px;border-radius:999px;font-size:10.5px;font-weight:500;line-height:16px;border:1px solid var(--mcp-line);color:var(--mcp-mut);background:var(--mcp-bg-1);corner-shape:round}
+.dsh-mcp-badge.dot::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:5px;opacity:.85;corner-shape:round}
+.dsh-mcp-badge.t-http{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}
+.dsh-mcp-badge.t-stdio{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-state-warn-tertiary)}
+.dsh-mcp-badge.s-on{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-tertiary)}
+.dsh-mcp-badge.s-on.dot::before{background:var(--dsw-alias-state-success-primary)}
+.dsh-mcp-badge.s-err.dot::before{background:var(--dsw-alias-state-error-primary)}
+.dsh-mcp-badge.s-off{color:var(--mcp-mut);border-color:var(--mcp-line)}
+.dsh-mcp-badge.s-err{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-interactive-bg-hover-danger)}
+.dsh-mcp-badge.scope-ws{color:var(--mcp-accent);border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent)}
+.dsh-mcp-detail{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);background:var(--mcp-bg-2);padding:16px;overflow:hidden}
+/* 只有正文滚：头与 Tab 行 flex:none，操作栏不再随内容滑走。
+   之前 .dsh-mcp-detail 自己 overflow-y:auto，头、操作按钮、Tab 与正文一起滚，
+   卡片一多就「滚动一下按钮就没了」。 */
+.dsh-mcp-d-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
+/* 非当前页签的卡片直接不参与布局——用 visibility/height 会让正文区留下空洞。
+   ⚠️ 选择器**必须**带 .dsh-mcp-detail 前缀。样式表里有两条 .dsh-mcp-card：后面那条
+   （市场样式所在的长行）把它定义成 display:flex。单类选择器 .dsh-mcp-pane-off 与它
+   同特异性、位置更靠前 → 被压掉，三个页签会同时显示。真机实测就是这样：
+   computed display 是 flex，而类名明明挂着。
+   这里用 (0,2,0) 压过任何单类规则，位置就不必再依赖先后。 */
+.dsh-mcp-detail .dsh-mcp-pane-off{display:none}
+.dsh-mcp-d-diag{display:flex;flex-direction:column;gap:8px}
+.dsh-mcp-d-note{font-size:12px;line-height:18px;color:var(--mcp-mut)}
+/* 空状态：图标方块 + 标题 + 一句说明，居中成块（原先是单行灰字，看不出「这里没有东西」
+   和「这里加载失败」的区别）。 */
+.dsh-mcp-d-empty{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--mcp-mut);font-size:13px;gap:4px;padding:24px 16px}
+.dsh-mcp-d-empty b{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.dsh-mcp-d-empty span{font-size:11.5px;line-height:18px;color:var(--mcp-mut);max-width:320px}
+.dsh-mcp-d-empty::before{content:"";width:34px;height:34px;border-radius:var(--mcp-r-md);background:var(--dsw-alias-interactive-bg-hover-accent);border:1px solid var(--mcp-accent)}
+.dsh-mcp-d-head{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+/* 详情里的 Tab 行复用作用域那套 .dsh-mcp-tab 原语，但**必须换行而不是横滚**。
+   作用域条用「横滚 + ⋯ 弹层」是因为它的条目数不可控；详情页签固定三项、且窄屏下
+   横滚条的滚动条是隐藏的——实测 390px 视口下 scrollWidth 431 > clientWidth 309，
+   「诊断」会静默跑到屏幕外且没有任何提示。换行则三项永远都在。 */
+.dsh-mcp-detail>.dsh-mcp-tabs{flex:none;flex-wrap:wrap;overflow:visible}
+.dsh-mcp-d-name{font-size:17px;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere}
+.dsh-mcp-d-meta{display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap}
+.dsh-mcp-d-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.dsh-mcp-d-scope-hint{font-size:11.5px;color:var(--mcp-mut)}
+.dsh-mcp-d-desc{margin:6px 0 0;font-size:12px;line-height:18px;color:var(--mcp-mut)}
+/* 头部左侧标题列：占满 d-head 减掉操作列之后的宽度，长名字换行而不是把按钮挤下去。 */
+.dsh-mcp-d-title{flex:1;min-width:0}
+.dsh-mcp-card{border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);padding:12px 14px;background:var(--mcp-bg-1)}
+.dsh-mcp-card h4{margin:0 0 9px;font-size:10.5px;font-weight:650;color:var(--mcp-mut);text-transform:uppercase;letter-spacing:.8px;display:flex;align-items:center;gap:6px}
+.dsh-mcp-card h4::after{content:"";flex:1;height:1px;background:var(--mcp-line);margin-left:2px}
+.dsh-mcp-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 14px;font-size:12px;word-break:break-all}
+.dsh-mcp-kv>*{min-width:0}
+.dsh-mcp-kv b{color:var(--mcp-mut);font-weight:500;white-space:normal;overflow-wrap:anywhere}
+.dsh-mcp-tools{display:flex;flex-direction:column;gap:5px}
+.dsh-mcp-tool{display:flex;gap:9px;padding:7px 9px;border-radius:var(--mcp-r-sm);background:var(--mcp-bg-1);border:1px solid transparent;transition:background .12s,border-color .12s}
+.dsh-mcp-tool:hover{border-color:var(--mcp-line);background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-tool-name{font-family:var(--mcp-mono);font-size:11.5px;color:var(--dsw-alias-brand-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.dsh-mcp-tool-desc{font-size:11.5px;color:var(--mcp-mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-mcp-empty-list{padding:20px;text-align:center;color:var(--mcp-mut);font-size:12px}
+.dsh-mcp-overlay{position:fixed;inset:0;background:var(--dsw-alias-bg-overlay);display:flex;align-items:center;justify-content:center;z-index:200;padding:12px;animation:mcpFade .14s ease-out}
+.dsh-mcp-whatsnew{box-sizing:border-box;width:min(460px,92vw);background:var(--mcp-bg-2);border:0;border-radius:var(--mcp-r-panel);padding:18px;box-shadow:var(--dsw-elevation-prominent);animation:mcpPop .18s cubic-bezier(.2,.9,.3,1.15)}
+.dsh-mcp-whatsnew-head{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
+.dsh-mcp-whatsnew-head b{font-size:15px;font-weight:650}
+.dsh-mcp-whatsnew-head span{font-size:12px;color:var(--mcp-mut)}
+.dsh-mcp-whatsnew-body{display:flex;flex-direction:column;gap:12px;max-height:52vh;overflow-y:auto}
+.dsh-mcp-whatsnew-entry{display:flex;flex-direction:column;gap:6px}
+.dsh-mcp-whatsnew-ver{font-size:11px;font-weight:650;color:var(--mcp-accent)}
+.dsh-mcp-whatsnew-item{display:flex;gap:8px;font-size:12.5px;line-height:1.6}
+.dsh-mcp-whatsnew-dot{flex:none;color:var(--mcp-accent)}
+.dsh-mcp-whatsnew-where{display:block;margin-top:3px;width:fit-content;padding:0 6px;border-radius:999px;background:var(--mcp-line);color:var(--mcp-mut);font-size:11px;line-height:17px;white-space:nowrap;corner-shape:round}
+.dsh-mcp-whatsnew-foot{display:flex;justify-content:flex-end;margin-top:14px}
+.dsh-mcp-modal{box-sizing:border-box;width:560px;max-width:92vw;max-height:84vh;overflow-y:auto;background:var(--mcp-bg-2);border:0;border-radius:var(--mcp-r-panel);padding:20px;box-shadow:var(--dsw-elevation-prominent);animation:mcpPop .16s ease-out}
+.dsh-mcp-modal h3{margin:0 0 16px;font-size:15px;font-weight:650;display:flex;align-items:center;gap:8px}
+.dsh-mcp-modal h3::before{content:"";width:4px;height:14px;border-radius:2px;background:var(--mcp-accent)}
+.dsh-mcp-field{margin-bottom:14px}
+.dsh-mcp-field>label{display:block;font-size:11.5px;color:var(--mcp-mut);margin-bottom:6px;font-weight:500}
+.dsh-mcp-field input,.dsh-mcp-field select,.dsh-mcp-field textarea{width:100%;box-sizing:border-box;padding:8px 11px;border-radius:var(--mcp-r-md);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;outline:none;transition:border-color .15s,box-shadow .15s}
+.dsh-mcp-field input::placeholder{color:var(--mcp-mut)}
+.dsh-mcp-field input:focus,.dsh-mcp-field select:focus,.dsh-mcp-field textarea:focus{border-color:var(--mcp-accent);box-shadow:none}
+.dsh-mcp-radio-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dsh-mcp-radio-row label{display:flex;align-items:center;gap:8px;margin:0;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);padding:9px 12px;background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12.5px;transition:border-color .12s,background .12s}
+.dsh-mcp-radio-row label:hover{border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-radio-row label.sel{border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent)}
+.dsh-mcp-radio-row input[type='radio']{width:15px;height:15px;flex:none;margin:0;padding:0;appearance:none;-webkit-appearance:none;border:1.5px solid var(--dsw-alias-border-l3);border-radius:50%;background:transparent;position:relative;cursor:pointer;transition:border-color .12s,background .12s;corner-shape:round}
+.dsh-mcp-radio-row input[type='radio']:checked{border-color:var(--mcp-accent);background:radial-gradient(circle,var(--dsw-alias-label-primary-inverted) 0 4px,var(--mcp-accent) 4.5px)}
+.dsh-mcp-radio-row input[type='radio']:hover{border-color:var(--mcp-accent)}
+.dsh-mcp-kv-edit{display:grid;grid-template-columns:38% 1fr auto;gap:8px;margin-bottom:8px;align-items:center}
+.dsh-mcp-kv-edit input{width:100%;min-width:0;box-sizing:border-box}
+.dsh-mcp-input-action{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start}.dsh-mcp-input-action textarea{min-width:0}.dsh-mcp-kv-row-actions{display:flex;gap:5px;align-items:center;height:34px}.dsh-mcp-inline-icon{box-sizing:border-box;width:34px!important;height:34px!important;padding:0!important;flex:none}
+.dsh-mcp-kv-del{box-sizing:border-box;width:34px;height:34px;padding:0!important;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.dsh-mcp-secret{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}.dsh-mcp-secret-value{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}.dsh-mcp-secret-btn{width:24px;height:24px;flex:none;padding:0;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-sm);background:var(--dsw-alias-button-elevated-fill);color:var(--mcp-mut);cursor:pointer}.dsh-mcp-secret-btn:hover{color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent)}.dsh-mcp-secret-list{display:flex;flex-direction:column;gap:5px;min-width:0}.dsh-mcp-secret-row{display:grid;grid-template-columns:minmax(0,40%) minmax(0,1fr);gap:8px;align-items:center;min-width:0}.dsh-mcp-secret-row b{min-width:0;overflow-wrap:anywhere}.dsh-mcp-log{margin-top:10px;padding:9px 11px;border-left:3px solid var(--mcp-err);background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--mcp-err);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}.dsh-mcp-log.warn{border-left-color:var(--mcp-warn);color:var(--mcp-warn);background:var(--dsw-alias-state-warn-tertiary)}
+.dsh-mcp-kv-add{display:flex;justify-content:flex-end;margin-top:2px}
+.dsh-mcp-kv-del{border:1px solid var(--mcp-line);background:var(--dsw-alias-button-elevated-fill);color:var(--mcp-mut);cursor:pointer;font-size:14px;padding:3px 9px;border-radius:var(--mcp-r-sm);line-height:18px;transition:color .12s,background .12s,border-color .12s}
+.dsh-mcp-kv-del:hover{color:var(--mcp-err);background:var(--dsw-alias-interactive-bg-hover-danger);border-color:var(--dsw-alias-state-error-primary)}
+.dsh-mcp-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap}
+.dsh-mcp-advanced{margin-top:14px}.dsh-mcp-check{display:flex!important;align-items:center;gap:8px;margin:9px 0!important;color:var(--dsw-alias-label-primary)!important}.dsh-mcp-check input{width:auto!important}.dsh-mcp-number-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.dsh-mcp-number-grid .dsh-mcp-field{margin-bottom:0}.dsh-mcp-import-preview{font-size:12px;line-height:1.6;color:var(--mcp-mut);white-space:pre-wrap}.dsh-mcp-import-json{min-height:220px;resize:vertical;font-family:var(--mcp-mono)!important}
+.dsh-mcp-check-list{display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;padding:3px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);background:var(--mcp-bg-1)}
+.dsh-mcp-check-row{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:var(--mcp-r-sm);font-size:12px;color:var(--dsw-alias-label-primary);cursor:pointer}
+.dsh-mcp-check-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-check-row input{width:auto;flex:none;margin:0}
+.dsh-mcp-check-name{font-weight:600;overflow-wrap:anywhere}
+.dsh-mcp-check-meta{margin-left:auto;flex:none;font-size:11px;color:var(--mcp-mut)}
+.dsh-mcp-check-toolbar{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:11px;color:var(--mcp-mut)}
+.dsh-mcp-copy-target{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px}
+.dsh-mcp-builtin-modal{box-sizing:border-box;width:700px;height:min(760px,84vh);display:flex;flex-direction:column;overflow:hidden}.dsh-mcp-builtin-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;flex:none}.dsh-mcp-builtin-toolbar .dsh-mcp-check{margin:0!important;font-size:12px}.dsh-mcp-builtin-count{font-size:11.5px;color:var(--mcp-mut)}.dsh-mcp-builtin-list{display:flex;flex-direction:column;gap:8px;min-height:0;overflow-y:auto;padding-right:2px}.dsh-mcp-builtin-modal>.dsh-mcp-modal-actions{flex:none}.dsh-mcp-builtin-row{display:grid;grid-template-columns:18px minmax(0,1fr) minmax(74px,auto);gap:11px;align-items:start;padding:11px 12px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);background:var(--mcp-bg-1);cursor:pointer;transition:border-color .12s,background .12s;flex:none}.dsh-mcp-builtin-row:hover{border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-interactive-bg-hover)}.dsh-mcp-builtin-row.installed{cursor:default;background:var(--mcp-bg-2)}.dsh-mcp-builtin-row.installed:hover{border-color:var(--mcp-line);background:var(--mcp-bg-2)}.dsh-mcp-builtin-select{box-sizing:border-box;width:16px!important;height:16px!important;margin:2px 0 0!important;accent-color:var(--mcp-accent);cursor:pointer}.dsh-mcp-builtin-select:disabled{cursor:default}.dsh-mcp-builtin-main{min-width:0;display:flex;flex-direction:column;gap:5px}.dsh-mcp-builtin-name{font-size:13px;font-weight:650;overflow-wrap:anywhere}.dsh-mcp-builtin-summary{font-size:11.5px;color:var(--mcp-mut);line-height:1.45}.dsh-mcp-builtin-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dsh-mcp-builtin-access{font-size:10.5px;color:var(--mcp-mut)}.dsh-mcp-builtin-config{font-family:var(--mcp-mono);font-size:10.5px;line-height:1.45;color:var(--dsw-alias-brand-text);overflow-wrap:anywhere;white-space:normal}.dsh-mcp-builtin-status{min-width:0;text-align:right;font-size:11px;color:var(--mcp-mut);line-height:1.45;overflow-wrap:anywhere}.dsh-mcp-builtin-status.ready{color:var(--dsw-alias-state-success-primary)}.dsh-mcp-builtin-loading{padding:30px 12px;text-align:center;color:var(--mcp-mut);font-size:12px}
+.dsh-mcp-source-box{margin:0 0 14px;flex:none}.dsh-mcp-source-list{display:flex;flex-direction:column;gap:6px;max-height:186px;overflow-y:auto;margin-top:7px}.dsh-mcp-source-row{box-sizing:border-box;display:flex;flex-direction:column;gap:3px;width:100%;padding:8px 10px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:1.45;text-align:left;cursor:pointer;transition:border-color .12s,background .12s}.dsh-mcp-source-row:hover:not(:disabled){border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-interactive-bg-hover)}.dsh-mcp-source-row.sel{border-color:var(--mcp-accent);background:var(--mcp-bg-2)}.dsh-mcp-source-row:disabled{cursor:default;opacity:.7}.dsh-mcp-source-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.dsh-mcp-source-name{font-weight:600}.dsh-mcp-source-path{font-family:var(--mcp-mono);font-size:10.5px;color:var(--dsw-alias-brand-text);overflow-wrap:anywhere}.dsh-mcp-source-detail{font-size:11px;color:var(--mcp-mut);overflow-wrap:anywhere}.dsh-mcp-source-note{font-size:10.5px;color:var(--mcp-mut)}.dsh-mcp-source-warn{font-size:10.5px;color:var(--mcp-warn)}
+.dsh-mcp-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--dsw-alias-toast-bg);backdrop-filter:blur(10px);border:0;color:var(--dsw-alias-label-primary);padding:10px 18px;border-radius:var(--mcp-r-lg);font-size:12.5px;z-index:300;box-shadow:var(--dsw-shadow-lv3);max-width:70vw;animation:mcpPop .16s ease-out}
+.dsh-mcp-toast.err{border:1px solid var(--dsw-alias-state-error-primary)}
+.dsh-mcp-toast.ok{border:1px solid var(--dsw-alias-state-success-primary)}
+.dsh-mcp-toggle{position:relative;width:34px;height:19px;box-sizing:border-box;border-radius:999px;border:0;cursor:pointer;background:var(--dsw-alias-border-l3);transition:background .18s,border-color .18s;flex:none;box-shadow:none;corner-shape:round}
+.dsh-mcp-toggle[aria-checked='true']{background:var(--mcp-accent);border-color:transparent}
+.dsh-mcp-toggle:disabled{opacity:.65;cursor:not-allowed}
+.dsh-mcp-toggle::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--dsw-alias-switch-thumb);transition:left .18s,background .18s;box-shadow:none;corner-shape:round}
+.dsh-mcp-toggle[aria-checked='true']::after{left:17px;background:var(--dsw-alias-label-primary-foreground)}
+.dsh-mcp-d-err{font-size:12.5px;color:var(--mcp-err);margin-top:8px;white-space:pre-wrap}
+/* 悬浮按钮：外框尺寸必须恰好是 JS 里 FAB_SIZE 的值（拖拽边界与默认位置按它算，
+   client.js 的 clampFabPos/defaultFabPos）。border-box 让这个等式不受边框影响——
+   之前是 1px 边框 + content-box，渲染出 52px 而 JS 按 50px 夹取，右/下边缘会差 2px；
+   现在去掉边框（抬升表面改成 elevation 阴影）+ border-box，两边一致且不会再漂。 */
+.dsh-mcp-fab{position:fixed;right:22px;bottom:22px;box-sizing:border-box;width:50px;height:50px;border-radius:50%;border:0;background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-inverted);cursor:grab;user-select:none;display:flex;align-items:center;justify-content:center;box-shadow:var(--dsw-elevation-panel);z-index:190;touch-action:none;transition:transform .16s,background .16s;pointer-events:auto;corner-shape:round}
+.dsh-mcp-fab:hover{transform:scale(1.05);background:var(--dsw-alias-button-primary-hover)}
+.dsh-mcp-fab:active{transform:scale(.97)}
+.dsh-mcp-fab svg{width:22px;height:22px}
+.dsh-mcp-panel-overlay{position:fixed;inset:0;background:var(--dsw-alias-bg-overlay);display:flex;align-items:center;justify-content:center;z-index:180;padding:26px;pointer-events:auto;animation:mcpFade .14s ease-out}
+.dsh-mcp-panel{box-sizing:border-box;width:1000px;max-width:95vw;height:88vh;background:var(--mcp-bg-2);border:0;border-radius:var(--mcp-r-panel);box-shadow:var(--dsw-elevation-prominent);display:flex;flex-direction:column;overflow:hidden;animation:mcpPop .18s cubic-bezier(.2,.9,.3,1.15)}
+.dsh-mcp-panel .dsh-mcp-wrap{height:100%;min-height:0;padding:18px}
+.dsh-mcp-filters{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.dsh-mcp-filters select{width:100%;box-sizing:border-box;padding:6px 24px 6px 8px;border-radius:var(--mcp-r-sm);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:11.5px;outline:none;transition:border-color .15s;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--mcp-mut) 50%),linear-gradient(135deg,var(--mcp-mut) 50%,transparent 50%);background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.dsh-mcp-filters select:focus{border-color:var(--mcp-accent)}
+.dsh-mcp-tool{flex-direction:column;padding:0;gap:0}
+.dsh-mcp-tool-head{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--mcp-r-sm)}
+.dsh-mcp-tool-head.interactive{cursor:pointer}
+.dsh-mcp-tool-head.interactive:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-tool-head.interactive:focus-visible{outline:1px solid var(--mcp-accent);outline-offset:-1px}
+.dsh-mcp-tool-body{padding:2px 9px 10px;display:flex;flex-direction:column;gap:8px}
+.dsh-mcp-params{display:flex;flex-direction:column;gap:6px}
+.dsh-mcp-param{border:1px solid var(--mcp-line);border-radius:var(--mcp-r-md);padding:7px 9px;background:var(--mcp-bg-1)}
+.dsh-mcp-param-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.dsh-mcp-param-name{font-family:var(--mcp-mono);font-size:11.5px;color:var(--dsw-alias-brand-text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.dsh-mcp-param-type{font-size:10px;color:var(--mcp-mut);border:1px solid var(--mcp-line);border-radius:var(--mcp-r-xs);padding:1px 5px;font-family:var(--mcp-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.dsh-mcp-req{font-size:10px;color:var(--dsw-alias-state-warn-primary);border:1px solid var(--dsw-alias-state-warn-primary);border-radius:var(--mcp-r-xs);padding:1px 5px}
+.dsh-mcp-opt{font-size:10px;color:var(--mcp-mut);border:1px solid var(--mcp-line);border-radius:var(--mcp-r-xs);padding:1px 5px}
+.dsh-mcp-param-desc{font-size:11px;color:var(--mcp-mut);margin-top:4px;line-height:1.5;white-space:normal;word-break:break-word}
+.dsh-mcp-param-enum{font-size:10.5px;color:var(--mcp-mut);margin-top:3px;font-family:var(--mcp-mono);word-break:break-all}
+.dsh-mcp-tool-rawbtn{align-self:flex-start;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-sm);background:var(--dsw-alias-button-elevated-fill);color:var(--mcp-mut);font-size:11px;padding:4px 9px;cursor:pointer;transition:color .12s,border-color .12s}
+.dsh-mcp-tool-rawbtn:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l3)}
+.dsh-mcp-json{font-family:var(--mcp-mono);font-size:11px;line-height:1.5;background:var(--mcp-bg-1);border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);padding:9px;overflow:auto;white-space:pre;max-height:260px;color:var(--dsw-alias-label-primary);margin:0}
+/* ── 发现市场（两个能力面共用的**内联**视图）─────────────────────────────
+   曾经它是 .dsh-mcp-modal.dsh-mcp-market——一个 1080×820 的浮层；而技能面的市场是内联的。
+   于是同一个「发现市场」在两个能力面里是两种形态：MCP 面按「市场」弹窗、技能面按「市场」换页。
+   现在两边都是内联视图，共用下面这批原语（.dsh-mcp-chips / .dsh-mcp-grid / .dsh-mcp-mcard）。
+   卡片类名故意**不叫** .dsh-mcp-card：那个名字已经被详情里的内容卡占了，而这里的一条
+   display:flex 曾经把 .dsh-mcp-pane-off 压掉（三个页签同时显示，真机事故）。 */
+.dsh-mcp-market-view{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+/* 工具栏（来源切换 + 搜索 + 分类药丸）钉在滚动区顶部。
+   为什么需要它：滚动盒是 .dsh-mcp-market-view 本身，而工具栏是它的子节点，所以默认会跟着滚走
+   （纯 MCP 那版把滚动放在 .dsh-mcp-market-grid 上、工具栏留在外面，因此天然固定；改成内联市场
+   视图 + 多 section 之后滚动盒上提了一层，工具栏就掉进了滚动区）。
+   三个要点缺一不可：① 必须把「head + 两个来源各自的分类药丸行」**包成一个容器**再 sticky——
+   分类药丸是 .dsh-mcp-market-head 的兄弟节点，只钉 head 的话药丸仍会从下面滑过去；
+   ② 必须给不透明背景，否则卡片会从工具栏下面透出来；③ top:0 相对滚动容器的 padding 盒，
+   本容器的 padding 只有右侧 2px，所以 0 就对。 */
+.dsh-mcp-market-toolbar{position:sticky;top:0;z-index:1;flex:none;display:flex;flex-direction:column;gap:12px;background:var(--mcp-bg-2)}
+.dsh-mcp-market-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+/* 右侧一组：搜索 + 「安装到」。原型是同一条横排（药丸 | 搜索 | 安装到），这里靠
+   flex-wrap 实现——分类药丸会先占满一行，工具组整块换到下一行，窄屏也不会把选择器压扁。 */
+.dsh-mcp-market-tools{display:flex;align-items:center;gap:8px;flex:1 1 260px;min-width:0}
+.dsh-mcp-market-tools .dsh-mcp-search{flex:1 1 auto;min-width:160px}
+/* 「安装到」：市场模式下唯一的作用域入口。刻意做成带文字的标签 + 原生 select
+   （而不是又一个图标按钮）——「装到哪」是**有后果**的选择，不能只用一个图标暗示。 */
+.dsh-mcp-market-scope{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;font-size:11.5px;color:var(--dsw-alias-label-tertiary)}
+.dsh-mcp-market-scope select{max-width:220px;box-sizing:border-box;padding:6px 24px 6px 9px;border-radius:var(--mcp-r-sm);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--mcp-mut) 50%),linear-gradient(135deg,var(--mcp-mut) 50%,transparent 50%);background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;cursor:pointer}
+.dsh-mcp-market-scope select:focus{border-color:var(--mcp-accent)}
+.dsh-mcp-market-head .dsh-mcp-search{flex:1;min-width:180px}
+.dsh-mcp-market-section{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;flex:none}
+.dsh-mcp-market-section b{font-size:13px;font-weight:650}
+.dsh-mcp-market-section span{font-size:11.5px;color:var(--dsw-alias-label-tertiary)}
+/* 分类药丸：**换行**，不横滚。
+   横滚 + 隐藏滚动条 = 最后一个药丸被裁掉一半，而且没有任何线索说明它还能滚
+   （真机上就是「文件与…」被切在右边缘，用户第一反应是「没处理好」——对）。
+   三条药丸行各有各的出口，但都必须有一个可见的出口：详情页签换行、作用域条
+   「横滚 + ⋯N 弹层」、分类药丸条目数固定且有限（十来个）所以直接换行。
+   ⚠️ 别在这条上加 overflow-x:auto——那正是把出口藏起来的写法。 */
+.dsh-mcp-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0;padding:1px 0}
+/* 药丸行吃掉搜索框剩下的宽度；搜索框自身有 min-width，窄屏下会整块换到下一行。 */
+.dsh-mcp-market-head .dsh-mcp-chips{flex:1 1 auto}
+.dsh-mcp-chip{display:inline-flex;align-items:center;gap:5px;flex:none;padding:5px 11px;border-radius:999px;corner-shape:round;border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--mcp-mut);font:inherit;font-size:12px;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background .13s,border-color .13s,color .13s}
+.dsh-mcp-chip:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l3)}
+/* 不可用的来源（宿主没提供那个接口）：明确变灰且不接受点击，而不是给一个点开就报错的入口。 */
+.dsh-mcp-chip:disabled{opacity:.45;cursor:not-allowed;text-decoration:line-through}
+.dsh-mcp-chip:disabled:hover{background:var(--mcp-bg-1);border-color:var(--mcp-line)}
+.dsh-mcp-chip.sel{color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent);font-weight:600}
+.dsh-mcp-chip-count{font-size:10px;padding:0 5px;border-radius:999px;corner-shape:round;background:var(--mcp-line);color:var(--mcp-mut);line-height:15px}
+.dsh-mcp-chip.sel .dsh-mcp-chip-count{background:var(--dsw-alias-interactive-bg-hover-accent);color:var(--mcp-accent)}
+.dsh-mcp-market-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none;font-size:12px;color:var(--mcp-mut)}
+.dsh-mcp-market-filters select{padding:5px 22px 5px 9px;border-radius:var(--mcp-r-sm);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--mcp-mut) 50%),linear-gradient(135deg,var(--mcp-mut) 50%,transparent 50%);background-position:calc(100% - 12px) 50%,calc(100% - 8px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;cursor:pointer}
+.dsh-mcp-market-filters select:focus{border-color:var(--mcp-accent)}
+.dsh-mcp-market-filters label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.dsh-mcp-market-filters input[type='checkbox']{width:14px;height:14px;margin:0;accent-color:var(--mcp-accent);cursor:pointer}
+/* grid-auto-rows:1fr 让所有隐式行等高，否则行高 = 该行最高那张卡，跨行看就是「大小不一」。
+   必须与 .dsh-mcp-mcard-desc 的截断一起用：不截断时最矮的卡会留出大片空白。 */
+.dsh-mcp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:10px;align-content:start;grid-auto-rows:1fr}
+.dsh-mcp-mcard{box-sizing:border-box;display:flex;flex-direction:column;gap:9px;padding:13px 14px;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);background:var(--mcp-bg-1);transition:border-color .13s,background .13s}
+.dsh-mcp-mcard:hover{border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-mcard.installed{border-color:var(--dsw-alias-state-success-primary)}
+.dsh-mcp-mcard-top{display:flex;align-items:flex-start;gap:9px}
+.dsh-mcp-mcard-icon{width:30px;height:30px;flex:none;border-radius:var(--mcp-r-sm);background:var(--dsw-alias-interactive-bg-hover);color:var(--mcp-mut);display:flex;align-items:center;justify-content:center}
+.dsh-mcp-mcard-main{flex:1;min-width:0}
+.dsh-mcp-mcard-name{font-size:13px;font-weight:650;line-height:1.35;overflow-wrap:anywhere}
+.dsh-mcp-mcard-meta{font-size:10.5px;color:var(--dsw-alias-label-tertiary);margin-top:2px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+/* 截断到 3 行（上游 summary 长度不受控，几千像素高的行就是这么来的）。
+   ⚠️ **这里不能用 -webkit-line-clamp**：本元素是 .dsh-mcp-mcard（display:flex）的 flex item，
+   Chrome 会把 flex item 上的 display:-webkit-box 块化成 flow-root，line-clamp 随之完全失效
+   ——真机实测：源码写着 display:-webkit-box / line-clamp:3，computed display 却是 flow-root，
+   长描述仍是 148px 高、一行没截。所以改用不依赖 display 的「行高 × 行数」截法：
+   line-height 1.55 与 font-size 12px 都写在同一规则上，故 1.55em 就是一行，×3 恰好三行。
+   全文出口由调用点的 title 提供，不能只截不留路。
+   ⚠️ 本段在 MCP_CSS 这个**模板字符串**里：注释里不得出现反引号（会直接把字符串截断，
+   详见本文件上方那条同类记录），类名与属性一律不加引号。 */
+.dsh-mcp-mcard-desc{font-size:12px;line-height:1.55;color:var(--mcp-mut);flex:1 1 auto;max-height:calc(1.55em * 3);overflow:hidden}
+.dsh-mcp-mcard-tags{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.dsh-mcp-mcard-access{font-size:10.5px;color:var(--mcp-mut);line-height:1.45;overflow-wrap:anywhere}
+.dsh-mcp-mcard-note{font-size:10.5px;line-height:1.45;color:var(--mcp-warn);overflow-wrap:anywhere}
+.dsh-mcp-mcard-vars{display:flex;flex-direction:column;gap:2px;font-size:10.5px;line-height:1.45;color:var(--dsw-alias-brand-text);overflow-wrap:anywhere}
+.dsh-mcp-mcard-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--mcp-line);padding-top:9px}
+.dsh-mcp-mcard-stat{font-size:10.5px;color:var(--dsw-alias-label-tertiary)}
+.dsh-mcp-mcard-stat.err{color:var(--mcp-err)}
+.dsh-mcp-mcard-actions{display:flex;gap:7px;align-items:center;flex:none}
+.dsh-mcp-market-empty{grid-column:1 / -1;padding:40px 20px;text-align:center;color:var(--mcp-mut);font-size:13px}
+@keyframes mcpPop{from{opacity:0;transform:scale(.965) translateY(6px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes mcpFade{from{opacity:0}to{opacity:1}}
+.dsh-mcp-tabs-wrap{position:relative;flex:none;min-width:0}.dsh-mcp-tabs{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:2px 0}.dsh-mcp-tabs::-webkit-scrollbar{display:none}.dsh-mcp-tab{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;corner-shape:round;border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--mcp-mut);font-size:12px;cursor:pointer;flex:none;white-space:nowrap;transition:background .13s,border-color .13s,color .13s;line-height:1.4}.dsh-mcp-tab:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l3)}.dsh-mcp-tab.sel{color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent);font-weight:600}.dsh-mcp-tab-count{font-size:10px;font-weight:500;padding:0 6px;border-radius:999px;background:var(--mcp-line);color:var(--mcp-mut);line-height:15px;corner-shape:round}.dsh-mcp-tab.more.open{color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent)}.dsh-mcp-tab-pop{position:absolute;top:calc(100% + 5px);right:0;z-index:60;background:var(--mcp-bg-2);border:0;border-radius:var(--mcp-r-lg);box-shadow:var(--dsw-elevation-panel);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:170px}
+/* 弹层里的行复用 .dsh-mcp-tab，但它自带 padding+border 且是 content-box：width:100%
+   会把内边距和边框再加一遍，整行比弹层宽出一圈而溢出（与下面 .dsh-mcp-entry-item 同一个坑）。 */
+.dsh-mcp-tab-pop .dsh-mcp-tab{box-sizing:border-box;width:100%}.dsh-mcp-entry{position:relative;display:inline-flex}.dsh-mcp-entry-pop{left:auto;right:0;min-width:196px}
+/* 菜单行不复用 .dsh-mcp-tab：那是标签 chip（content-box + 自带 padding/border），配上 width:100%
+   会把内边距和边框再加一遍，整行比弹层宽出一圈而溢出。行自己的盒模型必须 border-box。 */
+.dsh-mcp-entry-item{box-sizing:border-box;display:flex;align-items:center;width:100%;padding:7px 10px;border:1px solid transparent;border-radius:var(--mcp-r-sm);background:transparent;color:var(--mcp-mut);font-family:inherit;font-size:12px;line-height:1.4;text-align:left;white-space:nowrap;cursor:pointer;transition:background .13s,border-color .13s,color .13s}
+.dsh-mcp-entry-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-entry-item.sel{border-color:var(--mcp-accent);background:var(--dsw-alias-interactive-bg-hover-accent);color:var(--dsw-alias-label-primary);font-weight:600}.dsh-mcp-ws-body{width:288px;min-width:248px;min-height:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto;overflow-x:hidden}.dsh-mcp-section{display:flex;flex-direction:column;gap:8px;min-height:0;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-lg);background:var(--mcp-bg-2);padding:10px;overflow:hidden}.dsh-mcp-section.local{flex:0 1 auto;min-height:124px;max-height:62%;border-color:var(--mcp-accent)}.dsh-mcp-section.global{flex:1 1 0;min-height:124px}.dsh-mcp-section-title{font-size:10.5px;font-weight:650;color:var(--mcp-mut);text-transform:uppercase;letter-spacing:.6px;display:flex;align-items:center;gap:6px;flex:none}.dsh-mcp-section.local .dsh-mcp-section-title{color:var(--dsw-alias-label-primary)}.dsh-mcp-section-fill{flex:1;height:1px;background:var(--mcp-line)}.dsh-mcp-section-actions{display:flex;gap:4px;flex:none}.dsh-mcp-mini-btn{display:inline-flex;align-items:center;gap:4px;flex:none;padding:2px 8px;border:1px solid var(--mcp-line);border-radius:999px;corner-shape:round;background:var(--dsw-alias-button-elevated-fill);color:var(--mcp-mut);font:inherit;font-size:10.5px;font-weight:600;line-height:1.6;white-space:nowrap;cursor:pointer;transition:background .13s,border-color .13s,color .13s}.dsh-mcp-mini-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent)}.dsh-mcp-mini-btn:disabled{cursor:default;opacity:.55}.dsh-mcp-section-count{flex:none;font-size:10px;font-weight:600;letter-spacing:0;padding:0 6px;border-radius:999px;background:var(--mcp-line);color:var(--mcp-mut);line-height:15px;corner-shape:round}.dsh-mcp-section.local .dsh-mcp-section-count{background:var(--dsw-alias-interactive-bg-hover-accent);color:var(--mcp-accent)}.dsh-mcp-global-list{display:flex;flex-direction:column;gap:3px;overflow-y:auto;min-height:52px;margin:0 -4px;padding:0 4px}
+.dsh-mcp-item.muted{opacity:.52}
+.dsh-mcp-item.muted:hover{opacity:.85}
+.dsh-mcp-global-search{position:relative;flex:none}
+.dsh-mcp-global-search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.5}
+.dsh-mcp-global-search input{width:100%;box-sizing:border-box;padding:7px 10px 7px 30px;border-radius:var(--mcp-r-sm);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font-size:11.5px;outline:none;transition:border-color .15s}
+.dsh-mcp-global-search input::placeholder{color:var(--mcp-mut)}
+.dsh-mcp-section.global.collapsed{flex:none;min-height:0;border-color:transparent;background:transparent;padding:0;overflow:visible}
+.dsh-mcp-section-toggle{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;flex:none;padding:7px 9px;border:1px solid transparent;border-radius:var(--mcp-r-sm);background:transparent;color:var(--mcp-mut);font:inherit;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.6px;text-align:left;cursor:pointer;transition:background .13s,color .13s,border-color .13s}
+.dsh-mcp-section-toggle:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-mcp-section-toggle:focus{outline:none}
+.dsh-mcp-section-toggle:focus-visible{outline:1px solid var(--mcp-accent);outline-offset:-1px}
+.dsh-mcp-section.collapsed .dsh-mcp-section-toggle{border-color:var(--mcp-line);background:var(--mcp-bg-2)}
+/* 折叠指示器：一个图标、一个方向。
+   曾经三处各写一套（列表里的三角字符、组头的常驻三角 + CSS 旋转、诊断组头的感叹号），
+   同一个「可展开」长得不一样不好认。收起态统一转 -90°。 */
+.dsh-mcp-caret{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px;color:var(--mcp-mut);transition:transform .12s}
+.dsh-mcp-caret.closed{transform:rotate(-90deg)}
+.dsh-mcp-section-toggle-label{flex:none}
+.dsh-mcp-section-summary{margin-left:auto;flex:none;font-size:10.5px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--mcp-mut)}
+.dsh-mcp-eye{box-sizing:border-box;width:30px;height:26px;flex:none;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--mcp-line);border-radius:var(--mcp-r-sm);background:var(--dsw-alias-button-elevated-fill);color:var(--mcp-mut);cursor:pointer;transition:color .12s,border-color .12s,background .12s}
+.dsh-mcp-eye:hover{color:var(--dsw-alias-label-primary);border-color:var(--mcp-accent)}
+.dsh-mcp-eye.off{color:var(--mcp-err);border-color:var(--mcp-err);background:var(--dsw-alias-interactive-bg-hover-danger)}
+.dsh-mcp-eye:disabled{opacity:.5;cursor:not-allowed}
+/* ── 通知条（让位 / 降级 / 更新 / 读取失败）──────────────────────────────
+   统一成一张三色卡片：中性（无色调）| warn | err | info。进 wrap 的纵向流、
+   不挤头部，所以 Tab 行的位置不会因为「有没有通知」而上下跳。
+   位置放在 head 之后、第二行之前：先说明状态，再给操作。 */
+.dsh-mcp-notice{display:flex;align-items:flex-start;gap:10px;flex:none;padding:10px 12px;border-radius:var(--mcp-r-lg);border:1px solid var(--mcp-line);background:var(--mcp-bg-1);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family,inherit);font-size:12px}
+.dsh-mcp-notice>svg{flex:none;margin-top:1px}
+.dsh-mcp-notice-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.dsh-mcp-notice-body b{font-size:12.5px}
+.dsh-mcp-notice-body span{color:var(--mcp-mut);line-height:18px;overflow-wrap:anywhere}
+.dsh-mcp-notice.warn{border-color:var(--mcp-warn);background:var(--dsw-alias-state-warn-tertiary)}
+.dsh-mcp-notice.warn>svg{color:var(--mcp-warn)}
+.dsh-mcp-notice.err{border-color:var(--mcp-err);background:var(--dsw-alias-interactive-bg-hover-danger)}
+.dsh-mcp-notice.err>svg{color:var(--mcp-err)}
+.dsh-mcp-notice.info{border-color:var(--mcp-info);background:var(--dsw-alias-state-business-tertiary)}
+.dsh-mcp-notice.info>svg{color:var(--mcp-info)}
+.dsh-mcp-notice-actions{display:flex;gap:6px;flex:none;align-items:center}
+/* 让位提示不在面板里（它渲染在入口被占的位置），所以要自带定位与抬升。 */
+.dsh-mcp-notice-dock{max-width:520px;margin:14px;box-shadow:var(--dsw-elevation-panel)}
+/* 一键升级按钮：与 .dsh-mcp-btn.primary 同令牌，但更小——它长在提示条里，不该抢面板主操作的视觉权重。 */
+/* 左侧栏底部入口（sidebar.footer.action）：与 DSH 侧栏底部其它控件同规格——
+   展开态是 42px 行（图标 + 文字），收起轨道是 36px 圆钮（仅图标）。 */
+.dsh-mcp-footer-action{display:inline-flex;align-items:center;gap:8px;width:100%;height:42px;box-sizing:border-box;margin:0 -2px;padding:0 10px 0 8px;border:none;border-radius:var(--mcp-r-md);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;cursor:pointer;transition:background .15s}
+.dsh-mcp-footer-action:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-mcp-footer-action:active{background:var(--dsw-alias-interactive-bg-active)}
+.dsh-mcp-footer-action.rail{justify-content:center;gap:0;width:36px;height:36px;margin:0;padding:0;border-radius:50%;corner-shape:round}
+.dsh-mcp-footer-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 响应式覆盖必须位于全部基础规则之后：同特异性下后出现者胜出。 */
+@media (max-width:760px){.dsh-mcp-panel-overlay{padding:10px}.dsh-mcp-panel{max-width:none;width:100%;height:calc(100dvh - 20px);border-radius:var(--mcp-r-panel)}.dsh-mcp-panel .dsh-mcp-wrap{padding:12px}.dsh-mcp-head{align-items:flex-start}.dsh-mcp-body{flex-direction:column;overflow-y:auto;overflow-x:hidden}.dsh-mcp-side,.dsh-mcp-ws-body{width:auto;min-width:0;max-height:none;flex:none}.dsh-mcp-side:not(.embedded) .dsh-mcp-list{max-height:38vh}.dsh-mcp-section.local,.dsh-mcp-section.global{flex:none;min-height:0;max-height:none}.dsh-mcp-section.local .dsh-mcp-list{max-height:30vh}.dsh-mcp-global-list{max-height:30vh}.dsh-mcp-detail{padding:12px;flex:none;overflow:visible}.dsh-mcp-d-body{overflow:visible}.dsh-mcp-d-title{flex:none}.dsh-mcp-d-head{flex-direction:column}.dsh-mcp-kv-edit{grid-template-columns:minmax(90px,35%) minmax(0,1fr) auto}}
+/* 窄屏：标题与关闭留在第一行，能力层与操作区各占一整行。
+   ⚠️ 必须显式钉每一样东西的行列。四列 grid 退成两列后，自动排布会把「关闭」挤到第二行
+   （子元素顺序是 标题→能力层→操作区→关闭），而「关闭」在任何宽度下都该在右上角。 */
+@media (max-width:480px){.dsh-mcp-head{grid-template-columns:minmax(0,1fr) auto}.dsh-mcp-title{grid-row:1;grid-column:1}.dsh-mcp-head>.dsh-mcp-btn{grid-row:1;grid-column:2}.dsh-mcp-head>.dsh-mcp-seg{grid-row:2;grid-column:1 / -1}.dsh-mcp-head-actions{grid-row:3;grid-column:1 / -1;width:100%;justify-content:flex-start}.dsh-mcp-btn{padding:7px 9px}.dsh-mcp-radio-row,.dsh-mcp-number-grid{grid-template-columns:1fr}.dsh-mcp-modal{max-width:none;width:100%;padding:14px}.dsh-mcp-kv{grid-template-columns:1fr;gap:4px}.dsh-mcp-kv>b{margin-top:4px}.dsh-mcp-secret-row{grid-template-columns:1fr;gap:4px}.dsh-mcp-secret{width:100%}.dsh-mcp-kv-edit{grid-template-columns:1fr auto}.dsh-mcp-kv-edit input:first-child{grid-column:1 / -1}.dsh-mcp-tool{flex-direction:column}.dsh-mcp-tool-name{max-width:100%}.dsh-mcp-tool-desc{white-space:normal}}
+/* 动效约定：宿主官方客户端包普遍在 prefers-reduced-motion 下关掉过渡与弹入动画
+   （ui-* 包 46 处 @media，另有若干 JS 侧 matchMedia 判定）。这里关掉缩放弹入与过渡；
+   .dsh-mcp-dot.loading 的呼吸只改透明度、且是「正在连接」的状态线索，故保留。
+   ⚠️ 本注释在模板字符串内部：不得出现反引号。 */
+@media (prefers-reduced-motion:reduce){.dsh-mcp-panel,.dsh-mcp-whatsnew,.dsh-mcp-modal,.dsh-mcp-toast,.dsh-mcp-fab{animation:none}.dsh-mcp-wrap *,.dsh-mcp-panel-overlay *,.dsh-mcp-overlay *,.dsh-mcp-fab,.dsh-mcp-toggle::after{transition:none}}
+
+.dsh-skills-root{display:flex;flex-direction:column;min-height:0;flex:1;gap:0}
+.dsh-skills-sec{font-size:12px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-primary);margin:14px 0 6px}
+.dsh-skills-meta{display:grid;grid-template-columns:96px minmax(0,1fr);gap:4px 10px;font-size:12px;line-height:18px}
+.dsh-skills-meta dt{color:var(--mcp-mut);margin:0}
+.dsh-skills-meta dd{margin:0;color:var(--dsw-alias-label-primary);word-break:break-all}
+.dsh-skills-pre{margin:0;padding:10px;border-radius:var(--mcp-r-sm);background:var(--mcp-bg-1);border:.5px solid var(--mcp-line);font-family:var(--mcp-mono);font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);overflow:auto;max-height:320px;white-space:pre-wrap;word-break:break-word}
+/* 作用域组头：占满列表整行，所以路径放得下（这正是它取代筛选下拉的理由）。
+   超长走 ellipsis，完整根路径在 title 里兜底。 */
+.dsh-skills-group{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;margin:6px 0 2px;padding:4px 6px;border:0;border-radius:var(--mcp-r-sm);background:transparent;color:var(--mcp-mut);font-family:inherit;font-size:10.5px;font-weight:650;letter-spacing:.4px;text-align:left;cursor:pointer}
+.dsh-skills-group:first-child{margin-top:0}
+.dsh-skills-group:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-skills-group.static{cursor:default}
+.dsh-skills-group.static:hover{background:transparent;color:var(--mcp-mut)}
+/* 组头只定宽度；收起态的旋转由 .dsh-mcp-caret.closed 一处负责（别再写第二条旋转规则）。 */
+.dsh-skills-group-caret{flex:none;width:12px}
+.dsh-skills-group-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-skills-group-count{flex:none;padding:0 6px;border-radius:999px;corner-shape:round;background:var(--mcp-line);color:var(--mcp-mut);line-height:15px;font-size:10px}
+.dsh-skills-risk{border-radius:var(--mcp-r-lg);border:.5px solid var(--mcp-line);background:var(--mcp-bg-2);padding:10px;margin:10px 0}
+.dsh-skills-risk-h{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:8px}
+.dsh-skills-risk-row{display:flex;gap:10px;font-size:12px;line-height:18px;padding:3px 0;align-items:flex-start}
+.dsh-skills-risk-row .k{flex:none;width:104px;color:var(--mcp-mut)}
+/* 风险行左列有时带一个图标（如「声明不一致」的警示）。图标是行内 svg，靠 baseline 对齐会偏低。 */
+.dsh-skills-risk-row .k svg{vertical-align:-2px;margin-right:3px}
+.dsh-skills-risk-row .v{flex:1;min-width:0;color:var(--dsw-alias-label-primary)}
+/* 红绿灯的文字承载：颜色不能是唯一载体（无障碍 + 「这点点是咋回事」的直接答案）。
+   每个风险档一条自己的文字规则，卡片底栏按档位挑一条用。 */
+.dsh-skills-blocked{color:var(--mcp-err);font-weight:600}
+.dsh-skills-warn{color:var(--mcp-warn)}
+/* 「安装时创建」：紧跟在路径后面，**不许在词组中间折行**（真机上被折成「安装时创/建」）。
+   它自己占一行是可以的（选项窄的时候），所以只禁词内折行、不禁换行。 */
+.dsh-skills-pending{color:var(--mcp-warn);font-weight:600;white-space:nowrap}
+.dsh-skills-ack{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:18px;padding:8px 0;color:var(--dsw-alias-label-primary);cursor:pointer}
+.dsh-skills-ack input{margin:2px 0 0;flex:none;accent-color:var(--mcp-accent)}
+.dsh-skills-note{padding:10px 12px;font-size:12px;line-height:18px;color:var(--mcp-mut);border-top:.5px solid var(--mcp-line);flex:none}
+/* 外部源的「上游页面」链接：与插件其余链接同一套（品牌色 + hover 下划线），
+   不在弹窗里引入第二种链接样式。 */
+.dsh-skills-link{color:var(--mcp-accent);text-decoration:none;word-break:break-all}
+.dsh-skills-link:hover{text-decoration:underline}
+.dsh-skills-empty{display:flex;flex:1;align-items:center;justify-content:center;padding:32px 16px;font-size:12px;line-height:18px;color:var(--mcp-mut);text-align:center}
+
+/* ⚠️ 拼表顺序是契约的一部分：将来要加规则前先读这段。
+   这两张样式表按 MCP_CSS → SKILLS_CSS 的顺序**拼成一张**（apply 里那一次 __injectCss），
+   所以同特异性下 SKILLS_CSS 天然压过 MCP_CSS——而这件事在源码里完全看不出来。
+   两次真机事故都出自这里：
+     · .dsh-mcp-pane-off 被后面那条 .dsh-mcp-card{display:flex} 压掉 → 三个页签同时显示；
+     · 外壳对齐块接在 MCP_CSS 末尾 → 圆角与选中背景根本没生效。
+   现在的做法是**不留跨表覆盖块**：所有原语都在自己那张表的定义处一次写对
+   （.dsh-mcp-tab 的药丸、.dsh-mcp-d-empty 的成块、分段控件都回了 MCP_CSS）。
+   将来若确实需要覆盖 MCP_CSS，覆盖块只能放在**本常量最末尾**，并在这里写明为什么。
+   另：整张样式表是模板字符串，注释里不得出现反引号。 */
+</style>
+<style>
+  .pv-wrap{padding:16px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111)}
+  .pv-note{font:12px/1.6 system-ui;color:var(--dsw-alias-label-secondary,#666);margin:0 0 6px}
+  .pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:18px;align-items:start}
+  .pv-scene{min-width:0}
+  .pv-frame{border:1px solid var(--dsw-alias-border-l3,#ddd);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1,#fff)}
+  .pv-toolbar{display:flex;gap:6px;align-items:center;margin:0 0 14px;flex-wrap:wrap;position:sticky;top:0;z-index:9;background:var(--dsw-alias-bg-base,#fff);padding:6px 0}
+  .pv-toolbar button{font:12px system-ui;padding:5px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l3,#ccc);background:var(--dsw-alias-bg-layer-2,#f7f7f7);cursor:pointer}
+</style>
+</head>
+<body>
+<div class="pv-wrap">
+  <div class="pv-toolbar">
+    <span class="pv-note" style="margin:0">真主题 + 真样式 + 真组件。窄屏：</span>
+    <button data-w="720">720</button><button data-w="520">520</button>
+    <button data-w="420">420</button><button data-w="340">340</button><button data-w="0">自适应</button>
+    <button data-theme="dark">深色</button><button data-theme="light">浅色</button>
+  </div>
+  <div class="pv-grid" id="grid">
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 正常（模型✓ 用户✓）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge ">模型可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-checked="true" aria-label="zhanggui：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-checked="true" aria-label="zhanggui：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 仅手动可调用（模型✗ 用户✓）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge s-off">模型不可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-label="zhanggui：允许模型自动调用"></button> 禁止</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-checked="true" aria-label="zhanggui：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 仅模型可调用（模型✓ 用户✗）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge ">模型可调用</span><span class="dsh-mcp-badge s-off">用户不可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-checked="true" aria-label="zhanggui：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-label="zhanggui：允许用户手动调用"></button> 禁止</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 已停用（两个都✗）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-off">已停用</span><span class="dsh-mcp-badge s-off">模型不可调用</span><span class="dsh-mcp-badge s-off">用户不可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.2l7.6 4.8L5 12.8z"></path></svg>启用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已停用（disable-model-invocation: true + user-invocable: false）</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-label="zhanggui：允许模型自动调用"></button> 禁止</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-label="zhanggui：允许用户手动调用"></button> 禁止</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 旧机制残留 + 停用（徽章最多）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-off">已停用</span><span class="dsh-mcp-badge s-off">模型不可调用</span><span class="dsh-mcp-badge s-off">用户不可调用</span><span class="dsh-mcp-badge s-warn" title="这是旧版启停机制（改名成 .disabled）留下的条目；恢复后请用新的停用方式">旧机制残留</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.2l7.6 4.8L5 12.8z"></path></svg>启用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>旧机制停用（SKILL.md.disabled）——点「启用」把它改回来</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-label="zhanggui：允许模型自动调用"></button> 禁止</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-label="zhanggui：允许用户手动调用"></button> 禁止</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 调用权限未知（两个开关都禁用）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">状态未知</span><span class="dsh-mcp-badge s-off" title="SKILL.md 的 frontmatter 读不出来（宿主会跳过这条技能），无法判断它的调用权限">调用权限未知</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>未知（读不到这个文件）</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" disabled="true" title="SKILL.md 的 frontmatter 读不出来（宿主会跳过这条技能），无法判断它的调用权限" aria-label="zhanggui：允许模型自动调用"></button> 未知</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" disabled="true" title="SKILL.md 的 frontmatter 读不出来（宿主会跳过这条技能），无法判断它的调用权限" aria-label="zhanggui：允许用户手动调用"></button> 未知</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 内置只读</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui<span class="dsh-mcp-badge s-lock">内置只读</span></div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge ">模型可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary" disabled="true" title="内置技能只读"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（内置（只读））</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" disabled="true" title="内置技能只读" aria-checked="true" aria-label="zhanggui：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" disabled="true" title="内置技能只读" aria-checked="true" aria-label="zhanggui：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 被遮蔽</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-warn">被遮蔽</span><span class="dsh-mcp-badge ">模型可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断<span class="dsh-mcp-tab-count">1</span></button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-checked="true" aria-label="zhanggui：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-checked="true" aria-label="zhanggui：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-skills-risk"><div class="dsh-skills-risk-h">同名遮蔽</div><div class="dsh-skills-risk-row"><span class="k">实际生效</span><span class="v">来自 项目 · .dsh/skills，模型只会收到那一份；本行是另一个作用域里的副本。</span></div></div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 超长名 + 超长路径（最挤）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui-verification-before-completion</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge ">模型可调用</span></div><p class="dsh-mcp-d-desc">在宣称完成之前用新鲜证据证明它——真实命令输出、测试结果或一次真实运行，而不是&quot;看着像好了&quot;</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills\zhanggui-verification-before-completion（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-checked="true" aria-label="zhanggui-verification-before-completion：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-checked="true" aria-label="zhanggui-verification-before-completion：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><pre class="dsh-skills-pre">技能正文示例</pre></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>详情 · 正文读取失败</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-detail"><div class="dsh-mcp-d-head"><div class="dsh-mcp-d-title"><div class="dsh-mcp-d-name">zhanggui</div><div class="dsh-mcp-d-meta"><span class="dsh-mcp-badge s-on">已启用</span><span class="dsh-mcp-badge ">模型可调用</span></div><p class="dsh-mcp-d-desc">端到端拥有一个开发请求；从需求澄清到验证交付</p></div><div class="dsh-mcp-d-actions"><button type="button" class="dsh-mcp-btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.2v9.6M10 3.2v9.6"></path></svg>停用</button><div class="dsh-mcp-dd dsh-mcp-d-more" ref="[object Object]"><button type="button" class="dsh-mcp-btn icon " title="更多操作"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"></path></svg></button></div></div></div><div class="dsh-mcp-tabs" role="tablist" aria-label="详情分区"><button type="button" role="tab" aria-selected="true" class="dsh-mcp-tab sel">概览</button><button type="button" role="tab" class="dsh-mcp-tab">技能正文</button><button type="button" role="tab" class="dsh-mcp-tab">诊断</button></div><div class="dsh-mcp-d-body"><div class="dsh-mcp-card"><h4>技能属性</h4><div class="dsh-mcp-kv"><b>位置</b><span>C:\Users\zhanglu\.agents\skills（全局 · .agents/skills）</span><b>状态</b><span>已启用</span><b>模型自动调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 disable-model-invocation。宿主用文件监听盯技能根，改动通常不到一秒就生效（实测 100~300ms），不必重启" aria-checked="true" aria-label="zhanggui：允许模型自动调用"></button> 允许</span><b>用户可调用</b><span><button type="button" role="switch" class="dsh-mcp-toggle" title="写入 SKILL.md 的 user-invocable：关掉后你就不能用 /名字 手动调用它（模型仍可自动调用）。与上面那个一起关掉就是「已停用」" aria-checked="true" aria-label="zhanggui：允许用户手动调用"></button> 允许</span></div></div><div class="dsh-mcp-card dsh-mcp-pane-off"><h4>技能正文</h4><div class="dsh-skills-risk"><div class="dsh-skills-risk-row"><span class="k dsh-skills-blocked">读取失败</span><span class="v">ENOENT: no such file or directory</span></div><button type="button" class="dsh-mcp-btn">重试</button></div></div><div class="dsh-mcp-d-diag dsh-mcp-pane-off"><div class="dsh-mcp-d-note">未检测到跨作用域同名遮蔽，本份已进入模型目录。</div></div></div></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 已启用</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot connected"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="zhanggui：已启用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 已停用</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item muted" role="button" tab-index="0"><span class="dsh-mcp-dot "></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off">已停用</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="启用" aria-label="zhanggui：已停用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 旧机制残留</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item muted" role="button" tab-index="0"><span class="dsh-mcp-dot "></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off">旧机制停用</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="启用" aria-label="zhanggui：已停用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 模型面关（模型不用）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot connected"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off" title="模型不会自动调用它">模型不用</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="zhanggui：已启用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 用户面关（不可手调）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot connected"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off" title="你不能用 /名字 手动调用它">不可手调</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="zhanggui：已启用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 两个面都关但未判定为停用（边角）</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot loading"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off" title="模型不会自动调用它">模型不用</span><span class="dsh-mcp-badge s-off" title="你不能用 /名字 手动调用它">不可手调</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="zhanggui：已启用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 权限未知 + 超长名</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot loading"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="a-very-long-skill-name-that-must-not-break-the-row-layout">a-very-long-skill-name-that-must-not-break-the-row-layout</div><div class="dsh-mcp-item-sub"></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="a-very-long-skill-name-that-must-not-break-the-row-layout：已启用"></button></div></div></div>
+  </div>
+  <div class="pv-scene">
+    <p class="pv-note"><b>列表行 · 被遮蔽 + 两个面都有徽章</b></p>
+    <!-- ⚠️ 用真容器类（.dsh-mcp-body 是详情在真面板里的父级；.dsh-mcp-detail 由组件自己带）。
+         曾经这里套的是自造的 .dsh-mcp-detail-host —— 一个不存在的类，等于在**没有真容器**
+         的情况下看排版（宽度约束、flex 行为都可能不同）。 -->
+    <div class="pv-frame"><div class="dsh-mcp-body"><div class="dsh-mcp-item" role="button" tab-index="0"><span class="dsh-mcp-dot connected"></span><div class="dsh-mcp-item-main"><div class="dsh-mcp-item-name" title="zhanggui">zhanggui</div><div class="dsh-mcp-item-sub"><span class="dsh-mcp-badge s-off" title="模型不会自动调用它">模型不用</span><span class="dsh-mcp-badge s-off" title="你不能用 /名字 手动调用它">不可手调</span><span class="dsh-mcp-badge s-err" title="模型只会收到「项目 · .dsh/skills」那一份">被遮蔽</span></div></div><button type="button" role="switch" class="dsh-mcp-toggle" title="停用" aria-checked="true" aria-label="zhanggui：已启用"></button></div></div></div>
+  </div></div>
+</div>
+<script>
+  const grid = document.getElementById('grid')
+  document.querySelectorAll('[data-w]').forEach((b) => b.addEventListener('click', () => {
+    const w = Number(b.dataset.w)
+    grid.style.gridTemplateColumns = w === 0 ? '' : 'repeat(auto-fill,minmax(' + (w + 20) + 'px,1fr))'
+    grid.querySelectorAll('.pv-frame').forEach((f) => { f.style.maxWidth = w === 0 ? '' : w + 'px' })
+  }))
+  // ⚠️ 宿主的深色开关是 **body[data-ds-dark-theme]**（design-platform.css:85/284），
+  // 不是 data-theme="dark"。第一版用错了属性名 —— 于是"深色检查"全是浅色，
+  // 那种绿是假的（什么都没验到）。这里照宿主的真实选择器切。
+  // 页面初始也按浅色渲染：<body> 不带该属性即浅色。
+  document.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => {
+    const dark = b.dataset.theme === 'dark'
+    if (dark) document.body.setAttribute('data-ds-dark-theme', '')
+    else document.body.removeAttribute('data-ds-dark-theme')
+    document.documentElement.dataset.theme = b.dataset.theme
+  }))
+  // 打开即按系统的 prefers-color-scheme 选一次，免得每次手动点
+  if (matchMedia('(prefers-color-scheme: dark)').matches) document.body.setAttribute('data-ds-dark-theme', '')
+</script>
+</body></html>

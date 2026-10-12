@@ -600,6 +600,41 @@ test('the model-invocation switch flips both ways and is disabled when it cannot
   assert.match(textOf(unknown).join(' '), /未知/, '并且要说清是「未知」，不能显示成一个确定的值')
 })
 
+test('the list row badges BOTH invocation faces, because either one can be off', () => {
+  // ⚠️ 这条来自**看 UI 预览**时发现的缺口：列表行原来只标模型面
+  // （`enabled === false ? 已停用 : modelInvocable === false ? 仅用户可调用 : null`），
+  // 于是「仅模型可调用」（用户面关着）在列表上**看不出任何异常**——用户点进去才发现
+  // 自己没法用 /名字 调用它。两个面既然各自可关，列表就得各说一句。
+  const internals = loadClientInternals()
+  const base = {
+    name: 'zhanggui', description: '演示', entry: 'zhanggui', kind: 'bundle',
+    root: '/u/.agents/skills', source: 'user-agents', scope: 'global', writable: true,
+    modelInvocable: true, userInvocable: true, enabled: true,
+  }
+  const subOf = (over) => {
+    const tree = internals.__expand(internals.SkillRow({
+      row: { ...base, ...over }, selected: false, onSelect() {}, onToggle() {},
+      busy: false, shadowedBy: null, twins: null,
+    }))
+    return textOf(tree).join(' ')
+  }
+
+  // 四档各自的列表文案：能用的那一面不该出徽章，关掉的那面必须出。
+  assert.doesNotMatch(subOf({}), /模型不用|不可手调/, '两个面都开着时不该有任何限制徽章')
+  assert.match(subOf({ modelInvocable: false }), /模型不用/, '模型面关掉要说出来')
+  assert.doesNotMatch(subOf({ modelInvocable: false }), /不可手调/, '用户面还开着就不该说它不能手调')
+  assert.match(subOf({ userInvocable: false }), /不可手调/, '用户面关掉要说出来（这条以前是缺口）')
+  assert.doesNotMatch(subOf({ userInvocable: false }), /模型不用/, '模型面还开着就不该说它不用')
+
+  // 停用是更强的结论：只说「已停用」，不再重复两个面的限制（否则一行挤三个徽章）。
+  const parked = subOf({ modelInvocable: false, userInvocable: false, enabled: false })
+  assert.match(parked, /已停用/)
+  assert.doesNotMatch(parked, /模型不用|不可手调/, '停用时说「已停用」就够了，不重复两个面')
+
+  // 旧机制残留要能被认出来（它的「停用」在文件名里）
+  assert.match(subOf({ modelInvocable: false, userInvocable: false, enabled: false, migrated: true }), /旧机制停用/)
+})
+
 test('the user-invocable face has its OWN switch, wired to its own action', () => {
   // ⚠️ 这条补的是变异测试找到的缺口：原来 `switchOf` 只取**第一个** switch，于是第二个
   // （用户面）**完全没有被测**——把它接回 onModelInvocable 也不会有任何用例变红。
