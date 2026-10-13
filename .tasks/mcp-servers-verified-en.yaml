@@ -113,7 +113,7 @@
   summary: Project, Issue & merge request access
   category: dev
   vendor: GitLab
-  access: Free and above tiers usable; OAuth dynamic registration authorization; self-instances also usable
+  access: Free and above tiers usable; OAuth dynamic registration authorization; self-instances also usable; ⚠️ static-token auth is not officially confirmed (the official MCP docs describe only OAuth/DCR; issue 586184 requests PAT support and the official reply says it is not on the near-term roadmap), so it may fail to authorize in DSH
   transport: streamable-http
   url: https://gitlab.com/api/v4/mcp
   homepage: https://docs.gitlab.com/user/model_context_protocol/mcp_server/
@@ -412,7 +412,7 @@
   summary: Site build deployment & Netlify CLI
   category: cloud
   vendor: Netlify
-  access: Requires Netlify account OAuth authorization
+  access: Requires Netlify account OAuth authorization; ⚠️ static-token auth is not officially confirmed (the official docs' NETLIFY_PERSONAL_ACCESS_TOKEN is an environment variable of the local stdio package; the remote endpoint documents only OAuth), so it may fail to authorize in DSH
   transport: streamable-http
   url: https://netlify-mcp.netlify.app/mcp
   homepage: https://docs.netlify.com/build/build-with-ai/netlify-mcp-server/
