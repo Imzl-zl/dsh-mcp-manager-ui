@@ -16,7 +16,7 @@
 
 <p align="center"><a href="README.md">中文</a> | <b>English</b></p>
 
-Click the floating button or the sidebar's "Toolbox" entry: the panel floats above the session, so changing configuration or reading skills never interrupts the conversation you are in. Two ability faces live in the same panel — **MCP** and **skills**.
+Click the floating button or the sidebar's "Toolbox" entry: the panel floats above the session, so changing configuration or reading skills never interrupts the conversation you are in. Two ability panes live in the same panel — **MCP** and **skills**.
 
 > The panel follows the DSH interface language: when DSH is set to English, every label, button, and status string in the panel is English too (the dictionary is `EN_DICT` in `lib/client.js`); with Chinese selected — or on a Host that ships no locale service — the original Chinese copy is shown.
 
@@ -62,10 +62,10 @@ See every installed skill's **real scope** and cross-scope shadowing, enable/dis
 
 ```sh
 # Recommended: from npm — `dsh plugin update` then upgrades within ^1.x
-dsh plugin --profile web add dsh-toolbox-ui@^1.6.7
+dsh plugin --profile web add dsh-toolbox-ui@^1.7.0
 
 # Or pin a GitHub release tag (no automatic upgrades; re-add with a new tag)
-dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.6.7
+dsh plugin --profile web add github:Imzl-zl/dsh-toolbox-ui#v1.7.0
 ```
 
 Then **restart `dsh web`**. To uninstall (your existing MCP entries stay):

@@ -337,9 +337,9 @@ Existence must be checked against a list, so the repository carries a generated 
 
 `test/theme-contract.test.mjs` pins both ends: violating samples must be caught, and the snapshot itself must have scale and key members (otherwise, if the list degenerates into an empty table, the existence check would invert into "no token exists" and make the other side's assertions meaningless).
 
-## Skill capability surface: why it sits alongside the MCP surface instead of merging with it
+## The skill ability pane: why it sits alongside the MCP pane instead of merging with it
 
-The panel has **two capability layers** (MCP / Skills), switched by an enum at the top, sharing the same floating window and sidebar entry. They must be two independent host services:
+The panel has **two ability panes** (MCP / Skills), switched by an ability-layer enum at the top, sharing the same floating window and sidebar entry. They must be two independent host services:
 
 - **`skills` cannot go into the MCP gateway's `static inject`**. Cordis's `inject` is a **dependency declaration** — when the service is missing, the fiber simply stays inactive and waits, **without raising an error**. But the host's built-in plugin `dsh-skill` can be disabled by the user, and once `skills` is added to the existing gateway's inject, those profiles would have the **MCP panel fail silently along with it**. So `SkillsManagerGateway` is a separate sub-plugin with its own `inject = ["skills"]`; when unmet, only the skill surface is affected.
 - **The two services must be mounted within the same patch entry**: `cordis.patch.yml` has only one, and `package-contract` asserts that its id and name each appear exactly once, so the sub-plugin is mounted by the existing plugin's constructor via `ctx.plugin()`.

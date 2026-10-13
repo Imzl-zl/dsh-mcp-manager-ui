@@ -32,13 +32,40 @@ test('whats-new entries are append-only, ordered and well formed', () => {
   for (let i = 1; i < versions.length; i += 1) {
     assert.ok(compare(versions[i - 1], versions[i]) < 0, `${versions[i - 1]} 必须早于 ${versions[i]}`)
   }
+  // 双语形状（DSH 的 LocalizedText：string | { en, ...locale }）：text / where 要么是
+  // 非空字符串，要么 { zh, en } 两份都非空。英文缺席的条目在英文界面会回落中文——
+  // 那是允许的（回落链），但**卷到一半**不允许：新条目必须双语齐全。
+  const assertLocalized = (value, label) => {
+    if (typeof value === 'string') {
+      assert.ok(value.length > 0, `${label} 不能是空字符串`)
+      return
+    }
+    assert.ok(value && typeof value === 'object', `${label} 必须是字符串或 { zh, en }`)
+    assert.ok(typeof value.zh === 'string' && value.zh.length > 0, `${label} 缺中文`)
+    assert.ok(typeof value.en === 'string' && value.en.length > 0, `${label} 缺英文`)
+  }
   for (const entry of WHATS_NEW) {
     assert.ok(Array.isArray(entry.items) && entry.items.length > 0, `${entry.version} 没有任何条目`)
     for (const item of entry.items) {
-      assert.ok(typeof item.text === 'string' && item.text.length > 0, `${entry.version} 有条目缺少文案`)
-      if (item.where !== undefined) assert.ok(typeof item.where === 'string' && item.where.length > 0)
+      assertLocalized(item.text, `${entry.version} 有条目缺少文案`)
+      if (item.where !== undefined) assertLocalized(item.where, `${entry.version} 的 where 不合法`)
     }
   }
+})
+
+test('the notice renders the entry copy in the active language', async () => {
+  // 渲染点必须过 localized()：直接画 item.text 会让英文界面冒出 {zh,en} 对象或中文。
+  // localized 的行为（中文默认、显式英文才出英文、缺席回落）由这条钉住。
+  const { localized, setLocaleActiveForTest } = loadClientRule()
+  setLocaleActiveForTest(null)
+  assert.equal(localized('纯字符串'), '纯字符串')
+  assert.equal(localized({ zh: '中文', en: 'English' }), '中文')
+  assert.equal(localized({ en: 'only en' }), 'only en', '缺中文时回落英文')
+  assert.equal(localized(undefined), '')
+  setLocaleActiveForTest('en')
+  assert.equal(localized({ zh: '中文', en: 'English' }), 'English')
+  assert.equal(localized({ zh: '只有中文' }), '只有中文', '缺英文时回落中文')
+  setLocaleActiveForTest('zh')
 })
 
 test('whatsNew RPC reports the running version and the source entries', async () => {
@@ -54,7 +81,7 @@ test('whatsNew RPC reports the running version and the source entries', async ()
 const exportMarker = 'exports.inject = inject;'
 const instrumentedClient = clientSource.replace(
   exportMarker,
-  `${exportMarker}\nexports.__whatsNew = { WHATS_NEW_SEEN_KEY, whatsNewFor };`,
+  `${exportMarker}\nexports.__whatsNew = { WHATS_NEW_SEEN_KEY, whatsNewFor, localized, setLocaleActiveForTest: (value) => { localeActive = value } };`,
 )
 assert.notEqual(instrumentedClient, clientSource, 'client test export marker must stay current')
 
@@ -143,4 +170,12 @@ test('the notice is triggered by opening the panel, not by loading the page', ()
   assert.match(clientSource, /h\(JsonImportModal,[\s\S]{0,400}?h\(WhatsNewModal, \{ call \}\)/)
   assert.match(clientSource, /const WhatsNewModal = \(\{ call \}\) =>/)
   assert.doesNotMatch(clientSource, /seats[\s\S]{0,200}WhatsNewModal/)
+})
+
+test('the notice renders entry copy through localized(), never the raw value', () => {
+  // 条目是 { zh, en } 数据：直接画 item.text 会让英文界面冒出对象或中文。
+  // 判据钉在渲染点上（函数行为由上面那条钉，这里钉「渲染点真的用了它」）。
+  assert.match(clientSource, /localized\(item\.text\)/, 'WhatsNewModal 必须过 localized(item.text)')
+  assert.match(clientSource, /localized\(item\.where\)/, 'WhatsNewModal 必须过 localized(item.where)')
+  assert.doesNotMatch(clientSource, /item\.text,\s*\n/, '不得直接渲染 item.text')
 })
