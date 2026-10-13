@@ -52,7 +52,40 @@ test('every catalog entry is structurally complete for its transport', () => {
     }
     // homepage 是详情页唯一的排障出口，缺了用户只能自己去搜。
     assert.ok(/^https?:\/\//.test(entry.homepage || ''), `${where}: homepage 必须是 http(s) 地址`);
+
+    // 英文文案：**可选**，但一旦存在就必须是非空字符串，或**整个键缺席**。
+    // 判据是「有没有这个键」而不是「值是不是空」——空串会让 pickCatalogText 以为有英文，
+    // 卡片上显示一句空话（比显示中文更糟）。所以在源头挡掉空串。
+    for (const field of ['labelEn', 'summaryEn', 'accessEn', 'vendorEn']) {
+      if (entry[field] === undefined) continue;
+      assert.equal(typeof entry[field], 'string', `${where}: ${field} 必须是字符串`);
+      assert.ok(entry[field].trim().length > 0, `${where}: ${field} 存在就不能为空`);
+    }
   }
+})
+
+test('the English catalog copy lines up with the Chinese one, entry for entry', async () => {
+  // 英文副本可选，但存在时必须与中文**逐条对齐**：同一条目、同一顺序。
+  // 生成器已经断言过一遍；这里再钉一次，是为了防止有人绕过生成器直接手改产物。
+  const { readFile } = await import('node:fs/promises')
+  let rawEn
+  try {
+    rawEn = await readFile(new URL('../.tasks/mcp-servers-verified-en.yaml', import.meta.url), 'utf8')
+  } catch {
+    return // 副本缺席是合法状态：产物只有中文，面板回落显示中文
+  }
+  const block = /```yaml\n([\s\S]*?)```/.exec(rawEn)
+  assert.ok(block, '英文副本必须有 ```yaml 代码块')
+
+  const idsEn = [...block[1].matchAll(/^- id: (\S+)$/gm)].map((m) => m[1])
+  // ⚠️ 比的是**集合**不是顺序：产物按 CATEGORY_ORDER 重排过，而 YAML 里的物理顺序
+  // 只为了便于阅读（见 build-catalog.mjs 的说明与 mcp-catalog.test 里那条顺序用例）。
+  assert.deepEqual([...idsEn].sort(), MCP_CATALOG.map((entry) => entry.id).sort(),
+    '英文副本必须覆盖与中文完全相同的条目集合')
+  assert.equal(new Set(idsEn).size, idsEn.length, '英文副本里不能有重复 id')
+  // 每条都要真的给出英文文案，否则那一格在英文界面下会漏出中文。
+  const missing = MCP_CATALOG.filter((entry) => !entry.summaryEn || !entry.accessEn).map((entry) => entry.id)
+  assert.deepEqual(missing, [], '这些条目缺英文 summary/access')
 })
 
 test('catalog ids are unique and never change meaning', () => {
@@ -170,6 +203,14 @@ test('builtin catalog carries every field the market UI reads', () => {
     assert.ok(/^https?:\/\//.test(item.homepage || ''), `${where}: 缺 homepage（详情页的文档链接）`);
     assert.ok(Array.isArray(item.envKeys), `${where}: 缺 envKeys（「需密钥」徽章靠它）`);
     assert.ok(Array.isArray(item.placeholders), `${where}: 缺 placeholders（含占位符的条目要提示先改）`);
+    // 英文文案必须**真的带过来**：bundle 读不到 lib/mcp-catalog.js 的常量，只认宿主
+    // 这一层带过去的字段。少带一个，英文界面下那张卡片就漏出中文（真机才看得见）。
+    // 判据用「非空字符串」而不是"有没有键"——空串同样会让 pickCatalogText 回落，
+    // 于是英文界面显示中文，而同一条用例本该在这里就红。
+    for (const field of ['labelEn', 'summaryEn', 'accessEn', 'vendorEn']) {
+      assert.equal(typeof item[field], 'string', `${where}: 缺 ${field}（英文界面下会漏出中文）`);
+      assert.ok(item[field].trim().length > 0, `${where}: ${field} 不能为空`);
+    }
   }
 })
 

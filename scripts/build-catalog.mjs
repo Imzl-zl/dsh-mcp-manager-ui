@@ -18,6 +18,8 @@ import { parse } from 'yaml'
 // 之外的形式）写错文件是最难发现的一类事故——生成器会安静地改写另一个仓库的同名文件）。
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SOURCE = join(ROOT, '.tasks/mcp-servers-verified.yaml')
+// 英文文案副本（可选，见下面「英文文案」那段）。缺席时产物只有中文。
+const SOURCE_EN = join(ROOT, '.tasks/mcp-servers-verified-en.yaml')
 const TARGET = join(ROOT, 'lib/mcp-catalog.js')
 
 /**
@@ -71,6 +73,39 @@ const block = /```yaml\n([\s\S]*?)```/.exec(raw)
 if (!block) throw new Error('在 ' + SOURCE + ' 里找不到 ```yaml 代码块')
 const entries = parse(block[1])
 if (!Array.isArray(entries) || !entries.length) throw new Error('YAML 解析结果不是非空数组')
+
+/**
+ * 英文文案（可选）：与中文那份**逐条对齐**的翻译副本。
+ *
+ * 为什么是两份文件而不是同一份里加 `summary_en`：中文那份是**逐条核实**的原始记录
+ * （每条带来源、按当时的说法写），英文是它的译本。分成两份之后，中文侧一个字都不用动
+ * ——这正是「不要动中文默认」——而且译文可以独立于核实记录被审阅/重译。
+ *
+ * 只取文案字段（label/summary/access/vendor），其余一律以中文那份为**唯一真相源**：
+ * id/transport/url/command/args/headers 是配置数据，译文里改了就是错（双份漂移）。
+ * 生成器在这里做**逐条断言**：条数、顺序、id 必须完全一致，否则宁可报错。
+ */
+const TRANSLATABLE = ['label', 'summary', 'access', 'vendor']
+let translated = null
+try {
+  const rawEn = readFileSync(SOURCE_EN, 'utf8')
+  const blockEn = /```yaml\n([\s\S]*?)```/.exec(rawEn)
+  if (!blockEn) throw new Error('找不到 ```yaml 代码块')
+  const parsedEn = parse(blockEn[1])
+  if (!Array.isArray(parsedEn)) throw new Error('解析结果不是数组')
+  if (parsedEn.length !== entries.length) {
+    throw new Error(`条数不一致：中文 ${entries.length} 条 / 英文 ${parsedEn.length} 条`)
+  }
+  const byId = new Map(parsedEn.map((entry) => [entry.id, entry]))
+  for (const entry of entries) {
+    if (!byId.has(entry.id)) throw new Error(`英文副本缺少条目：${entry.id}`)
+  }
+  translated = byId
+} catch (error) {
+  // 英文副本**可以缺席**：那时产物只有中文，面板回落显示中文（老行为）。
+  // 但既然存在就必须自洽——上面的断言失败会走这里，转成一句可读的提示。
+  if (error?.code !== 'ENOENT') throw new Error('英文副本 ' + SOURCE_EN + ' 不合法：' + error.message)
+}
 
 /**
  * 分类的展示顺序。**唯一真相源就在这里**，标签见下面的 CATEGORY_LABELS。
@@ -195,6 +230,16 @@ function renderEntry(entry) {
   push('category', str(entry.category))
   push('vendor', str(entry.vendor))
   push('access', str(entry.access))
+  // 英文文案：只在英文副本里**确实提供了**该字段时才写出来。
+  // 不写 `summaryEn: ''` 这种空壳——面板的判据是「有没有这个字段」，
+  // 空串会让它以为"有英文"，结果显示一句空话。
+  const en = translated?.get(entry.id)
+  if (en) {
+    for (const field of TRANSLATABLE) {
+      const value = en[field]
+      if (typeof value === 'string' && value.trim() !== '') push(`${field}En`, str(value))
+    }
+  }
   push('transport', str(entry.transport))
   if (entry.transport === 'streamable-http') {
     push('url', str(entry.url))
@@ -226,6 +271,11 @@ const header = `// MCP 服务目录 —— 「MCP 市场」的数据源。
 //    要增删条目请改那份 YAML（它逐条带来源），然后重跑：
 //
 //      node scripts/build-catalog.mjs
+//
+// 语言：中文字段是**基准**（label / summary / access / vendor），英文由**可选的**副本
+// \`.tasks/mcp-servers-verified-en.yaml\` 提供，生成时写成 \`*En\` 字段（labelEn 等）。
+// 副本缺席也能生成，产物就只有中文——面板回落显示中文，即改前的行为。
+// 客户端按界面语言在「原字段 / *En」之间挑，见 lib/client.js 的 pickCatalogText。
 //
 // 为什么目录单独成文件，不留在 \`mcp-config.js\`：那个文件管**配置读写**（解析 patch、校验
 // serverName、归一化表达式），目录是**数据**。两者变更频率差一个数量级——上游改配置格式可能
