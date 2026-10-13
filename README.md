@@ -14,7 +14,11 @@
   <img src="https://img.shields.io/badge/DSH-%E2%89%A50.1.5--rc.1-blue" alt="DSH >= 0.1.5-rc.1">
 </p>
 
+<p align="center"><b>中文</b> | <a href="README.en.md">English</a></p>
+
 点右下角悬浮按钮或侧栏「工具箱」打开，面板浮在会话之上——改配置、看技能，都不打断正在进行的对话。两个能力面在同一个面板里切换：**MCP** 与**技能**。
+
+> 面板本身跟随 DSH 的界面语言：DSH 设成 English 时，面板里的文案、按钮与状态一律是英文（词典在 `lib/client.js` 的 `EN_DICT`）；设成中文或宿主没有语言服务时，显示中文原文。
 
 ## 界面预览
 
@@ -136,10 +140,13 @@ dsh web         # 起 Web 做真实操作验证
 
 ## 文档
 
-- [安装与升级](docs/installation.md) —— 三种安装方式、发布流程、故障排查
-- [技能管理](docs/skills.md) —— 作用域与遮蔽、启停、调用权限、技能市场
-- [JSON 导入](docs/json-import.md) —— 字段映射与限制
-- [设计与限制](docs/design.md) —— 共享连接模型、连接状态语义、已知限制、依赖细节
+中文版与英文版内容一致，`.en.md` 是英文版。两份在开头互链；文内目录锚点**各按自己语言的标题生成**（中文锚点在英文文档里解析不到，反之亦然），跨文档链接指向对应语言的那一份。
+
+- [安装与升级](docs/installation.md) —— 三种安装方式、发布流程、故障排查（[English](docs/installation.en.md)）
+- [技能管理](docs/skills.md) —— 作用域与遮蔽、启停、调用权限、技能市场（[English](docs/skills.en.md)）
+- [JSON 导入](docs/json-import.md) —— 字段映射与限制（[English](docs/json-import.en.md)）
+- [项目级 MCP 生命周期](docs/project-mcp-lifecycle.md) —— 挂载、共享连接与作用域对齐（[English](docs/project-mcp-lifecycle.en.md)）
+- [设计与限制](docs/design.md) —— 共享连接模型、连接状态语义、已知限制、依赖细节（[English](docs/design.en.md)）
 - [DeepSeek Harness 官方插件发布指南](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
 
 ## 友情链接

@@ -1,5 +1,8 @@
 # 安装与升级
 
+**中文** | [English](installation.en.md)
+
+
 本文区分正式安装和本地开发安装。正式使用推荐 GitHub、npm 或 tarball，不要长期依赖开发目录的 `link:`。
 
 ## 环境要求

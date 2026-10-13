@@ -14,7 +14,11 @@
   <img src="https://img.shields.io/badge/DSH-%E2%89%A50.1.5--rc.1-blue" alt="DSH >= 0.1.5-rc.1">
 </p>
 
+<p align="center"><a href="README.md">中文</a> | <b>English</b></p>
+
 Click the floating button or the sidebar's "Toolbox" entry: the panel floats above the session, so changing configuration or reading skills never interrupts the conversation you are in. Two ability faces live in the same panel — **MCP** and **skills**.
+
+> The panel follows the DSH interface language: when DSH is set to English, every label, button, and status string in the panel is English too (the dictionary is `EN_DICT` in `lib/client.js`); with Chinese selected — or on a Host that ships no locale service — the original Chinese copy is shown.
 
 ## Screenshots
 
@@ -136,10 +140,11 @@ dsh web         # start the Web app for hands-on verification
 
 ## Documentation
 
-- [Install & upgrade](docs/installation.md) — three install flavours, release flow, troubleshooting
-- [Skills](docs/skills.md) — scopes and shadowing, enable/disable, invocation policy, the skill market
-- [JSON import](docs/json-import.md) — field mapping and limits
-- [Design & limits](docs/design.md) — shared connection model, connection-state semantics, known limits, dependency details
+- [Install & upgrade](docs/installation.en.md) — three install flavours, release flow, troubleshooting
+- [Skills](docs/skills.en.md) — scopes and shadowing, enable/disable, invocation policy, the skill market
+- [JSON import](docs/json-import.en.md) — field mapping and limits
+- [Project MCP lifecycle](docs/project-mcp-lifecycle.en.md) — mounting, the shared connection, scope alignment
+- [Design & limits](docs/design.en.md) — shared connection model, connection-state semantics, known limits, dependency details
 - [DeepSeek Harness plugin publishing guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
 
 ## Friend link

@@ -1,0 +1,577 @@
+# MCP Servers Verified List (for DSH plugin "MCP Market")
+
+> Verified as of: 2026-10 (based on online docs / npm / PyPI / official registries at that time)
+> Each entry is a writable config that can connect. HTTP-type endpoints require OAuth authorization except where "no-auth" is noted.
+> Category values and display order are defined by `scripts/build-catalog.mjs` CATEGORY_ORDER (not repeated here,
+> to avoid a third list drifting); the physical order below is only for reading convenience, **it does not determine
+> the market's chips order**.
+
+```yaml
+# ============================== search 搜索 ==============================
+- id: exa
+  label: Exa
+  summary: Web search and content retrieval
+  category: search
+  vendor: Exa
+  access: No-auth available (limited quota); can add x-api-key in headers to increase quota
+  transport: streamable-http
+  url: https://mcp.exa.ai/mcp
+  headers:
+    x-api-key: "!!js (process.env.EXA_API_KEY ?? \"\")"
+  envKeys: [EXA_API_KEY]
+  homepage: https://docs.exa.ai/reference/exa-mcp
+
+- id: tavily
+  label: Tavily
+  summary: AI-optimized search & web extraction
+  category: search
+  vendor: Tavily
+  access: No-auth mode free with rate limits (responses with key same as without); official free key is 1000 credits/month, no credit card needed
+  transport: streamable-http
+  url: https://mcp.tavily.com/mcp/
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.TAVILY_API_KEY ?? \"\")"
+    X-Tavily-Access-Mode: keyless
+  envKeys: [TAVILY_API_KEY]
+  homepage: https://docs.tavily.com/documentation/mcp
+
+- id: firecrawl
+  label: Firecrawl
+  summary: Web crawling, search & document parsing
+  category: search
+  vendor: Firecrawl
+  access: No-auth available (daily quota); fill API key to increase quota. Use /v2/mcp-oauth when browser login is needed
+  transport: streamable-http
+  url: https://mcp.firecrawl.dev/v2/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.FIRECRAWL_API_KEY ?? \"\")"
+  envKeys: [FIRECRAWL_API_KEY]
+  homepage: https://docs.firecrawl.dev/mcp-server
+
+- id: brave-search
+  label: Brave Search
+  summary: Independent index of web & local search
+  category: search
+  vendor: Brave
+  access: Must provide your own Brave Search API Key (free tier available, pay-to-use beyond limit)
+  transport: stdio
+  command: npx
+  args: ['-y', '@brave/brave-search-mcp-server', '--transport', 'stdio']
+  envKeys: [BRAVE_API_KEY]
+  homepage: https://github.com/brave/brave-search-mcp-server
+
+- id: perplexity
+  label: Perplexity
+  summary: Real-time web search & deep research
+  category: search
+  vendor: Perplexity
+  access: Requires paid Perplexity API Key (Bearer); no free quota
+  transport: streamable-http
+  url: https://api.perplexity.ai/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.PERPLEXITY_API_KEY ?? \"\")"
+  envKeys: [PERPLEXITY_API_KEY, PERPLEXITY_API_KEY]
+  homepage: https://docs.perplexity.ai/docs/getting-started/integrations/mcp-server
+
+- id: google-maps
+  label: Google Maps
+  summary: Google Maps platform documentation retrieval
+  category: search
+  vendor: Google
+  access: Free experimental stage, no authentication required (tested tools/list returns 2 doc retrieval tools)
+  transport: streamable-http
+  url: https://mapscodeassist.googleapis.com/mcp
+  homepage: https://developers.google.com/maps/ai/code-assist
+
+- id: fetch
+  label: Fetch
+  summary: Fetch web pages and convert to LLM-friendly text
+  category: search
+  vendor: Anthropic
+  access: Open source free, no key needed
+  transport: stdio
+  command: uvx
+  args: ['mcp-server-fetch']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/fetch
+
+# ============================== dev 开发工具 ==============================
+- id: github
+  label: GitHub
+  summary: Repositories, Issues, PRs & code retrieval
+  category: dev
+  vendor: GitHub
+  access: Requires GitHub account & OAuth authorization; also usable with PAT. Functionality varies by account tier.
+  transport: streamable-http
+  url: https://api.githubcopilot.com/mcp/
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.GITHUB_PERSONAL_ACCESS_TOKEN ?? \"\")"
+  envKeys: [GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_PERSONAL_ACCESS_TOKEN]
+  homepage: https://docs.github.com/en/copilot/how-tos/copilot-in-your-ide/copilot-for-common-tasks/use-the-github-mcp-server
+
+- id: gitlab
+  label: GitLab
+  summary: Project, Issue & merge request access
+  category: dev
+  vendor: GitLab
+  access: Free and above tiers usable; OAuth dynamic registration authorization; self-instances also usable; ⚠️ static-token auth is not officially confirmed (the official MCP docs describe only OAuth/DCR; issue 586184 requests PAT support and the official reply says it is not on the near-term roadmap), so it may fail to authorize in DSH
+  transport: streamable-http
+  url: https://gitlab.com/api/v4/mcp
+  homepage: https://docs.gitlab.com/user/model_context_protocol/mcp_server/
+
+- id: sentry
+  label: Sentry
+  summary: Error retrieval, performance analysis & issue triage
+  category: dev
+  vendor: Sentry
+  access: Requires Sentry account OAuth authorization (free tier account usable)
+  transport: streamable-http
+  url: https://mcp.sentry.dev/mcp
+  headers:
+    Authorization: "!!js \"Sentry-Bearer \" + (process.env.SENTRY_AUTH_TOKEN ?? \"\")"
+  homepage: https://docs.sentry.io/product/sentry-mcp/
+
+- id: git
+  label: Git
+  summary: Read/write local Git repositories
+  category: dev
+  vendor: Anthropic
+  access: Open source free, operates on local repositories only
+  transport: stdio
+  command: uvx
+  args: ['mcp-server-git', '--repository', '<repository path>']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/git
+
+- id: serena
+  label: Serena
+  summary: Symbol-level code retrieval & refactoring
+  category: dev
+  vendor: Oraios AI
+  access: Open source free (MIT), local runtime; need to install `serena-agent` first via `uv tool install -p 3.13 serena-agent`
+  transport: stdio
+  command: serena
+  args: ['start-mcp-server', '--context', 'ide', '--project-from-cwd']
+  homepage: https://oraios.github.io/serena/02-usage/030_clients.html
+
+- id: everything
+  label: Everything
+  summary: Official reference implementation, used for connectivity check
+  category: dev
+  vendor: Anthropic
+  access: Open source free, for demo and test purposes
+  transport: stdio
+  command: npx
+  args: ['-y', '@modelcontextprotocol/server-everything']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/everything
+
+- id: dbx
+  label: DBX
+  summary: Multi-database query (Postgres / MySQL / SQLite etc.)
+  category: data
+  vendor: t8y2
+  access: Open source free, local native binary; data sources configured in DBX application
+  transport: stdio
+  command: npx
+  args: ['-y', '@dbx-app/mcp-server']
+  homepage: https://github.com/t8y2/dbx
+
+- id: deepwiki-fetch
+  label: DeepWiki (local fetch)
+  summary: Fetch DeepWiki pages and convert to Markdown
+  category: ai
+  vendor: regenrek
+  access: Completely free, no authentication; local process fetch, overlaps with official remote version - choose as needed
+  transport: stdio
+  command: npx
+  args: ['-y', 'mcp-deepwiki@latest']
+  homepage: https://github.com/regenrek/deepwiki-mcp
+
+- id: fast-context
+  label: Fast Context
+  summary: Windsurf-driven semantic code retrieval
+  category: dev
+  vendor: Windsurf
+  access: Open source free; if Windsurf is installed it will automatically read its Key, otherwise you need to provide WINDSURF_API_KEY
+  transport: stdio
+  command: npx
+  args: ['-y', 'fast-context-mcp']
+  envKeys: [WINDSURF_API_KEY]
+  homepage: https://www.npmjs.com/package/fast-context-mcp
+
+# ============================== security 安全与逆向 ==============================
+# Reverse engineering, dynamic instrumentation, vulnerability & malware analysis.
+# Python system: confirm no collision with mcp 2.x FastMCP renamed - tested frida-mcp & ida-pro-mcp both collide,
+# so args include --with mcp<2.
+
+- id: jshook
+  label: JS Hook
+  summary: "JS analysis & security research: Hook, CDP debugging, deobfuscation"
+  category: security
+  vendor: jshookmcp
+  access: Open source free (AGPL-3.0), local runtime; requires Node 22.12+. Tool tier controlled by MCP_TOOL_PROFILE env var (search ≈3K tokens / workflow / full ≈40K+), default tier is sufficient
+  transport: stdio
+  command: npx
+  args: ['-y', '@jshookmcp/jshook@latest']
+  homepage: https://vmoranv.github.io/jshookmcp/
+
+- id: ida-pro
+  label: IDA Pro
+  summary: Drive IDA Pro for reverse analysis
+  category: security
+  vendor: mrexodia
+  access: Requires locally installed IDA Pro; service pulls as needed, no pre-pip install required
+  transport: stdio
+  command: uvx
+  args: ['--with', 'mcp<2', '--with', 'ida-pro-mcp', 'ida-pro-mcp']
+  homepage: https://github.com/mrexodia/ida-pro-mcp
+
+# ⚠️ `frida-mcp` this name is **two unrelated packages** on npm & PyPI:
+#    PyPI `frida-mcp` (0.1.1, 2025-03) = dnakov/frida-mcp (435★, MIT, has real repo) - this is the one being collected.
+#    npm `frida-mcp` (1.0.0, 2026-05) = maintainer europa6, registry has **no repository field**,
+#          unreachable one-to-one source (README only points to accompanying skills repo yfe404/frida-mcp-skills),
+#          and it's a pure Node package, unrelated to mcp 2.x - excluded per "unreachable source, better not collect".
+
+- id: frida-mcp
+  label: Frida
+  summary: "Frida dynamic instrumentation: Hook functions, trace calls"
+  category: security
+  vendor: dnakov
+  access: Open source free (MIT), local runtime; requires locally installed Frida & target being tested. Tested uvx startup & initialize/tools/list handshake, enumerate_processes returns machine processes normally
+  transport: stdio
+  command: uvx
+  args: ['--with', 'mcp<2', '--with', 'frida-mcp', 'frida-mcp']
+  homepage: https://github.com/dnakov/frida-mcp
+
+# ============================== data 数据库与数据 ==============================
+- id: postgres
+  label: PostgreSQL
+  summary: Postgres query, index & health analysis
+  category: data
+  vendor: Crystal DBA
+  access: Open source free, requires your own database connection string (DATABASE_URI)
+  transport: stdio
+  command: uvx
+  args: ['--with', 'mcp<2', 'postgres-mcp', '--access-mode=unrestricted']
+  envKeys: [DATABASE_URI]
+  homepage: https://github.com/crystaldba/postgres-mcp
+
+- id: sqlite
+  label: SQLite
+  summary: Local SQLite query & data analysis
+  category: data
+  vendor: Anthropic
+  access: "Open source free, operates on local .db files only. Note: archived, only maintenance fixes"
+  transport: stdio
+  command: uvx
+  args: ['mcp-server-sqlite', '--db-path', '<database path>']
+  homepage: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite
+
+- id: redis
+  label: Redis
+  summary: Redis key-value, vector & stream operations
+  category: data
+  vendor: Redis
+  access: Open source free (MIT), requires your own Redis instance
+  transport: stdio
+  command: uvx
+  args: ['--from', 'redis-mcp-server@latest', 'redis-mcp-server', '--url', 'redis://localhost:6379/0']
+  envKeys: [REDIS_HOST, REDIS_PORT]
+  homepage: https://redis.io/docs/latest/integrate/redis-mcp/
+
+- id: clickhouse
+  label: ClickHouse
+  summary: ClickHouse query & table exploration
+  category: data
+  vendor: ClickHouse
+  access: Open source free, read-only by default; requires your ClickHouse connection info
+  transport: stdio
+  command: uv
+  args: ['run', '--with', 'mcp-clickhouse', '--python', '3.12', 'mcp-clickhouse']
+  envKeys: [CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD]
+  homepage: https://github.com/ClickHouse/mcp-clickhouse
+
+- id: mongodb
+  label: MongoDB
+  summary: MongoDB & Atlas data access
+  category: data
+  vendor: MongoDB
+  access: Open source free (Apache-2.0), requires your connection string
+  transport: stdio
+  command: npx
+  args: ['-y', 'mongodb-mcp-server@latest', '--readOnly']
+  envKeys: [MDB_MCP_CONNECTION_STRING]
+  homepage: https://www.mongodb.com/docs/mcp-server/get-started/
+
+- id: supabase
+  label: Supabase
+  summary: Supabase project & database management
+  category: data
+  vendor: Supabase
+  access: Requires Supabase account OAuth authorization; ?read_only=true parameter can constrain permissions
+  transport: streamable-http
+  url: https://mcp.supabase.com/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.SUPABASE_ACCESS_TOKEN ?? \"\")"
+  homepage: https://supabase.com/docs/guides/getting-started/mcp
+
+- id: neon
+  label: Neon
+  summary: Neon project management & query
+  category: data
+  vendor: Neon
+  access: Requires Neon account OAuth or API Key; optional read-only mode & single-project limit
+  transport: streamable-http
+  url: https://mcp.neon.tech/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.NEON_API_KEY ?? \"\")"
+  homepage: https://neon.com/docs/ai/neon-mcp-server
+
+# ============================== browser 浏览器自动化 ==============================
+- id: chrome-devtools
+  label: Chrome DevTools
+  summary: Drive real Chrome for debugging & performance analysis
+  category: browser
+  vendor: Google
+  access: Open source free, local runtime; requires locally installed Chrome
+  transport: stdio
+  command: npx
+  args: ['-y', 'chrome-devtools-mcp@latest']
+  homepage: https://github.com/ChromeDevTools/chrome-devtools-mcp
+
+- id: playwright
+  label: Playwright
+  summary: Browser automation based on accessible snapshots
+  category: browser
+  vendor: Microsoft
+  access: Open source free (Apache-2.0), local runtime; requires Node.js 18+
+  transport: stdio
+  command: npx
+  args: ['-y', '@playwright/mcp@latest']
+  homepage: https://github.com/microsoft/playwright-mcp
+
+# ============================== cloud 云与基础设施 ==============================
+- id: cloudflare-api
+  label: Cloudflare API
+  summary: Call all Cloudflare APIs
+  category: cloud
+  vendor: Cloudflare
+  access: Requires Cloudflare account OAuth authorization; also usable with API Token as Bearer
+  transport: streamable-http
+  url: https://mcp.cloudflare.com/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.CLOUDFLARE_API_TOKEN ?? \"\")"
+  homepage: https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/
+
+- id: cloudflare-docs
+  label: Cloudflare Docs
+  summary: Semantic search of Cloudflare official documentation
+  category: cloud
+  vendor: Cloudflare
+  access: No-auth usable, no account needed
+  transport: streamable-http
+  url: https://docs.mcp.cloudflare.com/mcp
+  homepage: https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/
+
+- id: aws
+  label: AWS
+  summary: Access AWS services through mcp-proxy-for-aws
+  category: cloud
+  vendor: Amazon Web Services
+  access: Open source free; credentials taken from local AWS config (~/.aws), requires Bedrock access
+  transport: stdio
+  command: uvx
+  args: ['mcp-proxy-for-aws@latest', 'https://aws-mcp.us-east-1.api.aws/mcp']
+  homepage: https://github.com/aws/mcp-proxy-for-aws
+
+- id: kubernetes
+  label: Kubernetes
+  summary: Cluster resources, Pods & Helm management
+  category: cloud
+  vendor: Red Hat / CNCF
+  access: Open source free (Apache-2.0), uses local kubeconfig
+  transport: stdio
+  command: npx
+  args: ['-y', 'kubernetes-mcp-server@latest']
+  homepage: https://github.com/containers/kubernetes-mcp-server
+
+- id: docker
+  label: Docker MCP Gateway
+  summary: Run MCP uniformly in container isolation
+  category: cloud
+  vendor: Docker
+  access: Open source free (MIT), requires Docker Desktop or docker CLI plugin
+  transport: stdio
+  command: docker
+  args: ['mcp', 'gateway', 'run']
+  homepage: https://github.com/docker/mcp-gateway
+
+# 已移除：vercel
+# 原因：Vercel 自家 auth 基础设施签发、audience 绑定 mcp.vercel.com 的 OAuth token，不接收静态 bearer
+# DSH 的 mcp-client 不支持 OAuth 交互授权，收录它等于给用户一个必然失败的按钮。
+- id: netlify
+  label: Netlify
+  summary: Site build deployment & Netlify CLI
+  category: cloud
+  vendor: Netlify
+  access: Requires Netlify account OAuth authorization; ⚠️ static-token auth is not officially confirmed (the official docs' NETLIFY_PERSONAL_ACCESS_TOKEN is an environment variable of the local stdio package; the remote endpoint documents only OAuth), so it may fail to authorize in DSH
+  transport: streamable-http
+  url: https://netlify-mcp.netlify.app/mcp
+  homepage: https://docs.netlify.com/build/build-with-ai/netlify-mcp-server/
+
+# ============================== productivity 效率协作 ==============================
+# 已移除：notion
+# 原因：Notion 官方 FAQ 明写 "currently requires you to complete the OAuth authorization flow"，且 token 约 8 小时过期必须 refresh
+# DSH 的 mcp-client 不支持 OAuth 交互授权，收录它等于给用户一个必然失败的按钮。
+- id: linear
+  label: Linear
+  summary: Issues, projects & comments management
+  category: productivity
+  vendor: Linear
+  access: Requires Linear account OAuth; readonly available at https://mcp.linear.app/mcp/readonly
+  transport: streamable-http
+  url: https://mcp.linear.app/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.LINEAR_API_KEY ?? \"\")"
+  homepage: https://linear.app/docs/mcp
+
+- id: atlassian
+  label: Atlassian (Jira/Confluence)
+  summary: Jira & Confluence read/write
+  category: productivity
+  vendor: Atlassian
+  access: Has free tier (no credit card needed); requires Atlassian account OAuth authorization
+  transport: streamable-http
+  url: https://mcp.atlassian.com/v2/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.ATLASSIAN_API_TOKEN ?? \"\")"
+  homepage: https://support.atlassian.com/atlassian-ai-gateway/docs/get-started-with-the-atlassian-remote-mcp-server/
+
+- id: airtable
+  label: Airtable
+  summary: Read/write Airtable bases & records
+  category: productivity
+  vendor: Airtable
+  access: All tiers usable (including free tier); requires Airtable OAuth authorization
+  transport: streamable-http
+  url: https://mcp.airtable.com/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.AIRTABLE_TOKEN ?? \"\")"
+  homepage: https://support.airtable.com/articles/9897799762-using-the-airtable-mcp-server
+
+- id: microsoft-learn
+  label: Microsoft Learn
+  summary: Microsoft official documentation & code examples retrieval
+  category: productivity
+  vendor: Microsoft
+  access: Completely free, no authentication, no account needed
+  transport: streamable-http
+  url: https://learn.microsoft.com/api/mcp
+  homepage: https://learn.microsoft.com/en-us/training/support/mcp
+
+# ============================== ai AI 与知识 ==============================
+- id: memory
+  label: Memory
+  summary: Persistent memory based on knowledge graph
+  category: ai
+  vendor: Anthropic
+  access: Open source free, data stored in local file
+  transport: stdio
+  command: npx
+  args: ['-y', '@modelcontextprotocol/server-memory']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/memory
+
+- id: sequential-thinking
+  label: Sequential Thinking
+  summary: Step-by-step reasoning & dynamic problem decomposition
+  category: ai
+  vendor: Anthropic
+  access: Open source free, no key needed
+  transport: stdio
+  command: npx
+  args: ['-y', '@modelcontextprotocol/server-sequential-thinking']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking
+
+- id: context7
+  label: Context7
+  summary: Get latest version documentation for libraries in real-time
+  category: ai
+  vendor: Upstash
+  access: No-auth usable; free API key available from official site to increase rate limit
+  transport: streamable-http
+  url: https://mcp.context7.com/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.CONTEXT7_API_KEY ?? \"\")"
+  envKeys: [CONTEXT7_API_KEY]
+  homepage: https://github.com/upstash/context7
+
+- id: deepwiki
+  label: DeepWiki
+  summary: Code repository documentation & Q&A
+  category: ai
+  vendor: Cognition (Devin)
+  access: Completely free, no authentication, only accesses public repositories
+  transport: streamable-http
+  url: https://mcp.deepwiki.com/mcp
+  homepage: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+
+- id: huggingface
+  label: Hugging Face
+  summary: Models, datasets & Spaces retrieval
+  category: ai
+  vendor: Hugging Face
+  access: No-auth usable basic tools; after login can optionally use personally configured apps & tools
+  transport: streamable-http
+  url: https://huggingface.co/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.HF_TOKEN ?? \"\")"
+  envKeys: [HF_TOKEN]
+  homepage: https://huggingface.co/mcp
+
+- id: arxiv
+  label: arXiv
+  summary: Paper retrieval & full text acquisition
+  category: ai
+  vendor: Blazick (community maintained, not official arXiv)
+  access: Open source free, no key needed
+  transport: stdio
+  command: uvx
+  args: ['arxiv-mcp-server']
+  homepage: https://github.com/blazickjp/arxiv-mcp-server
+
+# ============================== files 文件与本地系统 ==============================
+- id: filesystem
+  label: Filesystem
+  summary: File read/write within restricted directory
+  category: files
+  vendor: Anthropic
+  access: Open source free, can only access directories explicitly authorized in the command line
+  transport: stdio
+  command: npx
+  args: ['-y', '@modelcontextprotocol/server-filesystem', '<allowed directory>']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+
+- id: time
+  label: Time
+  summary: Time query & timezone conversion
+  category: productivity
+  vendor: Anthropic
+  access: Open source free, pure local computation
+  transport: stdio
+  command: uvx
+  args: ['mcp-server-time']
+  homepage: https://github.com/modelcontextprotocol/servers/tree/main/src/time
+
+# ============================== comms 通讯 ==============================
+- id: slack
+  label: Slack
+  summary: Search messages, send messages & manage channels
+  category: comms
+  vendor: Slack
+  access: Must first build a Slack App and go through OAuth to get xoxp- user token, that token can be reused long-term
+  transport: streamable-http
+  url: https://mcp.slack.com/mcp
+  headers:
+    Authorization: "!!js \"Bearer \" + (process.env.SLACK_USER_TOKEN ?? \"\")"
+  envKeys: [SLACK_USER_TOKEN]
+  homepage: https://docs.slack.dev/ai/slack-mcp-server/developing
+
+```

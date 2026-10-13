@@ -1,5 +1,8 @@
 # 设计与限制
 
+**中文** | [English](design.en.md)
+
+
 这份文档回答「它为什么这么设计、边界在哪」。日常使用请看 [README](../README.md)、[安装与升级](installation.md) 与 [JSON 导入](json-import.md)。
 
 - [项目 MCP 的共享连接模型](#项目-mcp-的共享连接模型)
@@ -149,6 +152,7 @@ mcpManager/projectConnections → { connections: [{ wsPath, serverName, state, r
 - **DSH 的退出宽限是 5 秒**：官方启动器在 SIGINT/SIGTERM 后只给整棵插件树 5 秒（`dsh/lib/profile-boot-*.js` 的 `PROCESS_SHUTDOWN_TIMEOUT_MS`），超时就 `process.exit()`。正常情形绰绰有余（实测 ~0.5s），但若同时有多个“退得慢”的服务器，退出可能在 teardown 完成前被强行截止。
 - **来源导入只取用户级 `mcpServers`**：`~/.claude.json` 里的 `projects[*].mcpServers` 不展开（那会把每个历史项目都铺出来）；项目级配置请从项目标签导入 `.mcp.json`。单文件超过 8 MB 的来源会被跳过。
 - **插件热重载会清空运行中会话的项目工具**：HMR/卸载时会撤回所有投射并释放连接（否则会留下指向已销毁连接的僵尸工具）。已在运行的会话要重新拿到项目 MCP 工具需新开会话。
+- **英文变体有三处如实边界**：界面文案、MCP 市场文案、文档都有英文版，但——① 技能市场的**分类名**来自上游 `api.skillhub.cn`，它只给中文，英文界面下分类行显示中文；② 安全扫描结论（`statusText`，如「安全，无风险」）上游也只有中文，没有对应英文字段；③ 「这次变了什么」弹窗的内容在 `lib/whats-new.js`，目前只有中文。三处都选择**显示中文而不是留空**——空文案比中文更难用。
 
 ## 兼容性与依赖细节
 
