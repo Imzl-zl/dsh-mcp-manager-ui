@@ -30,6 +30,7 @@ const testSurface = [
   'ENTRY_LABELS',
   'SCOPE_LABELS',
   'SCOPE_LABEL_DETAILS',
+  'MCP_PRESETS',
   'EN_DICT',
   't',
   'preservedView',
@@ -43,12 +44,13 @@ const instrumented = clientSource.replace(
   ${testSurface},
   setLocaleActiveForTest: (value) => { localeActive = value },
   setLocaleTForTest: (value) => { localeT = value },
+  getLocaleActiveForTest: () => localeActive,
 };`,
 )
 
 assert.notEqual(instrumented, clientSource, 'client test export marker must stay current')
 
-function loadI18n() {
+function loadInstrumented() {
   const react = {
     Fragment: Symbol('Fragment'),
     createElement() {},
@@ -61,7 +63,15 @@ function loadI18n() {
   let client
   const context = {
     console,
-    document: { addEventListener() {}, removeEventListener() {} },
+    // apply() 会经 __injectCss 碰 document（querySelector/createElement/head），
+    // 接线用例要跑完整的 apply，所以这里给齐最小面（与 client-lifecycle 的假 document 同形）。
+    document: {
+      addEventListener() {},
+      removeEventListener() {},
+      querySelector: () => null,
+      createElement: () => ({ dataset: {}, textContent: '', remove() {} }),
+      head: { appendChild() {}, removeChild() {} },
+    },
     navigator: {},
     setInterval,
     setTimeout,
@@ -80,7 +90,11 @@ function loadI18n() {
     },
   }
   vm.runInNewContext(instrumented, context)
-  return client.__i18n
+  return client
+}
+
+function loadI18n() {
+  return loadInstrumented().__i18n
 }
 
 test('the locale tables hold Chinese source text, not a frozen translation', () => {
@@ -162,6 +176,42 @@ test('every label a table can produce is covered by the dictionary', () => {
   assert.deepEqual(uncovered, [], '表里的这些文案没有英文，英文界面下会显示中文')
 })
 
+test('preset templates store source text and translate only at the render site', () => {
+  // 预设模板表（MCP_PRESETS）与页签表是同一类缺陷形态，别分开修：
+  // 表里写 `label: t('Filesystem · 本地文件读写')` 时，t() 在 bundle 加载那一刻求值，
+  // 而 localeActive 要等 apply() 接线才知道——语言被冻在加载时，英文界面下整个预设
+  // 下拉显示中文（译文明明在词典里，却永远走不到）。
+  // 契约与页签表一致：**表里存中文原文，渲染处 t(...)**。
+  const i18n = loadI18n()
+  assert.ok(Array.isArray(i18n.MCP_PRESETS) && i18n.MCP_PRESETS.length > 0, '找不到 MCP_PRESETS')
+
+  // ① 表里的标签必须是词典键（中文原文），且英文在渲染点可达
+  for (const preset of i18n.MCP_PRESETS) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(i18n.EN_DICT, preset.label),
+      `预设标签不在词典里（英文界面会漏中文）：${preset.label}`,
+    )
+  }
+  i18n.setLocaleActiveForTest('en')
+  for (const preset of i18n.MCP_PRESETS) {
+    assert.notEqual(i18n.t(preset.label), preset.label, `预设标签英文不可达：${preset.label}`)
+  }
+  i18n.setLocaleActiveForTest(null)
+
+  // ② 表定义里不得求值 t()（值位置求值 = 冻在加载时）
+  const tableStart = clientSource.indexOf('const MCP_PRESETS = [')
+  assert.ok(tableStart > 0, '找不到 MCP_PRESETS 的定义')
+  const tableBody = clientSource.slice(tableStart, clientSource.indexOf('\n]', tableStart))
+  assert.doesNotMatch(tableBody, /\bt\(/, 'MCP_PRESETS 表里不得求值 t()：存中文原文，翻译放渲染点')
+
+  // ③ 渲染点必须过 t()——这条是缺陷的精确闸门：直接画 p.label 就红
+  assert.match(
+    clientSource,
+    /MCP_PRESETS\.map\(\(p\) => h\('option', \{ key: p\.id, value: p\.id \}, t\(p\.label\)\)\)/,
+    '预设下拉的渲染点必须 t(p.label)：直接画 p.label 会让英文界面显示表里的中文原文',
+  )
+})
+
 test('the shared segment control translates labels at render time', () => {
   // ⚠️ 这条是**行为缺陷的精确闸门**，别删。
   //
@@ -187,24 +237,194 @@ test('the shared segment control translates labels at render time', () => {
 })
 
 test('no translation is evaluated at module scope', () => {
-  // 形状闸：模块级（顶格 const/let/var 初始化）不得出现 t(...)。
-  // 渲染路径上的 t() 都在函数体里（缩进），所以「顶格且紧跟在 = 后」是可靠的判据。
-  // 例外仅有 PRESERVED_VALUE_LABEL —— 它是**哨兵数据**而非文案，刻意保持中文原文，
-  // 见 lib/client.js 里那段注释（它靠 === 比较并要还原成 REDACTED_VALUE 送回宿主）。
+  // 形状闸：顶层**数据**声明（顶格 const/let/var）的初始区间里不得出现**值位置**的 t(...)。
+  // 渲染路径上的 t() 都在函数体里，求值在调用时。
+  //
+  // ⚠️ 判据必须覆盖**多行声明**：预设表是
+  //     const MCP_PRESETS = [
+  //       { id: 'filesystem', label: t('Filesystem · 本地文件读写'), … },
+  //     ]
+  // t() 在续行里，只查首行会整表漏掉——预设下拉的缺陷正是这么漏进来的。
+  // 顶层声明体用括号配平跟踪（首行开括号 → 深度回 0 收尾）。
+  //
+  // 两类区间**整体放行**（求值都在调用时，不是加载时）：
+  //   ① 函数型顶层声明：const ToolRow = ({ tool }) => { … }、const f = function () { … }；
+  //   ② 数据声明里嵌套的函数体：const MCP_CONTRIBUTION = { …, apply(ctx) { … } }。
+  // 用「函数区深度标记」实现：见到 => 或 function 记下当前深度，深度掉回去之前不判。
+  const isFunctionInitializer = (line) => {
+    const eq = line.indexOf('=')
+    if (eq < 0) return false
+    return /^\s*(?:async\s+)?(?:function\b|\()/.test(line.slice(eq + 1))
+      || /^\s*[A-Za-z_$][\w$]*\s*=>/.test(line.slice(eq + 1))
+  }
+  const isValuePositionT = (line) => {
+    const re = /\bt\(/g
+    let m
+    while ((m = re.exec(line))) {
+      const before = line.slice(0, m.index).trimEnd()
+      if (before.endsWith('=>') || before.endsWith('return')) continue
+      if (/\bfunction\b[^(]*$/.test(before)) continue
+      if (/(?:[:=,[(+]|\breturn\s)$/.test(before)) return true
+    }
+    return false
+  }
   const offenders = []
+  let inSpan = false
+  let isFnSpan = false
+  let fnFloor = null
+  let depth = 0
   clientSource.split('\n').forEach((line, index) => {
-    if (!/^(?:const|let|var)\s/.test(line)) return            // 只看顶格声明
-    if (!/\bt\(/.test(line)) return                            // 只看含 t( 的
-    if (/PRESERVED_VALUE_LABEL/.test(line)) return             // 哨兵是数据，允许
-    if (/=>/.test(line)) return                                // 箭头函数体，求值在调用时
-    offenders.push(`${index + 1}: ${line.trim().slice(0, 110)}`)
+    if (!inSpan) {
+      if (!/^(?:const|let|var)\s/.test(line)) return
+      inSpan = true
+      isFnSpan = isFunctionInitializer(line)
+      fnFloor = null
+      depth = 0
+    } else if (!isFnSpan && fnFloor === null && /=>|\bfunction\b/.test(line)) {
+      fnFloor = depth // 进入嵌套函数体：记下入口深度，掉出去之前不判
+    }
+    if (!isFnSpan && fnFloor === null && isValuePositionT(line)) {
+      offenders.push(`${index + 1}: ${line.trim().slice(0, 110)}`)
+    }
+    for (const ch of line) {
+      if (ch === '(' || ch === '[' || ch === '{') depth += 1
+      else if (ch === ')' || ch === ']' || ch === '}') depth -= 1
+    }
+    if (fnFloor !== null && depth < fnFloor) fnFloor = null // 函数体结束，恢复判罚
+    if (depth <= 0) inSpan = false
   })
   assert.deepEqual(
     offenders,
     [],
-    '模块级不得求值 t()：那会把语言锁死在 bundle 加载那一刻（页签/菜单停在中文的成因）。'
+    '模块级不得求值 t()：那会把语言锁死在 bundle 加载那一刻（页签/预设停在中文的成因）。'
       + '请改成「表里存中文原文，在渲染处 t(item.label)」。',
   )
+})
+
+test('copy punctuation goes through the dictionary, and scope checks use data', () => {
+  // ① 裸拼接的中文标点（'（' / '）' / '：' / join('、')）在英文界面会漏出全角字符：
+  //    'Sort：Default order'、'Add MCP（MyProject）'、'serverA、serverB'。
+  //    标点是文案的一部分，必须走词典（'：' → ': '、'（{name}）' → ' ({name})'、'、' → ', '）。
+  //    括号一律用整句 '（{name}）'：中英语序不同，碎片拼接等于把语序写死在代码里。
+  assert.doesNotMatch(
+    clientSource,
+    /\+ '（'|\+ '）'|\+ '：'|\.join\('、'\)/,
+    '不得裸拼接中文标点：包一层 t()，括号用整句 t(\'（{name}）\')',
+  )
+  // ② 不得用**显示文案**当判据：scopeName !== t('全局') 依赖两边调同一个 t()，
+  //    用户把工作区命名成「全局」就误判。判据用数据（scope !== 'global'）。
+  assert.doesNotMatch(
+    clientSource,
+    /!== t\('全局'\)|=== t\('全局'\)/,
+    '作用域判据必须用数据（scope !== \'global\'），不能比显示文案',
+  )
+  // ③ BCP 47 用连字符、部分宿主用下划线（en_US）：只切 '-' 会把 en_US 判成非英文。
+  assert.match(clientSource, /split\(\/\[-_\]\/\)\[0\] === 'en'/, 'localeIsEnglish 必须同时认 en-US 与 en_US')
+})
+
+test('every slot registration passes its label as a thunk', () => {
+  // 宿主的 SlotLabel 契约是 `string | (() => string)`，侧栏逐读条目时调
+  // resolveSlotLabel 解析（且订阅 locale 变化重解，见 ui-sidebar 的
+  // `ctx.locale.subscribe(syncPanels)`）。所以 label 必须是 thunk：
+  // 写成求值好的 `label: t('工具箱')` 会把语言冻在插件加载那一刻——组件侧的文字
+  // 靠 outlet 在语言切换时重渲染来刷新（scoped-slots 的 useLocaleRevision：
+  // 「Every outlet re-renders on a locale switch」），而 slot label 没有第二次
+  // 求值机会，只能靠 thunk。
+  const registrations = clientSource.match(/ctx\.slots\.register\(\{[^}]*\}/g) ?? []
+  assert.equal(registrations.length, 3, '应有三处 slot 注册（mcp-fab / mcp-handover / sidebar.footer.action）')
+  for (const registration of registrations) {
+    assert.match(
+      registration,
+      /label: \(\) => t\('/,
+      `slot 注册的 label 必须是 thunk（() => t('…')）：${registration.slice(0, 80)}`,
+    )
+  }
+})
+
+test('apply() wires the locale service once, and the wiring is observable', async () => {
+  // 接线路径此前**零覆盖**：所有假 ctx 要么没有 get，要么对 'locale' 返 undefined，
+  // 于是 apply() 里整段 locale 接线从没被执行过。这里按宿主的 LocaleRuntime 源码
+  // 契约（packages/client/locale/src/client/index.ts）造假，钉住五件事：
+  //   ① register 收到 (NS, 'en', EN_DICT)，且经 ctx.effect 注册（HMR 重载不撞车）；
+  //   ② bind 收到 NS，其返回值被 t() 用上——宿主语言包优先于自带表；
+  //   ③ subscribe 接上；切语言时 localeActive 跟着变（组件重渲染的根源就在这里，
+  //      宿主每个 outlet 都会在 locale revision 变化时重渲染）；
+  //   ④ ctx.effect 的工厂返回**函数**——cordis 对非函数、非 null、又无 then/iterator
+  //      的 effect 返回值抛 TypeError("Invalid effect")，那会被 catch 静默吞掉、
+  //      整段接线无声降级成中文。register 返回 disposer 是源码契约，工厂必须传递它；
+  //   ⑤ 宿主没有 locale 服务时整段跳过、t() 退化成恒等（没有语言服务 = 原文）。
+  const fakeDict = { '技能': 'Skills (host pack)' }
+  const state = { active: 'zh' }
+  const calls = { register: [], bind: [], getLocale: 0, subscribe: [] }
+  const localeService = {
+    register(ns, locale, dict) {
+      calls.register.push([ns, locale, dict])
+      return () => {} // 源码契约：register 返回 idempotent disposer
+    },
+    bind(ns) {
+      calls.bind.push(ns)
+      return (key) => (state.active === 'en' ? fakeDict[key] ?? key : key)
+    },
+    getLocale() {
+      calls.getLocale += 1
+      return { active: state.active, revision: 1 }
+    },
+    subscribe(fn) {
+      calls.subscribe.push(fn)
+      return () => {}
+    },
+  }
+  const switchLocale = (next) => {
+    state.active = next
+    for (const fn of [...calls.subscribe]) fn()
+  }
+
+  const effectReturns = []
+  const makeCtx = (locale) => ({
+    remote: { async $mount() { return async () => {} } },
+    slots: { inject() {} },
+    get(name) { return name === 'locale' ? locale : undefined },
+    effect(factory) {
+      const produced = factory()
+      effectReturns.push(produced)
+      return () => {}
+    },
+  })
+
+  const client = loadInstrumented()
+  const dispose = await client.apply(makeCtx(localeService))
+  try {
+    // ① register：(NS, 'en', EN_DICT)，且只注册一次
+    assert.equal(calls.register.length, 1, '词典必须只注册一次（重复注册会被宿主拒绝）')
+    assert.deepEqual(calls.register[0].slice(0, 2), ['dsh-toolbox-ui', 'en'])
+    assert.equal(calls.register[0][2], client.__i18n.EN_DICT, '注册过去的必须是自带词典对象本身')
+    // ② bind 收到 NS；切换前 localeActive 读一次（readActive 先跑）
+    assert.deepEqual(calls.bind, ['dsh-toolbox-ui'])
+    assert.ok(calls.getLocale >= 1, '接线时必须读一次当前语言')
+    // ③ 默认（中文 / 无显式 en）：t() 走自带表的门是 localeIsEnglish，此时恒等
+    assert.equal(client.__i18n.getLocaleActiveForTest(), 'zh')
+    assert.equal(client.__i18n.t('技能'), '技能')
+    switchLocale('en')
+    assert.equal(client.__i18n.getLocaleActiveForTest(), 'en')
+    // ② 宿主语言包优先：fake 的译文与 EN_DICT 不同，返回 fake 的才证明 bind 被用上
+    assert.equal(client.__i18n.t('技能'), 'Skills (host pack)')
+    // ④ effect 工厂返回值必须是函数（否则 cordis 抛 Invalid effect，被 catch 静默吞）
+    assert.ok(
+      effectReturns.length >= 2 && effectReturns.every((value) => typeof value === 'function'),
+      'locale 接线的 ctx.effect 工厂必须返回 disposer 函数',
+    )
+    // ⑤ 宿主没有 locale 服务：apply 照常完成，t() 恒等回中文
+    const bare = loadInstrumented()
+    const bareDispose = await bare.apply(makeCtx(undefined))
+    try {
+      assert.equal(bare.__i18n.getLocaleActiveForTest(), null)
+      assert.equal(bare.__i18n.t('技能'), '技能')
+    } finally {
+      await bareDispose()
+    }
+  } finally {
+    await dispose()
+  }
 })
 
 test('the preserved-value sentinel stays language-independent but renders translated', () => {
