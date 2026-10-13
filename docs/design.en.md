@@ -3,17 +3,17 @@
 [中文](design.md) | **English**
 
 
-This document answers "why is it designed this way, and where are the boundaries". For everyday use, see [README](../README.md), [Installation and Upgrade](installation.md), and [JSON Import](json-import.md).
+This document answers "why is it designed this way, and where are the boundaries". For everyday use, see [README](../README.en.md), [Installation and Upgrade](installation.en.md), and [JSON Import](json-import.en.md).
 
-- [The shared connection model for Project MCP](#项目-mcp-的共享连接模型)
-- [Connection state semantics](#连接状态语义)
-- [Entry display preference](#入口显示偏好为什么不能两个都关)
-- [Update notice](#更新提示这次变了什么为什么要本地写一份)
-- [Known limitations](#已知限制)
-- [Compatibility and dependency details](#兼容性与依赖细节)
-- [The boundary of workspace copy and export](#工作区复制与导出的边界)
-- [Design constraints](#设计约束)
-- [Package structure](#包结构)
+- [The shared connection model for Project MCP](#the-shared-connection-model-for-project-mcp)
+- [Connection state semantics](#connection-state-semantics)
+- [Entry display preference](#entry-display-preference-why-you-cannot-turn-off-both)
+- [Update notice](#update-notice-why-what-changed-this-time-is-written-locally)
+- [Known limitations](#known-limitations)
+- [Compatibility and dependency details](#compatibility-and-dependency-details)
+- [The boundary of workspace copy and export](#the-boundary-of-workspace-copy-and-export)
+- [Design constraints](#design-constraints)
+- [Package structure](#package-structure)
 
 ## The shared connection model for Project MCP
 
@@ -152,6 +152,7 @@ It is a **blocking** modal (the overlay covers the panel), and that is intention
 - **DSH's exit grace period is 5 seconds**: after SIGINT/SIGTERM the official launcher gives the whole plugin tree only 5 seconds (`dsh/lib/profile-boot-*.js`'s `PROCESS_SHUTDOWN_TIMEOUT_MS`), and on timeout it calls `process.exit()`. In normal cases this is more than enough (measured ~0.5s), but if several "slow to exit" servers are present at once, the exit may be cut off before teardown completes.
 - **Source import only takes user-level `mcpServers`**: `projects[*].mcpServers` in `~/.claude.json` is not expanded (that would lay out every historical project); import project-level config from the project tab as `.mcp.json`. A source file larger than 8 MB is skipped.
 - **Plugin hot reload clears the project tools of running sessions**: HMR/unload withdraws all projections and releases connections (otherwise zombie tools pointing at a destroyed connection would be left behind). Sessions already running must be reopened to regain their project MCP tools.
+- **Three honest boundaries of the English variant**: panel copy, MCP market copy, and docs all have English versions, but — ① the **category names** in the skill market come from the `api.skillhub.cn` upstream, which is Chinese-only, so that row stays Chinese in the English UI; ② the security-scan conclusion (`statusText`, e.g. "safe, no risk") is likewise Chinese-only upstream, with no English field; ③ the "what changed this time" popup content lives in `lib/whats-new.js` and is Chinese-only for now. All three choose to **show Chinese rather than nothing** — an empty label is worse than Chinese.
 
 ## Compatibility and dependency details
 
@@ -212,7 +213,7 @@ Earlier: contract cases were all green on `0.1.6-alpha.1`; on `0.1.6-alpha.2` th
 
 **All green on alpha does not mean it entered "verified"**: it was green this time because our changes happened to be purely additive (writing both codec keys + structurally probing cordis private fields), not because it is stable. So the compatibility table lists only `0.2.0-rc.2` — that is a promise; alpha is left to the weekly drift job to probe, and is not promised. This is the same tradeoff as item 2 above (prereleases need no special treatment).
 
-**What this evidence does not cover**: the client side is stand-in testing (the component cannot render in node), so the table above proves that the **slot registration contract** holds, not that the slots **render** correctly on a 0.2.0-rc.2 host. And the release notes for `0.1.6-alpha.2` mention "client Session support for multiple coexisting instances, with related APIs and slots changed". The symptom of that class of failure is a blank panel, which does not turn any test case red, so it belongs to the manual pre-release check (its trigger condition is "Every release" in [Installation and Upgrade](installation.md#每次发布)) and does not go into CI. On this occasion of advancing the baseline to `0.2.0-rc.2`, the real-hardware re-check was done per that checklist: the panel opens, 7 scope tabs and 16 global MCP entries render correctly.
+**What this evidence does not cover**: the client side is stand-in testing (the component cannot render in node), so the table above proves that the **slot registration contract** holds, not that the slots **render** correctly on a 0.2.0-rc.2 host. And the release notes for `0.1.6-alpha.2` mention "client Session support for multiple coexisting instances, with related APIs and slots changed". The symptom of that class of failure is a blank panel, which does not turn any test case red, so it belongs to the manual pre-release check (its trigger condition is "Every release" in [Installation and Upgrade](installation.en.md#every-release)) and does not go into CI. On this occasion of advancing the baseline to `0.2.0-rc.2`, the real-hardware re-check was done per that checklist: the panel opens, 7 scope tabs and 16 global MCP entries render correctly.
 
 The development baseline (`devDependencies`) follows the newest verified RC and, per official convention, **mirrors every peer dependency** (including `@deepseek-ai/cordis`); the one exception is `@deepseek-ai/dsh-typert-loader`, which is for testing only (see item 3 above) and is not a runtime host contract. This mirroring is not redundancy: `dsh plugin ... add <local directory>` is a `link:` install, and Node resolves upward from the plugin's own path, so a plugin that only declares peers without a local copy cannot even find its own host dependencies; conversely, if one transitive dependency of the local copy is missing (for example an old config that omitted `@deepseek-ai/cordis`), the whole plugin tree fails to load at startup. After upgrading DSH, verify with `pnpm install && npm test`.
 

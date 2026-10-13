@@ -8,7 +8,7 @@ This plugin has two ability panes at once: **MCP** and **Skills**. The ability-l
 The skills ability pane addresses the things DSH's built-in skill directory **cannot** show you:
 
 - Which scope a skill is actually installed in (same-named skills across scopes are a legal configuration, but the model only ever receives the one that takes effect);
-- Which skills are **disabled**, and one-click enable/disable (this writes the two invocation-face fields in `SKILL.md`, see [Enabling and disabling](#启用与停用));
+- Which skills are **disabled**, and one-click enable/disable (this writes the two invocation-face fields in `SKILL.md`, see [Enabling and disabling](#enabling-and-disabling));
 - Which skills **allow model auto-invocation** and which **allow you to invoke them manually**, with in-place toggles;
 - What you are honestly told and must confirm before installing a skill from the market (disclosure + a single explicit confirmation, with no license determination).
 
@@ -182,6 +182,6 @@ The former **per-skill license gate** was retired together with the built-in cur
 
 ## Related documentation
 
-- [`design.md`](design.md) —— package structure and deeper design (shared connection model, typert contracts, etc.)
-- [`installation.md`](installation.md) —— installation and upgrade
-- [`json-import.md`](json-import.md) —— importing MCP configuration from JSON
+- [`design.en.md`](design.en.md) —— package structure and deeper design (shared connection model, typert contracts, etc.)
+- [`installation.en.md`](installation.en.md) —— installation and upgrade
+- [`json-import.en.md`](json-import.en.md) —— importing MCP configuration from JSON
