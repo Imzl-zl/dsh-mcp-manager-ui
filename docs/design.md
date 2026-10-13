@@ -1,5 +1,8 @@
 # 设计与限制
 
+**中文** | [English](design.en.md)
+
+
 这份文档回答「它为什么这么设计、边界在哪」。日常使用请看 [README](../README.md)、[安装与升级](installation.md) 与 [JSON 导入](json-import.md)。
 
 - [项目 MCP 的共享连接模型](#项目-mcp-的共享连接模型)
