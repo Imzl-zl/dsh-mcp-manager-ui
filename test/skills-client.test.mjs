@@ -1139,3 +1139,179 @@ test('both ability panes share the same layout primitives, so switching does not
     assert.ok(!classes.has(private_), `技能面不得再保留自己的布局容器 ${private_}（两套布局正是「换一套操作逻辑」的来源）`)
   }
 })
+
+// ═══ 市场分页：上游有 19 万条，只取首页就是「数字与实物不符」═════════════════
+// 真机实测 api.skillhub.cn（2026-10）：无关键词浏览 total=192936，且深页有货
+// （page=2000 仍返回 48 条）。但面板的 searchHub 从不发 page 参数，于是永远停在第 1 页；
+// 计数区同时把上游 total 渲染成「192936 条结果」——数字本身是真的，可用户在面板里
+// 永远到不了另外 192888 条，看到的就是「显示 19 万、其实根本没有」。这一组把翻页钉住：
+// 请求带 page 与 pageSize 上限、加载下一页追加且去重、换词重置、到头就不发。
+const hubSkill = (slug, over = {}) => ({
+  source: 'skillhub', slug, name: '技能-' + slug, summary: '', owner: '发布者',
+  downloads: 1, stars: 0, installs: 0, verified: false, requiresApiKey: false,
+  version: '1.0.0', pageUrl: 'https://skillhub.cn/skills/' + slug, ...over,
+})
+
+/** 市场（skillhub.cn 源）的假服务：按请求的页码发预设好的技能，total 由用例给。 */
+function hubService({ total, pages }) {
+  const searches = []
+  const call = async (method, args) => {
+    if (method === 'skillHubSearch') {
+      searches.push(args)
+      return { ok: true, total, skills: pages[(args?.page ?? 1) - 1] ?? [] }
+    }
+    if (method === 'skillHubCategories') return { ok: true, labels: {} }
+    return { ok: true, skills: [] }
+  }
+  return { call, searches }
+}
+
+const hubCards = (tree) => collectAll(tree, (node) => typeof node?.props?.className === 'string'
+  && node.props.className.split(' ').includes('dsh-mcp-mcard'))
+const hubMoreBtn = (tree) => collectAll(tree, (node) => typeof node.props?.onClick === 'function'
+  && textOf(node).join('').includes('加载更多'))[0]
+
+test('市场搜索请求带 page 与 pageSize 上限：上游 19 万条，只取首页就是数字与实物不符', async () => {
+  const internals = loadClientInternals()
+  const { call, searches } = hubService({ total: 192936, pages: [[hubSkill('a')]] })
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+
+  assert.equal(searches.length, 1, '挂载应发一次搜索')
+  assert.equal(searches[0].page, 1, '请求必须显式带页码——不发 page 就永远停在上游第 1 页')
+  assert.equal(searches[0].pageSize, 100, 'pageSize 用满上游上限 100：19 万条按 48 一页要翻 4019 页')
+  // 计数必须说清「已显示 / 共」：只写总数，就是 19 万条结果旁边只摆 48 张卡。
+  const tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.ok(textOf(tree).some((text) => text.includes('已显示 1 / 共 192936 条')),
+    `计数文案要与实物一致，实际：${JSON.stringify(textOf(tree).filter((t) => t.includes('条')))}`)
+})
+
+test('上游同一页内就会返回重复 slug：条目按 slug 全局去重，React key 不撞车', async () => {
+  // 真机证据（2026-10 隔离宿主实测）：api.skillhub.cn 第 1 页（pageSize=100,
+  // sortBy=downloads）返回 100 条、只有 88 个不同 slug——agent-browser / anti-fraud
+  // 各出现 3 次（同一技能被不同发布者重复发布）。只按「跨页」去重挡不住页内重复：
+  // 重复 key 进 React 后 reconciliation 错乱，真机表现是 297 张卡 vs 计数 285、
+  // 卡片越滚越多、搜索像没生效。所以去重必须是全局的（跨页 + 页内）。
+  const internals = loadClientInternals()
+  const { call } = hubService({ total: 500, pages: [[hubSkill('a'), hubSkill('b'), hubSkill('a')]] })
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+  const tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.equal(hubCards(tree).length, 2, '首页内部的重复 slug 也要去重')
+  assert.ok(textOf(tree).some((text) => text.includes('已显示 2 / 共 500 条')),
+    '计数必须与去重后的实物一致')
+})
+
+test('加载更多：page 递增、追加渲染、按 slug 去重', async () => {
+  const internals = loadClientInternals()
+  const { call, searches } = hubService({
+    total: 3,
+    pages: [
+      [hubSkill('s1')],
+      // 第 2 页掺两种重复：s1 是跨页重复（第 1 页已有）、s2 在页内出现两次。
+      // 上游按下载量排序，两次请求之间排名会漂，同一页内也有重复发布者。
+      [hubSkill('s2'), hubSkill('s1'), hubSkill('s2')],
+    ],
+  })
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+
+  const first = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.equal(hubCards(first).length, 1, '第 1 页只渲染 1 张卡')
+  const more = hubMoreBtn(first)
+  assert.ok(more, '还有更多时市场底部要有「加载更多」入口（滚动到底自动加载的兜底，也是沙箱里唯一可测的路径）')
+  more.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const second = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.deepEqual(searches.map((search) => search.page), [1, 2], '第二次搜索必须带 page=2')
+  assert.equal(hubCards(second).length, 2, '第 2 页追加渲染；掺进来的第 1 页 slug 必须去重（否则卡片重复、React key 撞车）')
+})
+
+test('换关键字重置回第 1 页：新结果整体替换，不叠加旧页', async () => {
+  const internals = loadClientInternals()
+  const { call, searches } = hubService({
+    total: 5,
+    pages: [[hubSkill('s1')], [hubSkill('s2'), hubSkill('s3')], [hubSkill('never')]],
+  })
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+
+  let tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.ok(hubMoreBtn(tree), '先加载一页「更多」需要市场底部有加载更多入口')
+  hubMoreBtn(tree).props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  assert.equal(hubCards(tree).length, 3, '追加后应有 3 张卡')
+
+  // 提交新关键字（草稿 → 回车）：搜索必须重置到第 1 页并整体替换。
+  const findInput = (t) => collectAll(t, (node) => node.props?.placeholder === '搜索 skillhub.cn（回车）')[0]
+  findInput(tree).props.onChange({ target: { value: 'pdf' } })
+  // 假 React 不自动重渲染：击键后补一次渲染，回车闭包拿到的才是新草稿
+  // （真 React 里每次击键都重渲染，这一步是隐含的）。
+  findInput(internals.__render(internals.SkillsPanel, props)).props.onKeyDown({ key: 'Enter' })
+  // 清空积压的 effect 再重渲染：假 React 不比较依赖，每次渲染都会把全部 effect
+  // 重新入队；不清就会把前几轮渲染攒下的 searchHub 一起跑掉（真 React 靠依赖比较
+  // 只会跑新关键字的那一次）。
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+  tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+
+  assert.deepEqual(searches.map((search) => search.page), [1, 2, 1], '换关键字后必须重新从第 1 页搜')
+  assert.equal(searches[2].keyword, 'pdf', '提交的关键字要带到请求里')
+  assert.equal(hubCards(tree).length, 1, '新搜索结果整体替换，旧页数据不得残留')
+})
+
+test('加载更多失败：保留已加载页面，错误与重试落在结果区', async () => {
+  // 追加失败是翻页引入的新失败面：首屏失败的摆法（错误替换整个结果区）照搬过来，
+  // 一次上游抖动就会把用户已翻的几百张卡全部清空——比原来的 bug 更难用。
+  const internals = loadClientInternals()
+  const call = async (method, args) => {
+    if (method === 'skillHubSearch') {
+      if (args.page === 2) return { ok: false, error: '连接 skillhub.cn 失败：请求超时' }
+      return { ok: true, total: 5, skills: [hubSkill('s' + args.page)] }
+    }
+    if (method === 'skillHubCategories') return { ok: true, labels: {} }
+    return { ok: true, skills: [] }
+  }
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+
+  const first = internals.__expand(internals.__render(internals.SkillsPanel, props))
+  hubMoreBtn(first).props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+
+  assert.equal(hubCards(tree).length, 1, '加载更多失败不得清空已加载的页面')
+  const failure = collectAll(tree, (node) => textOf(node).join('').includes('加载更多失败'))[0]
+  assert.ok(failure, '失败要可见，且说清是「加载更多」这一步失败')
+  assert.ok(textOf(tree).some((text) => text.includes('连接 skillhub.cn 失败：请求超时')),
+    '上游给的错误原文要摆出来（用户要靠它判断下一步）')
+})
+
+test('到底之后不再发请求：没有更多时不给加载更多入口', async () => {
+  const internals = loadClientInternals()
+  const { call, searches } = hubService({ total: 2, pages: [[hubSkill('s1'), hubSkill('s2')]] })
+  const props = { call, workspaces: [], mode: 'market' }
+  internals.__effects.length = 0
+  internals.__render(internals.SkillsPanel, props)
+  await flushEffects(internals)
+  const tree = internals.__expand(internals.__render(internals.SkillsPanel, props))
+
+  assert.equal(hubCards(tree).length, 2)
+  assert.equal(hubMoreBtn(tree), undefined, 'items 已达 total 时不得再给「加载更多」入口')
+  assert.equal(searches.length, 1, '没有更多时不得再发请求')
+  assert.ok(textOf(tree).some((text) => text.includes('已显示 2 / 共 2 条')),
+    `计数文案要与实物一致，实际：${JSON.stringify(textOf(tree).filter((t) => t.includes('条')))}`)
+})
