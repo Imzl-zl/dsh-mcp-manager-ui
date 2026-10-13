@@ -153,7 +153,7 @@ test('the post-upgrade banner survives the hint going away', () => {
     '升级完成后 updateHint 已是 null，横幅必须靠 done 状态存活',
   )
   // done 分支不能再去读 updateHint 的字段（那时它是 null，会直接崩）。
-  const doneBranch = clientSource.match(/phase === 'done' \? '已升级到 v' \+ ([^+]+)\+ /)
+  const doneBranch = clientSource.match(/phase === 'done' \? t\('已升级到 v\{version\}，重启宿主后生效', \{ version: ([^}]+) \}\)/)
   assert.ok(doneBranch, '找不到 done 分支的文案')
   assert.match(doneBranch[1], /upgradeState\.version/, 'done 文案只能用升级时记下的版本，不能读 updateHint')
   // running 阶段就要把版本记下来，否则 done 时没有版本可显示（updateHint 已刷新成「已是最新」）。
@@ -178,5 +178,5 @@ test('the upgrade path calls the official remote with the arguments it requires'
   // 升级已存在的包时官方**无条件**返回 restart-required（installBundle 里的
   // `if (Object.hasOwn(before, name)) return 'restart-required'`），所以成功分支必须提示重启——
   // 宿主代码在进程内执行，不重启等于没升。这句文案就是整条链路的闭环。
-  assert.match(clientSource, /已升级到 v' \+ upgradeState\.version \+ '，重启宿主后生效/)
+  assert.match(clientSource, /t\('已升级到 v\{version\}，重启宿主后生效', \{ version: upgradeState\.version \}\)/)
 })

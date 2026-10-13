@@ -170,7 +170,7 @@ test('第二行（模式分段 / 作用域药丸 / 连接状态）只有一个�
   }
   // 模式层只有一份定义，两个能力面读同一份、放在同一个位置。
   assert.equal((clientSource.match(/const SKILL_MODES = \[/g) ?? []).length, 1)
-  assert.match(clientSource, /seg\(SKILL_MODES, mode, setMode, '模式'\)/)
+  assert.match(clientSource, /seg\(SKILL_MODES, mode, setMode, t\('模式'\)\)/)
 })
 
 test('作用域条在第二行里必须吃掉中间那一列的剩余宽度', () => {

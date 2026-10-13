@@ -304,8 +304,8 @@ test('client reveals masked values in detail and edit views without replacing pr
 })
 
 test('manual refresh provides progress and completion feedback', () => {
-  assert.match(client, /refreshing \? '刷新中…' : '刷新'/)
-  assert.match(client, /'已刷新，共 ' \+ next\.length \+ ' 个 MCP'/)
+  assert.match(client, /refreshing \? t\('刷新中…'\) : t\('刷新'\)/)
+  assert.match(client, /t\('已刷新，共 \{count\} 个 MCP', \{ count: next\.length \}\)/)
 })
 
 test('client avoids full-screen backdrop filters and skips stale or unchanged polling renders', () => {
@@ -325,7 +325,7 @@ test('mount failures are attributed to the row and the detail pane, not only a b
   // 行与详情都只读 Host 标在行上的 mountFailed；客户端不再拿 mountErrors 列表反推一遍（第二真相源）。
   assert.doesNotMatch(client, /const mountErrorMap = useMemo/)
   assert.match(client, /const mountFailed = \(s\) => s\.mountFailed === true/)
-  assert.match(client, /mountFailed\(s\) \? h\(Badge, \{ cls: 's-err' \}, '挂载失败'\) : null/)
+  assert.match(client, /mountFailed\(s\) \? h\(Badge, \{ cls: 's-err' \}, t\('挂载失败'\)\) : null/)
   // 挂载失败（我们 setup 阶段挂不上）与连接失败（mcp-client 报错/重连耗尽）必须分开：
   // 用“lastError 存在”反推挂载失败会把连接失败误标成挂载失败，也是同一事实的第二个真相源。
   assert.match(host, /row\.mountFailed = true;/)
@@ -333,7 +333,7 @@ test('mount failures are attributed to the row and the detail pane, not only a b
   assert.doesNotMatch(client, /return failure \? \{ \.\.\.local, lastError: failure \} : local/)
   // 列表行标红而详情说「随会话挂载」，是同一条信息在两处自相矛盾。
   assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'stopped'/)
-  assert.match(client, /mountFailed\s*\n\s*\? '挂载失败'/)
+  assert.match(client, /mountFailed\s*\n\s*\? t\('挂载失败'\)/)
   // 横幅不再猜测原因，具体错误留在它归属的条目上。
   assert.doesNotMatch(client, /可能已被其他会话占用或连接失败/)
 })
@@ -345,7 +345,7 @@ test('global MCPs are inspectable from a project tab but stay read-only there', 
   assert.match(client, /const isForeign = server\.foreign === 'global'/)
   // 只读的同时仍要能改「对本项目是否可见」，否则详情页比列表还弱。
   assert.match(client, /isForeign\s*\n\s*\? h\(React2\.Fragment, null,[^]*?onToggleExclude\(server\.serverName, next\)/)
-  assert.match(client, /isForeign \? '全局配置（在「全局」标签页可编辑）'/)
+  assert.match(client, /isForeign \? t\('全局配置（在「全局」标签页可编辑）'\)/)
   assert.doesNotMatch(client, /← 从左侧选择一个 MCP/)
 })
 
@@ -485,18 +485,18 @@ test('client places an explicit selectable builtin installer before manual add',
   // 真机上就是「文件与…」被裁一半）。判别断言放在 panel-chrome 那条，这里只钉它存在。
   assert.match(client, /\.dsh-mcp-chips\{[^}]*flex-wrap:wrap/)
   assert.match(client, /className: 'dsh-mcp-chip'/)
-  assert.match(client, /placeholder: '搜索服务、用途或提供方…'/)
+  assert.match(client, /placeholder: t\('搜索服务、用途或提供方…'\)/)
   assert.match(client, /install\(\[item\.id\]\)/)
   assert.match(client, /call\('removeServer'|call\('removeWorkspaceServer'/)
   assert.match(client, /call\('removeWorkspaceServer', \{ wsPath: scope, name \}\)/)
   // 头部顺序：导入在「添加」之前，两者都在标题栏那一列里。市场不再是这里的一个按钮
   // ——它升格成第二行的模式分段（与技能面同一个控件），所以「市场」不再参与这段排序。
-  const importPosition = client.indexOf("children: '导入 MCP")
-  const addPosition = client.indexOf("scope === 'global' ? '添加 MCP'")
+  const importPosition = client.indexOf("children: t('导入 MCP'")
+  const addPosition = client.indexOf("scope === 'global' ? t('添加 MCP')")
   assert.ok(importPosition >= 0 && importPosition < addPosition, '导入要排在「添加 MCP」之前')
   // 模式层是**两个能力面共用**的那一个：只有一处定义、且两处都读它。
   assert.equal((client.match(/const SKILL_MODES = \[/g) ?? []).length, 1, '模式层只能定义一次')
-  assert.match(client, /seg\(SKILL_MODES, mode, setMode, '模式'\)/)
+  assert.match(client, /seg\(SKILL_MODES, mode, setMode, t\('模式'\)\)/)
 })
 
 test('client exposes tool parameter schemas, presets, filters and clipboard copy', () => {
@@ -575,7 +575,7 @@ test('workspace MCPs stay toggleable and share the global status vocabulary', ()
   // 项目行的 status 与全局同一个取值域（deriveMcpPhase），只是文案不同；不再有自创的
   // connecting/idle/active 那套平行词汇，也不再有把"连接在不在"和"几个会话在用"压成一句的写法。
   assert.match(client, /const status = mountFailed \? 'failed' : server\.status \|\| server\.phase \|\| 'stopped'/)
-  assert.match(client, /status === 'connected' \? '已连接' : status === 'failed' \? '连接失败'/)
+  assert.match(client, /status === 'connected' \? t\('已连接'\) : status === 'failed' \? t\('连接失败'\)/)
   assert.match(client, /尚未建立连接（新会话自动挂载）/)
   assert.doesNotMatch(client, /s\.status === 'connecting'/)
   assert.doesNotMatch(client, /isWorkspace\s*\n\s*\? '随会话挂载'/)
@@ -586,7 +586,7 @@ test('sparse workspace lists hide filter controls and global search stays outsid
   // 项目 MCP 通常只有 1-3 个，常驻搜索框 + 两个下拉会吃掉整块列表高度。
   assert.match(client, /const showControls = !embedded \|\| count > CONTROLS_THRESHOLD/)
   assert.match(client, /workspace \? null : h\('option', \{ value: 'connected' \}/)
-  assert.match(client, /emptyHint: '此项目还没有 MCP。/)
+  assert.match(client, /emptyHint: t\('此项目还没有 MCP。/)
   // 搜索框必须是分区的直接子节点，否则会随列表一起滚走。
   assert.match(client, /servers\.length > CONTROLS_THRESHOLD \? h\('div', \{ className: 'dsh-mcp-global-search' \}[^]*?\n\s*h\('div', \{ className: 'dsh-mcp-global-list' \}/)
   assert.match(client, /setTransportFilter\('all'\);\s*\n\s*setStatusFilter\('all'\);/)
@@ -599,7 +599,7 @@ test('visibility and enablement use deliberately different controls', () => {
   assert.match(client, /ICONS\[hidden \? 'eyeOff' : 'eye'\]/)
   assert.match(client, /h\(EyeToggle, \{ hidden: isHidden, disabled: busy, label: s\.serverName, onChange: \(next\) => onToggleExclude\(s\.serverName, next\) \}\)/)
   assert.doesNotMatch(client, /dsh-mcp-hide-toggle/)
-  assert.match(client, /isHidden \? h\(Badge, \{ cls: 's-off' \}, '已屏蔽'\) : null/)
+  assert.match(client, /isHidden \? h\(Badge, \{ cls: 's-off' \}, t\('已屏蔽'\)\) : null/)
   // 眼睛按钮不能连带触发行选中
   assert.match(client, /onClick: \(e\) => \{ e\.stopPropagation\(\); onChange\(!hidden\); \}/)
 })
@@ -608,7 +608,7 @@ test('global list collapses to a one-line summary so the project list stays the 
   // 全局可见性是低频操作，展开时占了项目区两倍高度并把详情挤出视口。
   assert.match(client, /const \[globalOpen, setGlobalOpen\] = useState\(false\)/)
   assert.match(client, /className: 'dsh-mcp-section global' \+ \(globalOpen \? '' : ' collapsed'\)/)
-  assert.match(client, /visibleGlobalCount \+ '\/' \+ globalServers\.length \+ ' 对本项目可见'/)
+  assert.match(client, /t\('\{visible\}\/\{total\} 对本项目可见', \{ visible: visibleGlobalCount, total: globalServers\.length \}\)/)
   assert.match(client, /globalOpen \? h\(GlobalServerList/)
   assert.match(client, /\.dsh-mcp-section\.global\.collapsed\{flex:none;min-height:0;border-color:transparent/)
   assert.match(client, /setGlobalOpen\(false\);/)
@@ -623,7 +623,7 @@ test('project MCP: what the README promises the panel shows, the panel actually 
   assert.match(readme, /连接跟配置走，不跟会话走/)
   assert.doesNotMatch(readme, /配置待生效/)
   assert.match(client, /已连接 · 当前无会话使用（连接保留，下次直接用）/)
-  assert.match(client, /'已连接 · ' \+ refs \+ ' 个会话在用' \+ tools/)
+  assert.match(client, /已连接 · \{refs\} 个会话在用\{tools\}/)
   assert.match(client, /尚未建立连接（新会话自动挂载）/)
   // 不再有渲染出来的「待会话挂载」字样（注释里作为历史提及不算）。
   assert.doesNotMatch(client, /'待会话挂载'/)
