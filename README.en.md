@@ -18,7 +18,7 @@
 
 Click the floating button or the sidebar's "Toolbox" entry: the panel floats above the session, so changing configuration or reading skills never interrupts the conversation you are in. Two ability panes live in the same panel — **MCP** and **skills**.
 
-> The panel follows the DSH interface language: when DSH is set to English, every label, button, and status string in the panel is English too (the dictionary is `EN_DICT` in `lib/client.js`); with Chinese selected — or on a Host that ships no locale service — the original Chinese copy is shown.
+> The panel follows the DSH interface language: when DSH is set to English, every label, button, and status string in the panel is English too (the dictionary is `EN_DICT` in `lib/client.js`); with Chinese selected — or on a Host that ships no locale service — the original Chinese copy is shown. **The language switch lives in DSH, not in the panel**: Settings → General → Language. The panel deliberately has no switch of its own — the Host is the single source of truth for language, and two switches would inevitably disagree. Until you pick a language explicitly, the Host infers it from your **browser language** (an English browser means an English panel; pick Chinese once in Settings and the choice is remembered).
 
 ## Screenshots
 
