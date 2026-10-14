@@ -45,6 +45,7 @@ const instrumented = clientSource.replace(
   setLocaleActiveForTest: (value) => { localeActive = value },
   setLocaleTForTest: (value) => { localeT = value },
   getLocaleActiveForTest: () => localeActive,
+  ensureLocaleWired: () => ensureLocaleWired(),
 };`,
 )
 
@@ -341,49 +342,99 @@ test('every slot registration passes its label as a thunk', () => {
   }
 })
 
-test('apply() wires the locale service once, and the wiring is observable', async () => {
-  // 接线路径此前**零覆盖**：所有假 ctx 要么没有 get，要么对 'locale' 返 undefined，
-  // 于是 apply() 里整段 locale 接线从没被执行过。这里按宿主的 LocaleRuntime 源码
-  // 契约（packages/client/locale/src/client/index.ts）造假，钉住五件事：
-  //   ① register 收到 (NS, 'en', EN_DICT)，且经 ctx.effect 注册（HMR 重载不撞车）；
-  //   ② bind 收到 NS，其返回值被 t() 用上——宿主语言包优先于自带表；
-  //   ③ subscribe 接上；切语言时 localeActive 跟着变（组件重渲染的根源就在这里，
-  //      宿主每个 outlet 都会在 locale revision 变化时重渲染）；
-  //   ④ ctx.effect 的工厂返回**函数**——cordis 对非函数、非 null、又无 then/iterator
-  //      的 effect 返回值抛 TypeError("Invalid effect")，那会被 catch 静默吞掉、
-  //      整段接线无声降级成中文。register 返回 disposer 是源码契约，工厂必须传递它；
-  //   ⑤ 宿主没有 locale 服务时整段跳过、t() 退化成恒等（没有语言服务 = 原文）。
-  const fakeDict = { '技能': 'Skills (host pack)' }
-  const state = { active: 'zh' }
+/**
+ * 忠实模拟宿主 LocaleRuntime 的**回落链**语义（deepseek-harness 的
+ * packages/client/locale/src/client/index.ts）：目录里 zh 的 fallback 是 en，
+ * fallbackChain 末尾还强制追加 FALLBACK_LOCALE='en'——所以中文模式的查找链是
+ * ['zh','en']，zh 未命中就**落到 en**。
+ *
+ * 为什么必须模拟这条链：旧假 bind 在非 en 时原样返回键，于是「只注册 en 一份词典」
+ * 这个真机缺陷（DSH 设中文 → 宿主按链落到我们的英文词典 → 整片面板英文）可以
+ * 全绿通过。链不模拟，就等于没测宿主真正的解析行为。
+ */
+function createFakeLocale(initialActive = 'zh') {
+  const catalog = new Map([['zh', { id: 'zh', fallback: 'en' }], ['en', { id: 'en' }]])
+  const dicts = new Map() // ns → Map(locale → dict)
+  const state = { active: initialActive }
   const calls = { register: [], bind: [], getLocale: 0, subscribe: [] }
-  const localeService = {
-    register(ns, locale, dict) {
-      calls.register.push([ns, locale, dict])
-      return () => {} // 源码契约：register 返回 idempotent disposer
+  const chainOf = (start) => {
+    const chain = []
+    const seen = new Set()
+    let current = catalog.get(start)
+    while (current !== undefined && !seen.has(current.id)) {
+      seen.add(current.id)
+      chain.push(current.id)
+      current = current.fallback === undefined ? undefined : catalog.get(current.fallback)
+    }
+    if (!seen.has('en')) chain.push('en')
+    return chain
+  }
+  return {
+    calls,
+    switchTo(next) {
+      state.active = next
+      for (const fn of [...calls.subscribe]) fn()
     },
-    bind(ns) {
-      calls.bind.push(ns)
-      return (key) => (state.active === 'en' ? fakeDict[key] ?? key : key)
-    },
-    getLocale() {
-      calls.getLocale += 1
-      return { active: state.active, revision: 1 }
-    },
-    subscribe(fn) {
-      calls.subscribe.push(fn)
-      return () => {}
+    service: {
+      register(ns, localeOrDicts, dict) {
+        const pairs = typeof localeOrDicts === 'string'
+          ? [[localeOrDicts, dict]]
+          : Object.entries(localeOrDicts)
+        const perNs = dicts.get(ns) ?? new Map()
+        for (const [locale, entries] of pairs) {
+          if (perNs.has(locale)) throw new Error(`locale namespace "${ns}" already has locale "${locale}"`)
+          perNs.set(locale, entries)
+        }
+        dicts.set(ns, perNs)
+        calls.register.push([
+          ns,
+          typeof localeOrDicts === 'string' ? [localeOrDicts] : Object.keys(localeOrDicts),
+          typeof localeOrDicts === 'string' ? dict : localeOrDicts,
+        ])
+        return () => {} // 源码契约：register 返回 idempotent disposer
+      },
+      bind(ns) {
+        calls.bind.push(ns)
+        return (key) => {
+          for (const locale of chainOf(state.active)) {
+            const value = dicts.get(ns)?.get(locale)?.[key]
+            if (value !== undefined) return value
+          }
+          return key
+        }
+      },
+      getLocale() {
+        calls.getLocale += 1
+        return { active: state.active, revision: 1 }
+      },
+      subscribe(fn) {
+        calls.subscribe.push(fn)
+        return () => {}
+      },
     },
   }
-  const switchLocale = (next) => {
-    state.active = next
-    for (const fn of [...calls.subscribe]) fn()
-  }
+}
 
+test('apply() wires the locale service once, and Chinese stays Chinese', async () => {
+  // 接线路径的覆盖 + **中文模式回归闸门**。按宿主 LocaleRuntime 源码契约造假
+  // （见 createFakeLocale 的回落链），钉住六件事：
+  //   ① register 收到**中英两份**词典——只注册 en 时，中文模式下宿主按 ['zh','en']
+  //      链落到英文词典，整片面板变英文（真机事故：DSH 设中文，面板除了走数据的
+  //      分类标签全是英文）。平台的 register 契约也要求双语平衡。
+  //   ② 中文模式下 t() 返回中文原文（恒等命中，不落到英文）；
+  //   ③ 切英文时 t() 返回英文，且 localeActive 跟着变（组件重渲染的根源：宿主每个
+  //      outlet 都会在 locale revision 变化时重渲染）；
+  //   ④ ctx.effect 的工厂返回**函数**——cordis 对非函数、非 null、又无 then/iterator
+  //      的 effect 返回值抛 TypeError("Invalid effect")，会被 catch 静默吞掉、
+  //      整段接线无声降级。register 返回 disposer 是源码契约，工厂必须传递它；
+  //   ⑤ 宿主没有 locale 服务时整段跳过、t() 退化成恒等（没有语言服务 = 原文）；
+  //   ⑥ 词典只注册一次（重复注册会被宿主拒绝）。
+  const locale = createFakeLocale('zh')
   const effectReturns = []
-  const makeCtx = (locale) => ({
+  const makeCtx = (localeService) => ({
     remote: { async $mount() { return async () => {} } },
     slots: { inject() {} },
-    get(name) { return name === 'locale' ? locale : undefined },
+    get(name) { return name === 'locale' ? localeService : undefined },
     effect(factory) {
       const produced = factory()
       effectReturns.push(produced)
@@ -392,23 +443,23 @@ test('apply() wires the locale service once, and the wiring is observable', asyn
   })
 
   const client = loadInstrumented()
-  const dispose = await client.apply(makeCtx(localeService))
+  const dispose = await client.apply(makeCtx(locale.service))
   try {
-    // ① register：(NS, 'en', EN_DICT)，且只注册一次
-    assert.equal(calls.register.length, 1, '词典必须只注册一次（重复注册会被宿主拒绝）')
-    assert.deepEqual(calls.register[0].slice(0, 2), ['dsh-toolbox-ui', 'en'])
-    assert.equal(calls.register[0][2], client.__i18n.EN_DICT, '注册过去的必须是自带词典对象本身')
-    // ② bind 收到 NS；切换前 localeActive 读一次（readActive 先跑）
-    assert.deepEqual(calls.bind, ['dsh-toolbox-ui'])
-    assert.ok(calls.getLocale >= 1, '接线时必须读一次当前语言')
-    // ③ 默认（中文 / 无显式 en）：t() 走自带表的门是 localeIsEnglish，此时恒等
+    // ① 中英两份，各只注册一次
+    assert.equal(locale.calls.register.length, 1, '词典必须只注册一次（重复注册会被宿主拒绝）')
+    assert.deepEqual(locale.calls.register[0].slice(0, 2), ['dsh-toolbox-ui', ['zh', 'en']])
+    assert.equal(locale.calls.register[0][2].en, client.__i18n.EN_DICT, '英文必须是自带词典对象本身')
+    assert.equal(locale.calls.register[0][2].zh['技能'], '技能', '中文那份是恒等词典（键即原文）')
+    // ② 中文模式：恒等命中 → 中文（**只注册 en 的旧代码会在这里返回英文**）
     assert.equal(client.__i18n.getLocaleActiveForTest(), 'zh')
-    assert.equal(client.__i18n.t('技能'), '技能')
-    switchLocale('en')
+    assert.equal(client.__i18n.t('技能'), '技能', 'DSH 是中文时面板必须是中文——宿主的回落链会落到已注册的英文词典')
+    // ③ 切英文
+    locale.switchTo('en')
     assert.equal(client.__i18n.getLocaleActiveForTest(), 'en')
-    // ② 宿主语言包优先：fake 的译文与 EN_DICT 不同，返回 fake 的才证明 bind 被用上
-    assert.equal(client.__i18n.t('技能'), 'Skills (host pack)')
-    // ④ effect 工厂返回值必须是函数（否则 cordis 抛 Invalid effect，被 catch 静默吞）
+    assert.equal(client.__i18n.t('技能'), 'Skills')
+    locale.switchTo('zh')
+    assert.equal(client.__i18n.t('技能'), '技能')
+    // ④ effect 工厂返回值必须是函数
     assert.ok(
       effectReturns.length >= 2 && effectReturns.every((value) => typeof value === 'function'),
       'locale 接线的 ctx.effect 工厂必须返回 disposer 函数',
@@ -422,6 +473,55 @@ test('apply() wires the locale service once, and the wiring is observable', asyn
     } finally {
       await bareDispose()
     }
+  } finally {
+    await dispose()
+  }
+})
+
+test('a locale service that appears after apply() is picked up when the panel mounts', async () => {
+  // 桌面壳的真机形态：locale 插件的 apply 要等原生桥（`__DSH_LOCALE__.read()` 是
+  // 异步的），provide 晚于我们的 apply——ctx.get('locale') 当场是 null。真机表现：
+  // 桌面版面板恒中文、在设置里切语言也不跟随（web 没有这座桥、同步 provide，
+  // 所以 web 一直是好的）。不能改用 inject 声明依赖：宿主没有 locale 插件时
+  // inject 会让 fiber 保持 inactive，整个面板直接不出现。所以 apply 探一次、
+  // 面板挂载时重探。
+  const late = createFakeLocale('zh')
+  let available = null // 先没有，晚点到
+  const effectReturns = []
+  const ctx = {
+    remote: { async $mount() { return async () => {} } },
+    slots: { inject() {} },
+    get(name) { return name === 'locale' ? available : undefined },
+    effect(factory) {
+      const produced = factory()
+      effectReturns.push(produced)
+      return () => {}
+    },
+  }
+
+  const client = loadInstrumented()
+  const dispose = await client.apply(ctx)
+  try {
+    // apply 时探不到：没接线、恒等中文
+    assert.equal(late.calls.register.length, 0, '探不到服务时不得注册')
+    assert.equal(client.__i18n.getLocaleActiveForTest(), null)
+    assert.equal(client.__i18n.t('技能'), '技能')
+
+    // 桌面壳的异步 provide 在面板挂载前完成
+    available = late.service
+    client.__i18n.ensureLocaleWired()
+
+    assert.equal(late.calls.register.length, 1, '重探必须补上词典注册')
+    assert.deepEqual(late.calls.bind, ['dsh-toolbox-ui'], '重探必须重新 bind')
+    assert.equal(client.__i18n.getLocaleActiveForTest(), 'zh')
+    assert.equal(client.__i18n.t('技能'), '技能')
+    // 补接之后切语言也跟上了
+    late.switchTo('en')
+    assert.equal(client.__i18n.t('技能'), 'Skills')
+
+    // 幂等：再次调用不会重复注册（宿主对重复 (ns, locale) 直接抛）
+    client.__i18n.ensureLocaleWired()
+    assert.equal(late.calls.register.length, 1, '补接必须幂等')
   } finally {
     await dispose()
   }
