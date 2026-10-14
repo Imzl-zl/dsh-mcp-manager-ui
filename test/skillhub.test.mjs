@@ -122,7 +122,11 @@ test('失败路径：HTTP 错误、业务 code、非 JSON、超时都转成一�
 })
 
 test('下载：跟随 302 落到本地文件，并边下边数、超限即拒', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-skillhub-dl-'))
+  // ⚠️ 前缀不能用 `dsh-skillhub-`：skillhub-install.test.mjs 的 stagingDirs() 按
+  // `startsWith('dsh-skillhub-')` 过滤临时目录做前后对比，而 node --test 多文件并行——
+  // 本文件窗口内建了又清的目录会被那条用例拍到，造成假红（CI 上实过一次：
+  // actual [] vs expected ['dsh-skillhub-dl-…']）。用 dsh-hub- 系彻底不相交。
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-hub-dl-'))
   try {
     const payload = Buffer.from('PK\u0003\u0004 fake zip bytes')
     const fetchImpl = fakeFetch([['/api/v1/download?', () => ({
