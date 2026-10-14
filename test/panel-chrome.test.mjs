@@ -787,8 +787,12 @@ test('市场的搜索是「提交才打上游」：草稿与已提交关键字�
   assert.match(clientSource, /onKeyDown: \(event\) => \{ if \(event\.key === 'Enter'\) setHubKeyword\(marketDraft\); \}/)
   assert.doesNotMatch(clientSource, /value: query,\n\s+placeholder: '搜索 skillhub\.cn/,
     '市场搜索框不得再绑管理面的筛选词')
-  // 分类接口只该取一次：塞进搜索的 effect 里会每搜一次多打一次分类接口。
-  assert.equal((clientSource.match(/await call\('skillHubCategories'\)/g) ?? []).length, 1)
+  // 分类接口只该有一个调用点，且必须带 locale（上游分类中英两份，按语言挑）
+  // 并随语言版本重取——不传 locale 英文界面下分类行就是中文。
+  assert.equal((clientSource.match(/await call\('skillHubCategories', \{ locale: contentLocale\(\) \}\)/g) ?? []).length, 1,
+    '分类调用必须带 locale，且只有一个调用点')
+  assert.equal((clientSource.match(/await call\('skillHubCategories'/g) ?? []).length, 1,
+    '分类接口只该有一个调用点：塞进搜索的 effect 里会每搜一次多打一次分类接口')
   assert.equal((clientSource.match(/void searchHub\(\);/g) ?? []).length, 1,
     'searchHub 的直接调用点只应有挂载/依赖变化那一处（重试按钮用 onClick 传函数）')
 })

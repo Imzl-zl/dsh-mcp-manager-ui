@@ -152,10 +152,45 @@ test('下载：跟随 302 落到本地文件，并边下边数、超限即拒', 
   }
 })
 
-test('分类：key → 中文标签（面板不显示 office-efficiency 这种 key）', async () => {
-  const fetchImpl = fakeFetch([['/api/v1/categories', () => jsonResponse({ code: 0, data: [{ key: 'office-efficiency', name: '办公效率' }] })]])
-  assert.deepEqual(await hubCategories({ fetch: fetchImpl }), { 'office-efficiency': '办公效率' })
-  // 形状不认识时返回空表，不抛——分类只是显示层，缺了不该让市场打不开。
+test('分类：key → 当前语言标签，中英两份按语言挑', async () => {
+  // 真实响应形状（2026-10-14 实测 api.skillhub.cn）：{count, items}，每分类 name + nameEn。
+  // 曾经的错：读 body.data（形状从没对上，分类整个拿不到）+ 只读 name（英文界面漏中文）。
+  const fetchImpl = fakeFetch([['/api/v1/categories', () => jsonResponse({
+    count: 3,
+    items: [
+      { key: 'office-efficiency', name: '办公效率', nameEn: 'Office Efficiency' },
+      { key: 'dev-programming', name: '开发编程', nameEn: 'Development' },
+      { key: 'pay-skill', name: '付费技能', nameEn: 'Pay Skill' },
+    ],
+  })]])
+  // 默认（中文）与 language 缺失时：name。
+  assert.deepEqual(await hubCategories({ fetch: fetchImpl }), {
+    'office-efficiency': '办公效率',
+    'dev-programming': '开发编程',
+    'pay-skill': '付费技能',
+  })
+  assert.deepEqual(await hubCategories({ fetch: fetchImpl, locale: 'zh' }), {
+    'office-efficiency': '办公效率',
+    'dev-programming': '开发编程',
+    'pay-skill': '付费技能',
+  })
+  // 显式英文：nameEn；带地区的 en-* 也算。
+  assert.deepEqual(await hubCategories({ fetch: fetchImpl, locale: 'en' }), {
+    'office-efficiency': 'Office Efficiency',
+    'dev-programming': 'Development',
+    'pay-skill': 'Pay Skill',
+  })
+  assert.deepEqual((await hubCategories({ fetch: fetchImpl, locale: 'en-US' }))['dev-programming'], 'Development')
+
+  // 缺 nameEn 的条目回落 name（上游个别分类可能没译）。
+  const partial = fakeFetch([['/api/v1/categories', () => jsonResponse({
+    count: 1,
+    items: [{ key: 'x', name: '只有中文' }],
+  })]])
+  assert.deepEqual(await hubCategories({ fetch: partial, locale: 'en' }), { x: '只有中文' })
+
+  // 形状不符：**抛错**，不静默返回 {}——没有分类的市场比一句报错难排查得多
+  // （旧代码读 body.data，真实形状是顶层 items，于是分类整个不显示）。
   const weird = fakeFetch([['/api/v1/categories', () => jsonResponse({ code: 0, data: { unexpected: true } })]])
-  assert.deepEqual(await hubCategories({ fetch: weird }), {})
+  await assert.rejects(() => hubCategories({ fetch: weird }), /分类响应形状不符/)
 })
